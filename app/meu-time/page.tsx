@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-
+import { supabase } from '../../lib/supabase';
 type Colaborador = {
   id: number;
   id_groot: string;
