@@ -3,10 +3,9 @@
 import { useState, useEffect } from 'react';
 
 export default function Topbar() {
-  const [time, setTime] = useState<string>('');
+  const [time, setTime] = useState('');
 
   useEffect(() => {
-    // Função pra atualizar o relógio
     const updateTime = () => {
       const now = new Date();
       const hours = String(now.getHours()).padStart(2, '0');
@@ -14,33 +13,26 @@ export default function Topbar() {
       setTime(`${hours}:${minutes}`);
     };
 
-    // Atualiza imediatamente
     updateTime();
 
-    // Calcula quanto falta pro próximo minuto cheio
     const now = new Date();
-    const segundosFaltam = 60 - now.getSeconds();
-    const msFaltam = segundosFaltam * 1000 - now.getMilliseconds();
+    const msAtePromoMinuto = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
 
-    // Aguarda até virar o minuto e aí começa a atualizar a cada 60s
+    let interval: ReturnType<typeof setInterval>;
+
     const timeout = setTimeout(() => {
       updateTime();
-      const interval = setInterval(updateTime, 60000);
-      // Salva o interval pra limpar depois
-      (window as any).__clockInterval = interval;
-    }, msFaltam);
+      interval = setInterval(updateTime, 60000);
+    }, msAtePromoMinuto);
 
     return () => {
       clearTimeout(timeout);
-      if ((window as any).__clockInterval) {
-        clearInterval((window as any).__clockInterval);
-      }
+      if (interval) clearInterval(interval);
     };
   }, []);
 
   return (
     <header className="h-16 bg-[#0f0f0f] border-b border-[#2a2a2a] px-6 flex items-center justify-between">
-      {/* Esquerda: saudação */}
       <div className="flex items-center gap-3">
         <span className="text-2xl">😊</span>
         <div>
@@ -49,4 +41,21 @@ export default function Topbar() {
         </div>
       </div>
 
-      {/* Direita: notificações
+      <div className="flex items-center gap-4">
+        <button
+          className="relative p-2 rounded-lg hover:bg-[#1a1a1a] transition-colors"
+          aria-label="Notificações"
+        >
+          <span className="text-xl">🔔</span>
+          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+        </button>
+
+        <div className="px-4 py-2 bg-[#1a1a1a] rounded-lg border border-[#2a2a2a]">
+          <span className="text-[#FFD700] font-bold tabular-nums">
+            {time || '--:--'}
+          </span>
+        </div>
+      </div>
+    </header>
+  );
+}
