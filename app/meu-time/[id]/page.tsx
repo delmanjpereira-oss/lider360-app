@@ -18,6 +18,22 @@ type Colaborador = {
   created_at: string;
 };
 
+type HistoricoLinha = {
+  id: number;
+  data_referencia: string;
+  processo: string;
+  prod_liquida: number;
+  prod_efetiva: number;
+  utilizacao: string | null;
+  tempo_processo: string | null;
+  tempo_efetivo: string | null;
+  tempo_ocioso: string | null;
+  unidades: number;
+  impacto_net: number;
+  status_meta: string;
+  ima: number;
+};
+
 function iniciais(nome: string): string {
   const partes = nome.trim().split(' ');
   if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
@@ -26,11 +42,20 @@ function iniciais(nome: string): string {
 
 function formatarData(data: string | null): string {
   if (!data) return 'Não informado';
-  const d = new Date(data);
+  const d = new Date(data + 'T12:00:00');
   return d.toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
+  });
+}
+
+function formatarDataCurta(data: string): string {
+  const d = new Date(data + 'T12:00:00');
+  return d.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
   });
 }
 
@@ -44,8 +69,7 @@ function mesesEmpresa(dataAdmissao: string | null): string {
   const mesesRestantes = meses % 12;
 
   if (anos === 0) return `${meses} ${meses === 1 ? 'mês' : 'meses'}`;
-  if (mesesRestantes === 0)
-    return `${anos} ${anos === 1 ? 'ano' : 'anos'}`;
+  if (mesesRestantes === 0) return `${anos} ${anos === 1 ? 'ano' : 'anos'}`;
   return `${anos} ${anos === 1 ? 'ano' : 'anos'} e ${mesesRestantes} ${
     mesesRestantes === 1 ? 'mês' : 'meses'
   }`;
@@ -74,14 +98,30 @@ function diasParaAniversario(aniversario: string | null): string {
   return `Em ${diff} dias`;
 }
 
+function corStatus(status: string): string {
+  switch (status) {
+    case 'Supera':
+      return 'bg-green-500/20 text-green-400 border-green-500/30';
+    case 'Alinhado':
+      return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+    case 'Abaixo':
+      return 'bg-red-500/20 text-red-400 border-red-500/30';
+    default:
+      return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+  }
+}
+
 export default function DetalheColaboradorPage() {
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
 
   const [colaborador, setColaborador] = useState<Colaborador | null>(null);
+  const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  const [filtroPeriodo, setFiltroPeriodo] = useState<'7' | '30' | '90' | 'tudo'>('30');
 
   useEffect(() => {
     async function buscar() {
@@ -96,6 +136,8 @@ export default function DetalheColaboradorPage() {
           setErro(error.message);
         } else {
           setColaborador(data);
+          // Após carregar o colaborador, busca o histórico
+          if (data) buscarHistorico(data.id_groot);
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Erro desconhecido';
@@ -106,6 +148,27 @@ export default function DetalheColaboradorPage() {
     }
     buscar();
   }, [id]);
+
+  async function buscarHistorico(idGroot: string) {
+    try {
+      setLoadingHistorico(true);
+      const { data, error } = await supabase
+        .from('historico')
+        .select('*')
+        .eq('id_groot', idGroot)
+        .order('data_referencia', { ascending: false });
+
+      if (error) {
+        console.error('Erro buscando histórico:', error.message);
+      } else {
+        setHistorico(data || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingHistorico(false);
+    }
+  }
 
   async function excluir() {
     if (!colaborador) return;
@@ -123,6 +186,54 @@ export default function DetalheColaboradorPage() {
       router.push('/meu-time');
     }
   }
+
+  // Filtra histórico por período
+  const historicoFiltrado = (() => {
+    if (filtroPeriodo === 'tudo') return historico;
+    const dias = parseInt(filtroPeriodo);
+    const limite = new Date();
+    limite.setDate(limite.getDate() - dias);
+    return historico.filter((h) => new Date(h.data_referencia) >= limite);
+  })();
+
+  // Calcula estatísticas
+  const stats = (() => {
+    const validos = historicoFiltrado.filter((h) => h.prod_liquida > 0);
+    if (validos.length === 0)
+      return {
+        totalDias: 0,
+        mediaLiquida: 0,
+        mediaImpacto: 0,
+        diasSupera: 0,
+        diasAlinhado: 0,
+        diasAbaixo: 0,
+        melhorDia: null,
+        piorDia: null,
+        ultimoStatus: 'Sem dados',
+      };
+
+    const somaLiq = validos.reduce((s, h) => s + h.prod_liquida, 0);
+    const somaImp = validos.reduce((s, h) => s + h.impacto_net, 0);
+
+    const melhorDia = validos.reduce((max, h) =>
+      h.prod_liquida > max.prod_liquida ? h : max
+    );
+    const piorDia = validos.reduce((min, h) =>
+      h.prod_liquida < min.prod_liquida ? h : min
+    );
+
+    return {
+      totalDias: validos.length,
+      mediaLiquida: Math.round(somaLiq / validos.length),
+      mediaImpacto: Number((somaImp / validos.length).toFixed(1)),
+      diasSupera: validos.filter((h) => h.status_meta === 'Supera').length,
+      diasAlinhado: validos.filter((h) => h.status_meta === 'Alinhado').length,
+      diasAbaixo: validos.filter((h) => h.status_meta === 'Abaixo').length,
+      melhorDia: melhorDia,
+      piorDia: piorDia,
+      ultimoStatus: historicoFiltrado[0]?.status_meta || 'Sem dados',
+    };
+  })();
 
   if (loading) {
     return (
@@ -161,12 +272,10 @@ export default function DetalheColaboradorPage() {
       {/* Header com avatar grande */}
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-start gap-6 flex-wrap">
-          {/* Avatar */}
           <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-3xl flex-shrink-0">
             {iniciais(colaborador.nome)}
           </div>
 
-          {/* Info */}
           <div className="flex-1 min-w-0">
             <h1 className="text-3xl font-black text-white mb-2">
               {colaborador.nome}
@@ -175,7 +284,6 @@ export default function DetalheColaboradorPage() {
               {colaborador.cargo || 'Sem cargo cadastrado'}
             </p>
 
-            {/* Chips */}
             <div className="flex flex-wrap gap-2">
               <span
                 className={`text-xs px-3 py-1 rounded-full font-bold ${
@@ -201,7 +309,6 @@ export default function DetalheColaboradorPage() {
             </div>
           </div>
 
-          {/* Botões */}
           <div className="flex flex-col gap-2">
             <Link
               href={`/meu-time/${colaborador.id}/editar`}
@@ -219,9 +326,117 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
-      {/* Grid de informações */}
+      {/* ESTATÍSTICAS — calculadas do histórico */}
+      {!loadingHistorico && stats.totalDias > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">📊</span>
+              <span className="text-3xl font-black text-white">
+                {stats.mediaLiquida}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">Líquida média (pç/h)</p>
+          </div>
+
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">📈</span>
+              <span
+                className={`text-3xl font-black ${
+                  stats.mediaImpacto > 0 ? 'text-green-400' : 'text-red-400'
+                }`}
+              >
+                {stats.mediaImpacto > 0 ? '+' : ''}
+                {stats.mediaImpacto}%
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">Impacto NET médio</p>
+          </div>
+
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">📅</span>
+              <span className="text-3xl font-black text-cyan-400">
+                {stats.totalDias}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">Dias com dados</p>
+          </div>
+
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">🎯</span>
+              <span
+                className={`text-xs px-2 py-1 rounded-full font-bold ${corStatus(
+                  stats.ultimoStatus
+                )}`}
+              >
+                {stats.ultimoStatus}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">Último status</p>
+          </div>
+        </div>
+      )}
+
+      {/* DISTRIBUIÇÃO POR STATUS */}
+      {!loadingHistorico && stats.totalDias > 0 && (
+        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
+          <h3 className="text-sm font-bold text-gray-400 mb-4">
+            DISTRIBUIÇÃO DE STATUS
+          </h3>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="text-center">
+              <div className="text-3xl font-black text-green-400">
+                {stats.diasSupera}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">Supera</div>
+            </div>
+            <div className="text-center border-x border-[#2a2a2a]">
+              <div className="text-3xl font-black text-blue-400">
+                {stats.diasAlinhado}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">Alinhado</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-black text-red-400">
+                {stats.diasAbaixo}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">Abaixo</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MELHOR E PIOR DIA */}
+      {!loadingHistorico && stats.melhorDia && stats.piorDia && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4">
+            <p className="text-xs text-green-400 font-bold mb-1">
+              🏆 MELHOR DIA
+            </p>
+            <p className="text-2xl font-black text-white">
+              {stats.melhorDia.prod_liquida} pç/h
+            </p>
+            <p className="text-xs text-gray-400">
+              {formatarData(stats.melhorDia.data_referencia)}
+            </p>
+          </div>
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4">
+            <p className="text-xs text-red-400 font-bold mb-1">📉 PIOR DIA</p>
+            <p className="text-2xl font-black text-white">
+              {stats.piorDia.prod_liquida} pç/h
+            </p>
+            <p className="text-xs text-gray-400">
+              {formatarData(stats.piorDia.data_referencia)}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Dados cadastrais + Datas */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Dados cadastrais */}
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
           <h2 className="text-lg font-bold text-[#FFD700] mb-4">
             📋 Dados Cadastrais
@@ -232,10 +447,6 @@ export default function DetalheColaboradorPage() {
               <span className="text-white font-mono">
                 {colaborador.id_groot}
               </span>
-            </div>
-            <div className="flex justify-between border-b border-[#2a2a2a] pb-2">
-              <span className="text-gray-400">Nome</span>
-              <span className="text-white">{colaborador.nome}</span>
             </div>
             <div className="flex justify-between border-b border-[#2a2a2a] pb-2">
               <span className="text-gray-400">Cargo</span>
@@ -249,10 +460,6 @@ export default function DetalheColaboradorPage() {
                 {colaborador.processo || 'Não informado'}
               </span>
             </div>
-            <div className="flex justify-between border-b border-[#2a2a2a] pb-2">
-              <span className="text-gray-400">Status</span>
-              <span className="text-white">{colaborador.status}</span>
-            </div>
             <div className="flex justify-between">
               <span className="text-gray-400">Carreira</span>
               <span className="text-[#FFD700] font-bold">
@@ -262,7 +469,6 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
 
-        {/* Datas importantes */}
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
           <h2 className="text-lg font-bold text-[#FFD700] mb-4">
             📅 Datas Importantes
@@ -286,29 +492,132 @@ export default function DetalheColaboradorPage() {
                 🎂 {diasParaAniversario(colaborador.aniversario)}
               </p>
             </div>
-            <div className="pt-3 border-t border-[#2a2a2a]">
-              <p className="text-gray-400 mb-1">Cadastrado em</p>
-              <p className="text-white">
-                {formatarData(colaborador.created_at)}
-              </p>
-            </div>
           </div>
         </div>
       </div>
 
-      {/* Seções "em breve" */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 text-center">
-          <span className="text-4xl block mb-2">📊</span>
-          <h3 className="font-bold text-white mb-1">Histórico DPMO</h3>
-          <p className="text-xs text-gray-500">Em breve</p>
+      {/* HISTÓRICO DE PRODUÇÃO */}
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+          <h2 className="text-lg font-bold text-[#FFD700]">
+            📊 Histórico de Produção
+          </h2>
+
+          {/* Filtro por período */}
+          <div className="flex gap-1 bg-[#0a0a0a] rounded-lg p-1">
+            {(['7', '30', '90', 'tudo'] as const).map((periodo) => (
+              <button
+                key={periodo}
+                onClick={() => setFiltroPeriodo(periodo)}
+                className={`px-3 py-1.5 text-xs font-bold rounded transition-all ${
+                  filtroPeriodo === periodo
+                    ? 'bg-[#FFD700] text-black'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                {periodo === 'tudo' ? 'Tudo' : `${periodo}d`}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 text-center">
+
+        {loadingHistorico ? (
+          <div className="text-center py-12">
+            <span className="text-6xl block mb-4">⏳</span>
+            <p className="text-gray-400">Carregando histórico...</p>
+          </div>
+        ) : historicoFiltrado.length === 0 ? (
+          <div className="text-center py-12">
+            <span className="text-6xl block mb-4">📭</span>
+            <p className="text-gray-400 mb-2">
+              Sem dados de produção no período
+            </p>
+            <p className="text-xs text-gray-500">
+              Faça upload de um CSV em MEU TIME → 📤 Upload CSV
+            </p>
+            <Link
+              href="/meu-time/upload"
+              className="inline-block mt-4 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 px-4 py-2 rounded-lg text-sm font-bold transition-colors"
+            >
+              📤 Subir CSV agora
+            </Link>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
+                  <th className="py-3 pr-3">Data</th>
+                  <th className="py-3 pr-3 text-right">Líquida</th>
+                  <th className="py-3 pr-3 text-right">Unidades</th>
+                  <th className="py-3 pr-3 text-right">T.Processo</th>
+                  <th className="py-3 pr-3 text-right">T.Efetivo</th>
+                  <th className="py-3 pr-3 text-right">Ociosidade</th>
+                  <th className="py-3 pr-3 text-right">Util.</th>
+                  <th className="py-3 pr-3 text-right">Imp.NET</th>
+                  <th className="py-3 pr-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historicoFiltrado.map((h) => (
+                  <tr
+                    key={h.id}
+                    className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors"
+                  >
+                    <td className="py-3 pr-3 text-white font-mono">
+                      {formatarDataCurta(h.data_referencia)}
+                    </td>
+                    <td className="py-3 pr-3 text-right text-white font-mono font-bold">
+                      {h.prod_liquida.toFixed(0)}
+                    </td>
+                    <td className="py-3 pr-3 text-right text-gray-300 font-mono">
+                      {h.unidades.toLocaleString('pt-BR')}
+                    </td>
+                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">
+                      {h.tempo_processo || '-'}
+                    </td>
+                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">
+                      {h.tempo_efetivo || '-'}
+                    </td>
+                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">
+                      {h.tempo_ocioso || '-'}
+                    </td>
+                    <td className="py-3 pr-3 text-right text-gray-300 text-xs">
+                      {h.utilizacao || '-'}
+                    </td>
+                    <td
+                      className={`py-3 pr-3 text-right font-mono font-bold ${
+                        h.impacto_net > 0 ? 'text-green-400' : 'text-red-400'
+                      }`}
+                    >
+                      {h.impacto_net > 0 ? '+' : ''}
+                      {h.impacto_net.toFixed(1)}%
+                    </td>
+                    <td className="py-3 pr-3">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(
+                          h.status_meta
+                        )}`}
+                      >
+                        {h.status_meta}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Seções "em breve" — Feedbacks/Atestados */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-6 text-center">
           <span className="text-4xl block mb-2">💬</span>
           <h3 className="font-bold text-white mb-1">Feedbacks</h3>
-          <p className="text-xs text-gray-500">Em breve</p>
+          <p className="text-xs text-gray-500">Em breve — próximo bloco</p>
         </div>
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 text-center">
+        <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-6 text-center">
           <span className="text-4xl block mb-2">🏥</span>
           <h3 className="font-bold text-white mb-1">Atestados</h3>
           <p className="text-xs text-gray-500">Em breve</p>
