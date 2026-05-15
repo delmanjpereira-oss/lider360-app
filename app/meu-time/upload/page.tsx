@@ -29,7 +29,6 @@ type RegistroProcessado = {
   statusMeta: string;
 };
 
-// Converte HH:MM:SS pra segundos
 function hmsToSeconds(value: string): number {
   if (!value) return 0;
   const s = String(value).trim();
@@ -40,7 +39,6 @@ function hmsToSeconds(value: string): number {
   return 0;
 }
 
-// Parseia número flexível (vírgula, ponto, %)
 function parseNumber(value: string): number {
   if (!value) return 0;
   let s = String(value).trim().replace(/\s/g, '').replace('%', '');
@@ -64,7 +62,6 @@ function parseNumber(value: string): number {
   return isNaN(n) ? 0 : n;
 }
 
-// Normaliza chave (cabeçalho) — remove acentos, espaços, deixa lowercase
 function normalizarChave(s: string): string {
   return String(s || '')
     .normalize('NFD')
@@ -74,7 +71,6 @@ function normalizarChave(s: string): string {
     .replace(/[^a-z0-9_]/g, '');
 }
 
-// Tenta achar um valor numa linha procurando por aliases
 function pegarValor(linha: LinhaCSV, aliases: string[]): string {
   const chaves = Object.keys(linha);
   for (const alias of aliases) {
@@ -88,26 +84,10 @@ function pegarValor(linha: LinhaCSV, aliases: string[]): string {
   return '';
 }
 
-// Detecta processo pelo cabeçalho ou nome do arquivo
-function detectarProcesso(linha: LinhaCSV, nomeArquivo: string): string {
-  const procDoCsv = pegarValor(linha, ['processo', 'process']).toLowerCase();
-  if (procDoCsv.includes('check')) return 'Checkin';
-  if (procDoCsv.includes('p2m')) return 'P2M';
-  if (procDoCsv.includes('sort')) return 'Sorting';
-
-  const arq = nomeArquivo.toLowerCase();
-  if (arq.includes('check')) return 'Checkin';
-  if (arq.includes('p2m')) return 'P2M';
-  if (arq.includes('sort')) return 'Sorting';
-  return '';
-}
-
-// Normaliza id_groot (só dígitos)
 function normalizarIdGroot(v: string): string {
   return String(v || '').replace(/\D/g, '').trim();
 }
 
-// Classifica status_meta com base nas metas
 function classificar(
   liquida: number,
   processo: string,
@@ -139,6 +119,7 @@ export default function UploadPage() {
   const [dataRef, setDataRef] = useState(
     new Date().toISOString().split('T')[0]
   );
+  const [processoSelecionado, setProcessoSelecionado] = useState<string>('');
   const [linhas, setLinhas] = useState<LinhaCSV[]>([]);
   const [cabecalhos, setCabecalhos] = useState<string[]>([]);
   const [processado, setProcessado] = useState<RegistroProcessado[]>([]);
@@ -150,7 +131,6 @@ export default function UploadPage() {
   const [sucesso, setSucesso] = useState<string | null>(null);
   const [naoVinculados, setNaoVinculados] = useState<string[]>([]);
 
-  // Carrega colaboradores e metas no mount
   useEffect(() => {
     async function carregarBase() {
       const { data: colabs } = await supabase
@@ -203,10 +183,16 @@ export default function UploadPage() {
 
   function processar() {
     if (!linhas.length) return;
+
+    // VALIDAÇÃO: precisa escolher o processo
+    if (!processoSelecionado) {
+      setErro('⚠️ Selecione o processo (Checkin / P2M / Sorting) antes de processar.');
+      return;
+    }
+
     setErro(null);
     setSucesso(null);
 
-    // Mapa nome → id_groot (case insensitive)
     const mapaCadastro: Record<string, ColaboradorMap> = {};
     colaboradores.forEach((c) => {
       mapaCadastro[normalizarIdGroot(c.id_groot)] = c;
@@ -237,11 +223,8 @@ export default function UploadPage() {
         return;
       }
 
-      const cadastro = mapaCadastro[idGroot];
-      const processo =
-        cadastro.processo ||
-        detectarProcesso(linha, arquivo?.name || '') ||
-        'Checkin';
+      // PROCESSO vem do seletor da tela (não mais do CSV nem do cadastro)
+      const processo = processoSelecionado;
 
       const prodLiquida = parseNumber(
         pegarValor(linha, [
@@ -288,7 +271,6 @@ export default function UploadPage() {
       });
     });
 
-    // Calcula NET média por processo
     const netPorProc: Record<string, { volume: number; horas: number }> = {};
     registrosBrutos.forEach((r) => {
       const horas = hmsToSeconds(r.tempoProcesso) / 3600;
@@ -304,7 +286,6 @@ export default function UploadPage() {
       netMedia[proc] = a.horas > 0 ? a.volume / a.horas : 0;
     });
 
-    // Calcula Impacto NET e classifica
     const finais: RegistroProcessado[] = registrosBrutos.map((r) => {
       const horas = hmsToSeconds(r.tempoProcesso) / 3600;
       const netInd = horas > 0 ? r.unidades / horas : 0;
@@ -336,14 +317,12 @@ export default function UploadPage() {
     setSucesso(null);
 
     try {
-      // Remove registros antigos do mesmo dia + mesmo arquivo (substituição)
       await supabase
         .from('historico')
         .delete()
         .eq('data_referencia', dataRef)
         .eq('arquivo_origem', arquivo.name);
 
-      // Determina trimestre
       const dataObj = new Date(dataRef + 'T12:00:00');
       const mes = dataObj.getMonth() + 1;
       let quarter = 'Q1';
@@ -351,7 +330,6 @@ export default function UploadPage() {
       else if (mes >= 7 && mes <= 9) quarter = 'Q3';
       else if (mes >= 10) quarter = 'Q4';
 
-      // Insere todos
       const linhasInsert = processado.map((r) => ({
         data_referencia: dataRef,
         id_groot: r.idGroot,
@@ -378,12 +356,11 @@ export default function UploadPage() {
         .insert(linhasInsert);
       if (errInsert) throw new Error(errInsert.message);
 
-      // Registra no uploads
       const uploadId = 'UP-' + Math.random().toString(36).substring(2, 10).toUpperCase();
       await supabase.from('uploads').insert({
         upload_id: uploadId,
         data_referencia: dataRef,
-        tipo_base: processado[0]?.processo || 'Misto',
+        tipo_base: processoSelecionado,
         arquivo: arquivo.name,
         linhas_processadas: linhas.length,
         linhas_vinculadas: processado.length,
@@ -392,18 +369,18 @@ export default function UploadPage() {
       });
 
       setSucesso(
-        `✅ ${processado.length} registros salvos! ${naoVinculados.length} não vinculados (não cadastrados).`
+        `✅ ${processado.length} registros salvos! ${naoVinculados.length} não vinculados.`
       );
 
-      // Limpa pro próximo
       setTimeout(() => {
         setArquivo(null);
         setLinhas([]);
         setProcessado([]);
         setNaoVinculados([]);
+        setProcessoSelecionado('');
         const input = document.getElementById('input-csv') as HTMLInputElement;
         if (input) input.value = '';
-      }, 2000);
+      }, 2500);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Erro desconhecido';
       setErro(msg);
@@ -430,7 +407,6 @@ export default function UploadPage() {
         </p>
       </div>
 
-      {/* Mensagens */}
       {sucesso && (
         <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4 flex items-center gap-3">
           <span className="text-2xl">✅</span>
@@ -445,9 +421,60 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Upload */}
+      {/* SELEÇÃO DE PROCESSO */}
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
-        <h2 className="text-lg font-bold text-[#FFD700]">1️⃣ Selecionar arquivo</h2>
+        <h2 className="text-lg font-bold text-[#FFD700]">
+          1️⃣ Qual processo desse CSV?
+        </h2>
+        <p className="text-sm text-gray-400">
+          Esse processo será aplicado a TODAS as linhas do arquivo
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <button
+            onClick={() => setProcessoSelecionado('Checkin')}
+            className={`p-4 rounded-lg border-2 transition-all font-bold ${
+              processoSelecionado === 'Checkin'
+                ? 'bg-cyan-500/30 border-cyan-400 text-cyan-300'
+                : 'bg-[#0a0a0a] border-[#2a2a2a] text-gray-400 hover:border-cyan-500/50'
+            }`}
+          >
+            📦 Checkin
+          </button>
+
+          <button
+            onClick={() => setProcessoSelecionado('P2M')}
+            className={`p-4 rounded-lg border-2 transition-all font-bold ${
+              processoSelecionado === 'P2M'
+                ? 'bg-orange-500/30 border-orange-400 text-orange-300'
+                : 'bg-[#0a0a0a] border-[#2a2a2a] text-gray-400 hover:border-orange-500/50'
+            }`}
+          >
+            🚚 P2M
+          </button>
+
+          <button
+            onClick={() => setProcessoSelecionado('Sorting')}
+            className={`p-4 rounded-lg border-2 transition-all font-bold ${
+              processoSelecionado === 'Sorting'
+                ? 'bg-emerald-500/30 border-emerald-400 text-emerald-300'
+                : 'bg-[#0a0a0a] border-[#2a2a2a] text-gray-400 hover:border-emerald-500/50'
+            }`}
+          >
+            📋 Sorting
+          </button>
+        </div>
+
+        {processoSelecionado && (
+          <p className="text-sm text-green-400">
+            ✓ Processo selecionado: <strong>{processoSelecionado}</strong>
+          </p>
+        )}
+      </div>
+
+      {/* SELEÇÃO DE ARQUIVO */}
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
+        <h2 className="text-lg font-bold text-[#FFD700]">2️⃣ Selecionar arquivo</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -495,22 +522,34 @@ export default function UploadPage() {
         )}
       </div>
 
-      {/* Processar */}
+      {/* BOTÃO PROCESSAR */}
       {linhas.length > 0 && processado.length === 0 && (
         <button
           onClick={processar}
-          className="w-full bg-[#FFD700] text-black font-bold py-4 rounded-lg hover:bg-yellow-300 transition-colors text-lg"
+          disabled={!processoSelecionado}
+          className="w-full bg-[#FFD700] text-black font-bold py-4 rounded-lg hover:bg-yellow-300 transition-colors text-lg disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          🔧 Processar e calcular Impacto NET
+          {!processoSelecionado
+            ? '⚠️ Selecione o processo primeiro'
+            : '🔧 Processar e calcular Impacto NET'}
         </button>
       )}
 
-      {/* Preview do processamento */}
+      {/* PREVIEW */}
       {processado.length > 0 && (
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
-          <h2 className="text-lg font-bold text-[#FFD700]">
-            2️⃣ Preview ({processado.length} vinculados)
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-[#FFD700]">
+              3️⃣ Preview ({processado.length} vinculados)
+            </h2>
+            <span className={`text-xs px-3 py-1 rounded-full font-bold ${
+              processoSelecionado === 'Checkin' ? 'bg-cyan-500/20 text-cyan-400' :
+              processoSelecionado === 'P2M' ? 'bg-orange-500/20 text-orange-400' :
+              'bg-emerald-500/20 text-emerald-400'
+            }`}>
+              Processo: {processoSelecionado}
+            </span>
+          </div>
 
           {naoVinculados.length > 0 && (
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm">
@@ -536,7 +575,6 @@ export default function UploadPage() {
               <thead>
                 <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400">
                   <th className="py-2 pr-2">Nome</th>
-                  <th className="py-2 pr-2">Proc.</th>
                   <th className="py-2 pr-2 text-right">Líquida</th>
                   <th className="py-2 pr-2 text-right">Imp.NET</th>
                   <th className="py-2 pr-2">Status</th>
@@ -546,7 +584,6 @@ export default function UploadPage() {
                 {processado.slice(0, 10).map((r, i) => (
                   <tr key={i} className="border-b border-[#2a2a2a]">
                     <td className="py-2 pr-2 text-white">{r.nomeCsv}</td>
-                    <td className="py-2 pr-2 text-gray-400">{r.processo}</td>
                     <td className="py-2 pr-2 text-right text-white font-mono">
                       {r.prodLiquida.toFixed(0)}
                     </td>
@@ -600,7 +637,6 @@ export default function UploadPage() {
         <ul className="space-y-1 list-disc pl-5 text-xs">
           <li><strong>ID GROOT</strong> (obrigatório) — vincula ao colaborador</li>
           <li><strong>NOME</strong> — pra referência visual</li>
-          <li><strong>PROCESSO</strong> — Checkin / P2M / Sorting (ou detecta pelo nome do arquivo)</li>
           <li><strong>LIQUIDA / PROD_LIQUIDA</strong> — peças/hora líquida</li>
           <li><strong>UNIDADES / VOLUME</strong> — quantidade de peças</li>
           <li><strong>TEMPO_PROCESSO</strong> — HH:MM:SS</li>
@@ -609,6 +645,9 @@ export default function UploadPage() {
           <li><strong>UTILIZACAO</strong> — Ex: 85%</li>
           <li><strong>IMA</strong> — opcional</li>
         </ul>
+        <p className="text-xs text-blue-200 mt-3">
+          💡 <strong>Processo</strong> NÃO precisa estar no CSV — você escolhe ali em cima e ele se aplica a todas as linhas.
+        </p>
       </div>
     </div>
   );
