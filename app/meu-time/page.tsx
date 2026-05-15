@@ -16,7 +16,6 @@ type Colaborador = {
   aniversario: string | null;
 };
 
-// Cores por carreira
 const corCarreira: Record<string, string> = {
   REP1: 'bg-blue-500/20 text-blue-400',
   REP2: 'bg-purple-500/20 text-purple-400',
@@ -24,21 +23,18 @@ const corCarreira: Record<string, string> = {
   MULTIPLICADOR: 'bg-[#FFD700]/20 text-[#FFD700]',
 };
 
-// Cores por processo
 const corProcesso: Record<string, string> = {
   Checkin: 'bg-cyan-500/20 text-cyan-400',
   P2M: 'bg-orange-500/20 text-orange-400',
   Sorting: 'bg-emerald-500/20 text-emerald-400',
 };
 
-// Pega iniciais do nome para o avatar
 function iniciais(nome: string): string {
   const partes = nome.trim().split(' ');
   if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
   return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
 }
 
-// Verifica se é aniversário hoje
 function isAniversarioHoje(aniversario: string | null): boolean {
   if (!aniversario) return false;
   const hoje = new Date();
@@ -48,7 +44,6 @@ function isAniversarioHoje(aniversario: string | null): boolean {
   );
 }
 
-// Calcula meses na empresa
 function mesesEmpresa(dataAdmissao: string | null): number | null {
   if (!dataAdmissao) return null;
   const inicio = new Date(dataAdmissao);
@@ -63,7 +58,6 @@ export default function MeuTimePage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
-  // Filtros
   const [busca, setBusca] = useState('');
   const [filtroProcesso, setFiltroProcesso] = useState<string>('TODOS');
   const [filtroStatus, setFiltroStatus] = useState<string>('TODOS');
@@ -107,7 +101,6 @@ export default function MeuTimePage() {
     }
   }
 
-  // Filtra colaboradores
   const colaboradoresFiltrados = colaboradores.filter((c) => {
     const matchBusca =
       busca === '' ||
@@ -124,7 +117,6 @@ export default function MeuTimePage() {
     return matchBusca && matchProcesso && matchStatus && matchCarreira;
   });
 
-  // Estatísticas
   const stats = {
     total: colaboradores.length,
     ativos: colaboradores.filter((c) => c.status === 'Ativo').length,
@@ -152,7 +144,7 @@ export default function MeuTimePage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header com botões de ação */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-4xl font-black mb-2">
@@ -163,12 +155,46 @@ export default function MeuTimePage() {
           </p>
         </div>
 
-        <Link
-          href="/meu-time/cadastrar"
-          className="bg-[#FFD700] text-black font-bold px-6 py-3 rounded-lg hover:bg-yellow-300 transition-colors flex items-center gap-2"
-        >
-          <span>+</span> Novo Colaborador
-        </Link>
+        {/* Botões de ação rápida */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Upload CSV — azul */}
+          <Link
+            href="/meu-time/upload"
+            title="Upload CSV de Produtividade"
+            className="w-12 h-12 flex items-center justify-center bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 hover:text-blue-300 rounded-lg transition-all text-2xl border border-blue-500/30 hover:border-blue-400"
+          >
+            📤
+          </Link>
+
+          {/* Upload DPMO — roxo (placeholder pro próximo bloco) */}
+          <Link
+            href="/meu-time/dpmo"
+            title="Upload DPMO (em breve)"
+            className="w-12 h-12 flex items-center justify-center bg-purple-500/20 hover:bg-purple-500/40 text-purple-400 hover:text-purple-300 rounded-lg transition-all text-2xl border border-purple-500/30 hover:border-purple-400"
+          >
+            📊
+          </Link>
+
+          {/* Configurações de Metas — cinza */}
+          <Link
+            href="/meu-time/configuracoes"
+            title="Configurações de Metas"
+            className="w-12 h-12 flex items-center justify-center bg-[#2a2a2a] hover:bg-[#3a3a3a] text-gray-400 hover:text-white rounded-lg transition-all text-2xl border border-[#3a3a3a] hover:border-[#FFD700]"
+          >
+            ⚙️
+          </Link>
+
+          {/* Separador visual */}
+          <div className="w-px h-12 bg-[#2a2a2a] mx-1"></div>
+
+          {/* Novo Colaborador — botão principal amarelo */}
+          <Link
+            href="/meu-time/cadastrar"
+            className="bg-[#FFD700] text-black font-bold px-6 py-3 rounded-lg hover:bg-yellow-300 transition-colors flex items-center gap-2"
+          >
+            <span>+</span> Novo Colaborador
+          </Link>
+        </div>
       </div>
 
       {/* Estatísticas */}
@@ -248,7 +274,6 @@ export default function MeuTimePage() {
       {/* Filtros */}
       {!loading && colaboradores.length > 0 && (
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 space-y-4">
-          {/* Busca */}
           <div className="relative">
             <input
               type="text"
@@ -262,7 +287,6 @@ export default function MeuTimePage() {
             </span>
           </div>
 
-          {/* Dropdowns */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <select
               value={filtroProcesso}
@@ -299,7 +323,6 @@ export default function MeuTimePage() {
             </select>
           </div>
 
-          {/* Resumo + limpar */}
           {temFiltrosAtivos && (
             <div className="flex items-center justify-between pt-2 border-t border-[#2a2a2a]">
               <p className="text-sm text-gray-400">
@@ -367,7 +390,6 @@ export default function MeuTimePage() {
                 className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-5 hover:border-[#FFD700] transition-all group cursor-pointer"
               >
                 <Link href={`/meu-time/${c.id}`} className="block">
-                  {/* Avatar + nome + status */}
                   <div className="flex items-start gap-3 mb-3">
                     <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-lg flex-shrink-0">
                       {iniciais(c.nome)}
@@ -382,7 +404,6 @@ export default function MeuTimePage() {
                     </div>
                   </div>
 
-                  {/* Chips */}
                   <div className="flex flex-wrap gap-1.5 mb-3">
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full font-bold ${
@@ -425,14 +446,12 @@ export default function MeuTimePage() {
                     )}
                   </div>
 
-                  {/* Info adicional */}
                   <div className="flex items-center justify-between text-xs text-gray-500 pt-3 border-t border-[#2a2a2a]">
                     <span>ID: {c.id_groot}</span>
                     {meses !== null && <span>{meses}m na empresa</span>}
                   </div>
                 </Link>
 
-                {/* Botões de ação (aparecem no hover) */}
                 <div className="flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
                   <Link
                     href={`/meu-time/${c.id}/editar`}
