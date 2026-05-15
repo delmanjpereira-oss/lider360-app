@@ -34,6 +34,14 @@ type HistoricoLinha = {
   ima: number;
 };
 
+type FeedbackBreve = {
+  feedback_id: string;
+  tipo: string;
+  classificacao: string;
+  observacao: string;
+  registrado_em: string;
+};
+
 function iniciais(nome: string): string {
   const partes = nome.trim().split(' ');
   if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
@@ -111,6 +119,29 @@ function corStatus(status: string): string {
   }
 }
 
+function tempoRelativo(iso: string): string {
+  const agora = new Date();
+  const data = new Date(iso);
+  const diff = Math.floor((agora.getTime() - data.getTime()) / 1000);
+
+  if (diff < 3600) return `${Math.floor(diff / 60)}min atrás`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h atrás`;
+  return `${Math.floor(diff / 86400)}d atrás`;
+}
+
+function iconeTipo(tipo: string): string {
+  switch (tipo) {
+    case 'Reconhecimento':
+      return '🏆';
+    case 'Alinhamento':
+      return '🎯';
+    case 'Acompanhamento':
+      return '📊';
+    default:
+      return '✏️';
+  }
+}
+
 export default function DetalheColaboradorPage() {
   const router = useRouter();
   const params = useParams();
@@ -118,6 +149,9 @@ export default function DetalheColaboradorPage() {
 
   const [colaborador, setColaborador] = useState<Colaborador | null>(null);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
+  const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>(
+    []
+  );
   const [loading, setLoading] = useState(true);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -136,8 +170,10 @@ export default function DetalheColaboradorPage() {
           setErro(error.message);
         } else {
           setColaborador(data);
-          // Após carregar o colaborador, busca o histórico
-          if (data) buscarHistorico(data.id_groot);
+          if (data) {
+            buscarHistorico(data.id_groot);
+            buscarFeedbacks(data.id_groot);
+          }
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Erro desconhecido';
@@ -170,6 +206,20 @@ export default function DetalheColaboradorPage() {
     }
   }
 
+  async function buscarFeedbacks(idGroot: string) {
+    try {
+      const { data } = await supabase
+        .from('feedbacks')
+        .select('feedback_id, tipo, classificacao, observacao, registrado_em')
+        .eq('id_groot', idGroot)
+        .order('registrado_em', { ascending: false })
+        .limit(3);
+      if (data) setFeedbacksRecentes(data as FeedbackBreve[]);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   async function excluir() {
     if (!colaborador) return;
     const confirma = window.confirm(`Deseja excluir ${colaborador.nome}?`);
@@ -187,7 +237,6 @@ export default function DetalheColaboradorPage() {
     }
   }
 
-  // Filtra histórico por período
   const historicoFiltrado = (() => {
     if (filtroPeriodo === 'tudo') return historico;
     const dias = parseInt(filtroPeriodo);
@@ -196,7 +245,6 @@ export default function DetalheColaboradorPage() {
     return historico.filter((h) => new Date(h.data_referencia) >= limite);
   })();
 
-  // Calcula estatísticas
   const stats = (() => {
     const validos = historicoFiltrado.filter((h) => h.prod_liquida > 0);
     if (validos.length === 0)
@@ -261,7 +309,6 @@ export default function DetalheColaboradorPage() {
 
   return (
     <div className="space-y-6">
-      {/* Voltar */}
       <Link
         href="/meu-time"
         className="text-gray-400 hover:text-white transition-colors inline-flex items-center gap-2"
@@ -311,6 +358,12 @@ export default function DetalheColaboradorPage() {
 
           <div className="flex flex-col gap-2">
             <Link
+              href={`/meu-time/${colaborador.id}/feedbacks`}
+              className="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2"
+            >
+              💬 Feedbacks
+            </Link>
+            <Link
               href={`/meu-time/${colaborador.id}/editar`}
               className="bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm"
             >
@@ -326,7 +379,7 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
-      {/* ESTATÍSTICAS — calculadas do histórico */}
+      {/* Estatísticas */}
       {!loadingHistorico && stats.totalDias > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
@@ -380,7 +433,7 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      {/* DISTRIBUIÇÃO POR STATUS */}
+      {/* Distribuição */}
       {!loadingHistorico && stats.totalDias > 0 && (
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
           <h3 className="text-sm font-bold text-gray-400 mb-4">
@@ -409,7 +462,7 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      {/* MELHOR E PIOR DIA */}
+      {/* Melhor e pior dia */}
       {!loadingHistorico && stats.melhorDia && stats.piorDia && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4">
@@ -434,6 +487,65 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       )}
+
+      {/* FEEDBACKS RECENTES — preview com link pra página completa */}
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-[#FFD700]">
+            💬 Feedbacks Recentes
+          </h2>
+          <Link
+            href={`/meu-time/${colaborador.id}/feedbacks`}
+            className="text-sm text-blue-400 hover:text-blue-300 transition-colors font-bold"
+          >
+            Ver todos →
+          </Link>
+        </div>
+
+        {feedbacksRecentes.length === 0 ? (
+          <div className="text-center py-8">
+            <span className="text-4xl block mb-2">📭</span>
+            <p className="text-gray-400 text-sm mb-3">Nenhum feedback ainda</p>
+            <Link
+              href={`/meu-time/${colaborador.id}/feedbacks`}
+              className="inline-block bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm"
+            >
+              + Registrar primeiro feedback
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {feedbacksRecentes.map((fb) => (
+              <div
+                key={fb.feedback_id}
+                className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-4"
+              >
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">{iconeTipo(fb.tipo)}</span>
+                    <span className="text-sm font-bold text-white">
+                      {fb.tipo}
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(
+                        fb.classificacao
+                      )}`}
+                    >
+                      {fb.classificacao}
+                    </span>
+                  </div>
+                  <span className="text-xs text-gray-500">
+                    {tempoRelativo(fb.registrado_em)}
+                  </span>
+                </div>
+                <p className="text-gray-300 text-sm line-clamp-2">
+                  {fb.observacao}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Dados cadastrais + Datas */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -496,14 +608,13 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
-      {/* HISTÓRICO DE PRODUÇÃO */}
+      {/* Histórico de produção */}
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">
             📊 Histórico de Produção
           </h2>
 
-          {/* Filtro por período */}
           <div className="flex gap-1 bg-[#0a0a0a] rounded-lg p-1">
             {(['7', '30', '90', 'tudo'] as const).map((periodo) => (
               <button
@@ -610,18 +721,11 @@ export default function DetalheColaboradorPage() {
         )}
       </div>
 
-      {/* Seções "em breve" — Feedbacks/Atestados */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-6 text-center">
-          <span className="text-4xl block mb-2">💬</span>
-          <h3 className="font-bold text-white mb-1">Feedbacks</h3>
-          <p className="text-xs text-gray-500">Em breve — próximo bloco</p>
-        </div>
-        <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-6 text-center">
-          <span className="text-4xl block mb-2">🏥</span>
-          <h3 className="font-bold text-white mb-1">Atestados</h3>
-          <p className="text-xs text-gray-500">Em breve</p>
-        </div>
+      {/* Atestados — placeholder */}
+      <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-6 text-center">
+        <span className="text-4xl block mb-2">🏥</span>
+        <h3 className="font-bold text-white mb-1">Atestados</h3>
+        <p className="text-xs text-gray-500">Em breve</p>
       </div>
     </div>
   );
