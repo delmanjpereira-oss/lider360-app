@@ -10,7 +10,6 @@ const menuItems = [
   { href: '/calculadora', label: 'Calculadora NET', icon: '🧮' },
   { href: '/presenca', label: 'Registro Presença', icon: '✅' },
   { href: '/meu-time', label: 'MEU TIME', icon: '👥' },
-  { href: '/meu-time/configuracoes', label: '⚙️ Metas', icon: '', subitem: true },
   { href: '/calibracao', label: 'Calibração', icon: '🎯' },
   { href: '/copiloto', label: 'Copiloto IA', icon: '🤖' },
   { href: '/boletim', label: 'Boletim', icon: '📊' },
@@ -39,10 +38,10 @@ export default function Sidebar() {
                 isActive
                   ? 'bg-[#FFD700] text-black font-bold'
                   : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
-              } ${item.subitem ? 'ml-4 text-sm' : ''}`}
+              }`}
             >
-              {item.icon && <span className="text-lg">{item.icon}</span>}
-              <span className={item.subitem ? 'text-sm' : ''}>{item.label}</span>
+              <span className="text-lg">{item.icon}</span>
+              <span>{item.label}</span>
             </Link>
           );
         })}
