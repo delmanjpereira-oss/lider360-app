@@ -50,9 +50,7 @@ export default function MeuTimePage() {
         <h1 className="text-4xl font-black mb-2">
           MEU <span className="text-[#FFD700]">TIME</span>
         </h1>
-        <p className="text-gray-400">
-          {colaboradores.length} colaboradores
-        </p>
+        <p className="text-gray-400">{colaboradores.length} colaboradores</p>
       </div>
 
       {loading && (
@@ -78,30 +76,3 @@ export default function MeuTimePage() {
 
       {!loading && colaboradores.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {colaboradores.map((c) => (
-            <div
-              key={c.id}
-              className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 hover:border-[#FFD700] transition-all"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <h3 className="text-lg font-bold text-white">{c.nome}</h3>
-                <span
-                  className={`text-xs px-2 py-1 rounded-full ${
-                    c.status === 'Ativo'
-                      ? 'bg-green-500/20 text-green-400'
-                      : 'bg-gray-500/20 text-gray-400'
-                  }`}
-                >
-                  {c.status}
-                </span>
-              </div>
-
-              <div className="space-y-2 text-sm">
-                {c.cargo && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500">💼</span>
-                    <span className="text-gray-300">{c.cargo}</span>
-                  </div>
-                )}
-                {c.processo && (
-                  <div className="flex items-center gap-2">
