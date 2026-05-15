@@ -3,18 +3,39 @@
 import { useState, useEffect } from 'react';
 
 export default function Topbar() {
-  const [time, setTime] = useState('');
+  const [time, setTime] = useState<string>('');
 
   useEffect(() => {
+    // Função pra atualizar o relógio
     const updateTime = () => {
       const now = new Date();
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
       setTime(`${hours}:${minutes}`);
     };
+
+    // Atualiza imediatamente
     updateTime();
-    const interval = setInterval(updateTime, 60000);
-    return () => clearInterval(interval);
+
+    // Calcula quanto falta pro próximo minuto cheio
+    const now = new Date();
+    const segundosFaltam = 60 - now.getSeconds();
+    const msFaltam = segundosFaltam * 1000 - now.getMilliseconds();
+
+    // Aguarda até virar o minuto e aí começa a atualizar a cada 60s
+    const timeout = setTimeout(() => {
+      updateTime();
+      const interval = setInterval(updateTime, 60000);
+      // Salva o interval pra limpar depois
+      (window as any).__clockInterval = interval;
+    }, msFaltam);
+
+    return () => {
+      clearTimeout(timeout);
+      if ((window as any).__clockInterval) {
+        clearInterval((window as any).__clockInterval);
+      }
+    };
   }, []);
 
   return (
@@ -28,22 +49,4 @@ export default function Topbar() {
         </div>
       </div>
 
-      {/* Direita: notificações + relógio */}
-      <div className="flex items-center gap-4">
-        {/* Notificações */}
-        <button
-          className="relative p-2 rounded-lg hover:bg-[#1a1a1a] transition-colors"
-          aria-label="Notificações"
-        >
-          <span className="text-xl">🔔</span>
-          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
-        </button>
-
-        {/* Relógio */}
-        <div className="px-4 py-2 bg-[#1a1a1a] rounded-lg border border-[#2a2a2a]">
-          <span className="text-[#FFD700] font-bold">{time}</span>
-        </div>
-      </div>
-    </header>
-  );
-}
+      {/* Direita: notificações
