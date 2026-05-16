@@ -60,39 +60,65 @@ export default function Sidebar() {
         sticky top-0 h-screen
         transition-all duration-300 ease-out
         flex-shrink-0
-        relative
       `}
       style={{
         boxShadow: '4px 0 20px -8px rgba(0,0,0,0.5)',
       }}
     >
-      {/* Logo */}
-      <div className="flex items-center justify-between px-4 py-5 border-b border-[#1a1a1a]">
+      {/* Header com Logo + Botão de Toggle */}
+      <div className="flex items-center justify-between px-3 py-4 border-b border-[#1a1a1a] gap-2">
         {aberta ? (
-          <Link href="/meu-time" className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-yellow-500/20">
-              L
-            </div>
-            <span className="text-white font-black text-lg">LIDER 360</span>
-          </Link>
+          <>
+            <Link href="/meu-time" className="flex items-center gap-2 flex-1 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-yellow-500/20 flex-shrink-0">
+                L
+              </div>
+              <span className="text-white font-black text-base whitespace-nowrap">
+                LIDER 360
+              </span>
+            </Link>
+            <button
+              onClick={toggle}
+              title="Recolher menu"
+              className="w-8 h-8 rounded-lg bg-[#1a1a1a] hover:bg-[#2a2a2a] text-gray-400 hover:text-[#FFD700] flex items-center justify-center transition-all active:scale-95 flex-shrink-0 border border-[#2a2a2a] hover:border-[#FFD700]/30"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+          </>
         ) : (
-          <Link
-            href="/meu-time"
-            className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-yellow-500/20 mx-auto"
+          <button
+            onClick={toggle}
+            title="Expandir menu"
+            className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#FFD700] to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 flex items-center justify-center text-black font-black shadow-lg shadow-yellow-500/30 transition-all active:scale-95 mx-auto"
           >
-            L
-          </Link>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </button>
         )}
       </div>
-
-      {/* Botão flutuante de toggle */}
-      <button
-        onClick={toggle}
-        title={aberta ? 'Recolher menu' : 'Expandir menu'}
-        className="absolute -right-3 top-7 z-50 w-6 h-6 rounded-full bg-gradient-to-br from-[#FFD700] to-yellow-600 text-black font-black text-xs flex items-center justify-center shadow-lg shadow-yellow-500/30 hover:scale-110 active:scale-95 transition-all"
-      >
-        {aberta ? '◀' : '▶'}
-      </button>
 
       {/* Itens de navegação */}
       <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
