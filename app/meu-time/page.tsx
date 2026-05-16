@@ -175,6 +175,15 @@ export default function MeuTimePage() {
             📊
           </Link>
 
+          {/* Importar CSV em massa — verde */}
+          <Link
+            href="/meu-time/importar"
+            title="Importar colaboradores em massa (CSV)"
+            className="w-12 h-12 flex items-center justify-center bg-green-500/20 hover:bg-green-500/40 text-green-400 hover:text-green-300 rounded-lg transition-all text-2xl border border-green-500/30 hover:border-green-400"
+          >
+            📥
+          </Link>
+
           {/* Configurações de Metas — cinza */}
           <Link
             href="/meu-time/configuracoes"
