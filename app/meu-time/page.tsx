@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 
 type Colaborador = {
@@ -17,16 +18,16 @@ type Colaborador = {
 };
 
 const corCarreira: Record<string, string> = {
-  REP1: 'bg-blue-500/20 text-blue-400',
-  REP2: 'bg-purple-500/20 text-purple-400',
-  REP3: 'bg-pink-500/20 text-pink-400',
-  MULTIPLICADOR: 'bg-[#FFD700]/20 text-[#FFD700]',
+  'REP 1': 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  'REP 2': 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  'REP 3': 'bg-pink-500/20 text-pink-300 border-pink-500/30',
+  MULTIPLICADOR: 'bg-[#FFD700]/20 text-[#FFD700] border-[#FFD700]/30',
 };
 
 const corProcesso: Record<string, string> = {
-  Checkin: 'bg-cyan-500/20 text-cyan-400',
-  P2M: 'bg-orange-500/20 text-orange-400',
-  Sorting: 'bg-emerald-500/20 text-emerald-400',
+  Checkin: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+  P2M: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  Sorting: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
 };
 
 function iniciais(nome: string): string {
@@ -39,169 +40,131 @@ function isAniversarioHoje(aniversario: string | null): boolean {
   if (!aniversario) return false;
   const hoje = new Date();
   const data = new Date(aniversario);
-  return (
-    hoje.getMonth() === data.getMonth() && hoje.getDate() === data.getDate()
-  );
-}
-
-function mesesEmpresa(dataAdmissao: string | null): number | null {
-  if (!dataAdmissao) return null;
-  const inicio = new Date(dataAdmissao);
-  const agora = new Date();
-  const diffMs = agora.getTime() - inicio.getTime();
-  const meses = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30));
-  return meses;
+  return hoje.getMonth() === data.getMonth() && hoje.getDate() === data.getDate();
 }
 
 export default function MeuTimePage() {
+  const router = useRouter();
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [loading, setLoading] = useState(true);
-  const [erro, setErro] = useState<string | null>(null);
-
   const [busca, setBusca] = useState('');
-  const [filtroProcesso, setFiltroProcesso] = useState<string>('TODOS');
-  const [filtroStatus, setFiltroStatus] = useState<string>('TODOS');
-  const [filtroCarreira, setFiltroCarreira] = useState<string>('TODOS');
+  const [filtroProcesso, setFiltroProcesso] = useState('todos');
+  const [filtroStatus, setFiltroStatus] = useState('todos');
+  const [versao, setVersao] = useState(0); // ⭐ pra forçar refetch
 
-  useEffect(() => {
-    buscarColaboradores();
-  }, []);
-
-  async function buscarColaboradores() {
+  const carregar = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
       const { data, error } = await supabase
         .from('colaboradores')
         .select('*')
         .order('nome');
-
       if (error) {
-        setErro(error.message);
+        if (typeof window !== 'undefined' && window.showToast) {
+          window.showToast('error', 'Erro: ' + error.message);
+        }
       } else {
         setColaboradores(data || []);
       }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Erro desconhecido';
-      setErro(msg);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  async function excluirColaborador(id: number, nome: string) {
-    const confirma = window.confirm(`Deseja excluir ${nome}?`);
-    if (!confirma) return;
+  useEffect(() => {
+    carregar();
+  }, [carregar, versao]);
 
-    const { error } = await supabase.from('colaboradores').delete().eq('id', id);
+  async function excluir(colab: Colaborador) {
+    const ok = await window.showConfirm({
+      title: 'Excluir colaborador',
+      message: `Tem certeza que deseja excluir ${colab.nome}? Essa ação não pode ser desfeita.`,
+      confirmText: 'Excluir',
+      cancelText: 'Cancelar',
+      danger: true,
+    });
+    if (!ok) return;
 
+    const { error } = await supabase.from('colaboradores').delete().eq('id', colab.id);
     if (error) {
-      alert('Erro ao excluir: ' + error.message);
+      window.showToast('error', 'Erro: ' + error.message);
     } else {
-      buscarColaboradores();
+      window.showToast('success', `${colab.nome} foi removido com sucesso`);
+      // 🎯 FORÇA REFETCH (corrige o bug)
+      setVersao((v) => v + 1);
     }
   }
 
-  const colaboradoresFiltrados = colaboradores.filter((c) => {
-    const matchBusca =
-      busca === '' ||
-      c.nome.toLowerCase().includes(busca.toLowerCase()) ||
-      c.id_groot.includes(busca) ||
-      (c.cargo && c.cargo.toLowerCase().includes(busca.toLowerCase()));
-
-    const matchProcesso =
-      filtroProcesso === 'TODOS' || c.processo === filtroProcesso;
-    const matchStatus = filtroStatus === 'TODOS' || c.status === filtroStatus;
-    const matchCarreira =
-      filtroCarreira === 'TODOS' || c.carreira === filtroCarreira;
-
-    return matchBusca && matchProcesso && matchStatus && matchCarreira;
+  const filtrados = colaboradores.filter((c) => {
+    if (busca && !c.nome.toLowerCase().includes(busca.toLowerCase())) return false;
+    if (filtroProcesso !== 'todos' && c.processo !== filtroProcesso) return false;
+    if (filtroStatus !== 'todos' && c.status !== filtroStatus) return false;
+    return true;
   });
 
   const stats = {
     total: colaboradores.length,
     ativos: colaboradores.filter((c) => c.status === 'Ativo').length,
-    inativos: colaboradores.filter((c) => c.status === 'Inativo').length,
-    afastados: colaboradores.filter((c) => c.status === 'Afastado').length,
-    checkin: colaboradores.filter((c) => c.processo === 'Checkin').length,
-    p2m: colaboradores.filter((c) => c.processo === 'P2M').length,
-    sorting: colaboradores.filter((c) => c.processo === 'Sorting').length,
-    aniversariantes: colaboradores.filter((c) => isAniversarioHoje(c.aniversario))
-      .length,
+    ferias: colaboradores.filter((c) => c.status === 'Férias').length,
+    aniversariantes: colaboradores.filter((c) => isAniversarioHoje(c.aniversario)).length,
   };
-
-  function limparFiltros() {
-    setBusca('');
-    setFiltroProcesso('TODOS');
-    setFiltroStatus('TODOS');
-    setFiltroCarreira('TODOS');
-  }
-
-  const temFiltrosAtivos =
-    busca !== '' ||
-    filtroProcesso !== 'TODOS' ||
-    filtroStatus !== 'TODOS' ||
-    filtroCarreira !== 'TODOS';
 
   return (
     <div className="space-y-6">
-      {/* Header com botões de ação */}
+      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-4xl font-black mb-2">
-            MEU <span className="text-[#FFD700]">TIME</span>
+            👥 Meu <span className="text-[#FFD700]">Time</span>
           </h1>
           <p className="text-gray-400">
-            {colaboradores.length} colaboradores cadastrados
+            {stats.total === 0
+              ? 'Cadastre seus colaboradores pra começar'
+              : `${stats.total} colaboradores cadastrados`}
           </p>
         </div>
 
         {/* Botões de ação rápida */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Upload CSV — azul */}
           <Link
             href="/meu-time/upload"
             title="Upload CSV de Produtividade"
-            className="w-12 h-12 flex items-center justify-center bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 hover:text-blue-300 rounded-lg transition-all text-2xl border border-blue-500/30 hover:border-blue-400"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-blue-600/10 hover:from-blue-500/40 hover:to-blue-600/30 text-blue-300 rounded-xl transition-all text-2xl border border-blue-500/30 hover:border-blue-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-500/20 active:translate-y-0"
           >
             📤
           </Link>
 
-          {/* Upload DPMO — roxo (placeholder pro próximo bloco) */}
           <Link
             href="/meu-time/dpmo"
-            title="Upload DPMO (em breve)"
-            className="w-12 h-12 flex items-center justify-center bg-purple-500/20 hover:bg-purple-500/40 text-purple-400 hover:text-purple-300 rounded-lg transition-all text-2xl border border-purple-500/30 hover:border-purple-400"
+            title="Upload DPMO"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-purple-500/20 to-purple-600/10 hover:from-purple-500/40 hover:to-purple-600/30 text-purple-300 rounded-xl transition-all text-2xl border border-purple-500/30 hover:border-purple-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-purple-500/20 active:translate-y-0"
           >
             📊
           </Link>
 
-          {/* Importar CSV em massa — verde */}
           <Link
             href="/meu-time/importar"
             title="Importar colaboradores em massa (CSV)"
-            className="w-12 h-12 flex items-center justify-center bg-green-500/20 hover:bg-green-500/40 text-green-400 hover:text-green-300 rounded-lg transition-all text-2xl border border-green-500/30 hover:border-green-400"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-green-500/20 to-green-600/10 hover:from-green-500/40 hover:to-green-600/30 text-green-300 rounded-xl transition-all text-2xl border border-green-500/30 hover:border-green-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-500/20 active:translate-y-0"
           >
             📥
           </Link>
 
-          {/* Configurações de Metas — cinza */}
           <Link
             href="/meu-time/configuracoes"
             title="Configurações de Metas"
-            className="w-12 h-12 flex items-center justify-center bg-[#2a2a2a] hover:bg-[#3a3a3a] text-gray-400 hover:text-white rounded-lg transition-all text-2xl border border-[#3a3a3a] hover:border-[#FFD700]"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] hover:from-[#3a3a3a] hover:to-[#2a2a2a] text-gray-400 hover:text-white rounded-xl transition-all text-2xl border border-[#3a3a3a] hover:border-[#FFD700] hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0"
           >
             ⚙️
           </Link>
 
-          {/* Separador visual */}
           <div className="w-px h-12 bg-[#2a2a2a] mx-1"></div>
 
-          {/* Novo Colaborador — botão principal amarelo */}
           <Link
             href="/meu-time/cadastrar"
-            className="bg-[#FFD700] text-black font-bold px-6 py-3 rounded-lg hover:bg-yellow-300 transition-colors flex items-center gap-2"
+            className="bg-gradient-to-br from-[#FFD700] to-yellow-500 text-black font-bold px-6 py-3 rounded-xl hover:from-yellow-300 hover:to-yellow-400 transition-all flex items-center gap-2 shadow-lg shadow-yellow-500/30 hover:shadow-xl hover:shadow-yellow-500/40 hover:-translate-y-0.5 active:translate-y-0"
           >
-            <span>+</span> Novo Colaborador
+            <span className="text-xl">+</span> Novo
           </Link>
         </div>
       </div>
@@ -209,298 +172,228 @@ export default function MeuTimePage() {
       {/* Estatísticas */}
       {!loading && colaboradores.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+          <div
+            className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50"
+            style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+          >
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">👥</span>
-              <span className="text-3xl font-black text-white">
-                {stats.total}
-              </span>
+              <span className="text-3xl font-black text-white">{stats.total}</span>
             </div>
             <p className="text-xs text-gray-400">Total</p>
           </div>
 
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+          <div
+            className="bg-gradient-to-br from-green-500/10 to-green-700/5 border border-green-500/30 rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-green-500/20"
+            style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+          >
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">✅</span>
-              <span className="text-3xl font-black text-green-400">
-                {stats.ativos}
-              </span>
+              <span className="text-3xl font-black text-green-400">{stats.ativos}</span>
             </div>
-            <p className="text-xs text-gray-400">Ativos</p>
+            <p className="text-xs text-green-300">Ativos</p>
           </div>
 
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+          <div
+            className="bg-gradient-to-br from-blue-500/10 to-blue-700/5 border border-blue-500/30 rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/20"
+            style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+          >
             <div className="flex items-center justify-between mb-2">
-              <span className="text-2xl">⏸️</span>
-              <span className="text-3xl font-black text-yellow-400">
-                {stats.afastados}
-              </span>
+              <span className="text-2xl">🌴</span>
+              <span className="text-3xl font-black text-blue-400">{stats.ferias}</span>
             </div>
-            <p className="text-xs text-gray-400">Afastados</p>
+            <p className="text-xs text-blue-300">Em férias</p>
           </div>
 
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+          <div
+            className="bg-gradient-to-br from-pink-500/10 to-pink-700/5 border border-pink-500/30 rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-pink-500/20"
+            style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+          >
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">🎂</span>
               <span className="text-3xl font-black text-pink-400">
                 {stats.aniversariantes}
               </span>
             </div>
-            <p className="text-xs text-gray-400">Aniversariantes hoje</p>
-          </div>
-        </div>
-      )}
-
-      {/* Distribuição por processo */}
-      {!loading && colaboradores.length > 0 && (
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
-          <h3 className="text-sm font-bold text-gray-400 mb-4">
-            DISTRIBUIÇÃO POR PROCESSO
-          </h3>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center">
-              <div className="text-3xl font-black text-cyan-400">
-                {stats.checkin}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">Checkin</div>
-            </div>
-            <div className="text-center border-x border-[#2a2a2a]">
-              <div className="text-3xl font-black text-orange-400">
-                {stats.p2m}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">P2M</div>
-            </div>
-            <div className="text-center">
-              <div className="text-3xl font-black text-emerald-400">
-                {stats.sorting}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">Sorting</div>
-            </div>
+            <p className="text-xs text-pink-300">Aniversariantes hoje</p>
           </div>
         </div>
       )}
 
       {/* Filtros */}
       {!loading && colaboradores.length > 0 && (
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 space-y-4">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Buscar por nome, ID ou cargo..."
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 pl-12 text-white focus:border-[#FFD700] focus:outline-none transition-colors"
-            />
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">
-              🔍
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <select
-              value={filtroProcesso}
-              onChange={(e) => setFiltroProcesso(e.target.value)}
-              className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-white focus:border-[#FFD700] focus:outline-none"
-            >
-              <option value="TODOS">📦 Todos os Processos</option>
-              <option value="Checkin">Checkin</option>
-              <option value="P2M">P2M</option>
-              <option value="Sorting">Sorting</option>
-            </select>
-
-            <select
-              value={filtroStatus}
-              onChange={(e) => setFiltroStatus(e.target.value)}
-              className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-white focus:border-[#FFD700] focus:outline-none"
-            >
-              <option value="TODOS">⚡ Todos os Status</option>
-              <option value="Ativo">Ativo</option>
-              <option value="Inativo">Inativo</option>
-              <option value="Afastado">Afastado</option>
-            </select>
-
-            <select
-              value={filtroCarreira}
-              onChange={(e) => setFiltroCarreira(e.target.value)}
-              className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-white focus:border-[#FFD700] focus:outline-none"
-            >
-              <option value="TODOS">🎯 Todas as Carreiras</option>
-              <option value="REP1">REP1</option>
-              <option value="REP2">REP2</option>
-              <option value="REP3">REP3</option>
-              <option value="MULTIPLICADOR">MULTIPLICADOR</option>
-            </select>
-          </div>
-
-          {temFiltrosAtivos && (
-            <div className="flex items-center justify-between pt-2 border-t border-[#2a2a2a]">
-              <p className="text-sm text-gray-400">
-                <span className="text-[#FFD700] font-bold">
-                  {colaboradoresFiltrados.length}
-                </span>{' '}
-                de {colaboradores.length} encontrados
-              </p>
-              <button
-                onClick={limparFiltros}
-                className="text-sm text-gray-500 hover:text-white transition-colors"
-              >
-                ✕ Limpar filtros
-              </button>
-            </div>
-          )}
+        <div
+          className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4 flex items-center gap-3 flex-wrap"
+          style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+        >
+          <input
+            type="text"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="🔍 Buscar por nome..."
+            className="flex-1 min-w-[200px] bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:border-[#FFD700] focus:outline-none transition-colors"
+          />
+          <select
+            value={filtroProcesso}
+            onChange={(e) => setFiltroProcesso(e.target.value)}
+            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:border-[#FFD700] focus:outline-none transition-colors"
+          >
+            <option value="todos">Todos os processos</option>
+            <option value="Checkin">📦 Checkin</option>
+            <option value="P2M">🚚 P2M</option>
+            <option value="Sorting">📋 Sorting</option>
+          </select>
+          <select
+            value={filtroStatus}
+            onChange={(e) => setFiltroStatus(e.target.value)}
+            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:border-[#FFD700] focus:outline-none transition-colors"
+          >
+            <option value="todos">Todos os status</option>
+            <option value="Ativo">Ativo</option>
+            <option value="Férias">Férias</option>
+            <option value="Afastado">Afastado</option>
+            <option value="Inativo">Inativo</option>
+          </select>
         </div>
       )}
 
       {/* Loading */}
       {loading && (
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
-          <span className="text-6xl block mb-4">⏳</span>
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-12 text-center">
+          <span className="text-6xl block mb-4 animate-pulse">⏳</span>
           <p className="text-gray-400">Carregando colaboradores...</p>
         </div>
       )}
 
-      {/* Erro */}
-      {erro && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6">
-          <p className="text-red-400 font-bold mb-2">Erro ao carregar:</p>
-          <p className="text-red-300 text-sm">{erro}</p>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && !erro && colaboradores.length === 0 && (
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
+      {/* Vazio total */}
+      {!loading && colaboradores.length === 0 && (
+        <div
+          className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center"
+          style={{ boxShadow: '0 15px 35px -10px rgba(0,0,0,0.5)' }}
+        >
           <span className="text-6xl block mb-4">📭</span>
-          <h2 className="text-2xl font-bold text-white mb-2">
-            Nenhum colaborador ainda
-          </h2>
-          <p className="text-gray-400 mb-6">
-            Comece cadastrando o primeiro colaborador do seu time
+          <h3 className="text-xl font-bold text-white mb-2">
+            Nenhum colaborador cadastrado
+          </h3>
+          <p className="text-gray-400 mb-6 text-sm">
+            Comece adicionando seus colaboradores
           </p>
-          <Link
-            href="/meu-time/cadastrar"
-            className="inline-block bg-[#FFD700] text-black font-bold px-6 py-3 rounded-lg hover:bg-yellow-300 transition-colors"
-          >
-            + Cadastrar Primeiro
-          </Link>
+          <div className="flex justify-center gap-3 flex-wrap">
+            <Link
+              href="/meu-time/cadastrar"
+              className="bg-gradient-to-br from-[#FFD700] to-yellow-500 text-black font-bold px-6 py-3 rounded-xl hover:from-yellow-300 hover:to-yellow-400 transition-all shadow-lg shadow-yellow-500/30"
+            >
+              + Adicionar um por um
+            </Link>
+            <Link
+              href="/meu-time/importar"
+              className="bg-gradient-to-br from-green-500/30 to-green-600/20 text-green-300 font-bold px-6 py-3 rounded-xl hover:from-green-500/40 transition-all border border-green-500/30"
+            >
+              📥 Importar CSV
+            </Link>
+          </div>
         </div>
       )}
 
-      {/* Lista de cards */}
-      {!loading && colaboradoresFiltrados.length > 0 && (
+      {/* Sem resultados com filtro */}
+      {!loading && colaboradores.length > 0 && filtrados.length === 0 && (
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-8 text-center">
+          <span className="text-4xl block mb-3">🔍</span>
+          <p className="text-gray-400">Nenhum colaborador encontrado com esses filtros</p>
+        </div>
+      )}
+
+      {/* Grid de cards */}
+      {!loading && filtrados.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {colaboradoresFiltrados.map((c) => {
-            const meses = mesesEmpresa(c.data_admissao);
-            const aniversario = isAniversarioHoje(c.aniversario);
-
-            return (
-              <div
-                key={c.id}
-                className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-5 hover:border-[#FFD700] transition-all group cursor-pointer"
-              >
-                <Link href={`/meu-time/${c.id}`} className="block">
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-lg flex-shrink-0">
-                      {iniciais(c.nome)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base font-bold text-white truncate">
-                        {c.nome}
-                      </h3>
-                      <p className="text-xs text-gray-500 truncate">
-                        {c.cargo || 'Sem cargo'}
-                      </p>
-                    </div>
+          {filtrados.map((c) => (
+            <div
+              key={c.id}
+              className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-5 transition-all hover:-translate-y-1 hover:border-[#FFD700]/30 group"
+              style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+            >
+              <Link href={`/meu-time/${c.id}`} className="block">
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-lg flex-shrink-0 shadow-lg shadow-yellow-500/30 group-hover:scale-105 transition-transform">
+                    {iniciais(c.nome)}
                   </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-white font-bold text-base truncate group-hover:text-[#FFD700] transition-colors">
+                      {c.nome}
+                    </h3>
+                    <p className="text-xs text-gray-500 font-mono">{c.id_groot}</p>
+                    {c.cargo && (
+                      <p className="text-xs text-gray-400 mt-0.5">{c.cargo}</p>
+                    )}
+                  </div>
+                  {isAniversarioHoje(c.aniversario) && (
+                    <span className="text-2xl animate-bounce" title="Aniversário hoje!">
+                      🎂
+                    </span>
+                  )}
+                </div>
 
-                  <div className="flex flex-wrap gap-1.5 mb-3">
+                <div className="flex flex-wrap gap-1.5">
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                      c.status === 'Ativo'
+                        ? 'bg-green-500/20 text-green-300 border border-green-500/30'
+                        : c.status === 'Férias'
+                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                        : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                    }`}
+                  >
+                    {c.status}
+                  </span>
+                  {c.processo && (
                     <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                        c.status === 'Ativo'
-                          ? 'bg-green-500/20 text-green-400'
-                          : c.status === 'Afastado'
-                          ? 'bg-yellow-500/20 text-yellow-400'
-                          : 'bg-gray-500/20 text-gray-400'
+                      className={`text-xs px-2 py-0.5 rounded-full font-bold border ${
+                        corProcesso[c.processo] ||
+                        'bg-gray-500/20 text-gray-400 border-gray-500/30'
                       }`}
                     >
-                      {c.status}
+                      {c.processo}
                     </span>
-
-                    {c.processo && (
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                          corProcesso[c.processo] ||
-                          'bg-gray-500/20 text-gray-400'
-                        }`}
-                      >
-                        {c.processo}
-                      </span>
-                    )}
-
-                    {c.carreira && (
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                          corCarreira[c.carreira] ||
-                          'bg-gray-500/20 text-gray-400'
-                        }`}
-                      >
-                        {c.carreira}
-                      </span>
-                    )}
-
-                    {aniversario && (
-                      <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-pink-500/20 text-pink-400 animate-pulse">
-                        🎂 Aniversário!
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-gray-500 pt-3 border-t border-[#2a2a2a]">
-                    <span>ID: {c.id_groot}</span>
-                    {meses !== null && <span>{meses}m na empresa</span>}
-                  </div>
-                </Link>
-
-                <div className="flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Link
-                    href={`/meu-time/${c.id}/editar`}
-                    className="flex-1 text-center text-xs py-1.5 bg-[#2a2a2a] text-white rounded hover:bg-[#3a3a3a] transition-colors"
-                  >
-                    ✏️ Editar
-                  </Link>
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      excluirColaborador(c.id, c.nome);
-                    }}
-                    className="flex-1 text-xs py-1.5 bg-red-500/10 text-red-400 rounded hover:bg-red-500/20 transition-colors"
-                  >
-                    🗑️ Excluir
-                  </button>
+                  )}
+                  {c.carreira && (
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-bold border ${
+                        corCarreira[c.carreira] ||
+                        'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                      }`}
+                    >
+                      {c.carreira}
+                    </span>
+                  )}
                 </div>
+              </Link>
+
+              {/* Ações */}
+              <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a2a2a]">
+                <Link
+                  href={`/meu-time/${c.id}/feedbacks`}
+                  className="flex-1 text-center text-xs bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 font-bold py-2 rounded-lg transition-all active:scale-95"
+                >
+                  💬 Feedback
+                </Link>
+                <Link
+                  href={`/meu-time/${c.id}/editar`}
+                  className="flex-1 text-center text-xs bg-[#FFD700]/10 text-[#FFD700] hover:bg-[#FFD700]/20 font-bold py-2 rounded-lg transition-all active:scale-95"
+                >
+                  ✏️ Editar
+                </Link>
+                <button
+                  onClick={() => excluir(c)}
+                  className="text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20 font-bold py-2 px-3 rounded-lg transition-all active:scale-95"
+                  title="Excluir"
+                >
+                  🗑️
+                </button>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
-
-      {/* No results */}
-      {!loading &&
-        colaboradores.length > 0 &&
-        colaboradoresFiltrados.length === 0 && (
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
-            <span className="text-6xl block mb-4">🔍</span>
-            <p className="text-gray-400 mb-4">
-              Nenhum colaborador encontrado com esses filtros
-            </p>
-            <button
-              onClick={limparFiltros}
-              className="bg-[#FFD700] text-black font-bold px-6 py-2 rounded-lg hover:bg-yellow-300 transition-colors"
-            >
-              Limpar filtros
-            </button>
-          </div>
-        )}
     </div>
   );
 }
