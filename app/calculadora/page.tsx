@@ -88,10 +88,14 @@ export default function CalculadoraNetPage() {
         logging: false,
       });
       const link = document.createElement('a');
-      const ts = new Date()
-        .toISOString()
-        .slice(0, 16)
-        .replace(/[-:T]/g, '');
+      const agora = new Date();
+      const ts =
+        agora.getFullYear().toString() +
+        (agora.getMonth() + 1).toString().padStart(2, '0') +
+        agora.getDate().toString().padStart(2, '0') +
+        '-' +
+        agora.getHours().toString().padStart(2, '0') +
+        agora.getMinutes().toString().padStart(2, '0');
       link.download = `calculadora-net-${ts}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
