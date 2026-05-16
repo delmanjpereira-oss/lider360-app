@@ -34,15 +34,16 @@ type HistoricoLinha = {
   ima: number;
 };
 
-type DpmoEvento = {
+type DpmoAgregado = {
   id: number;
-  checkin_data: string;
-  qtd_dif: number;
-  qtd_checkin: number;
-  qtd_ima: number;
+  representante: string;
+  id_groot: string | null;
+  processo: string;
   semana: number;
   ano: number;
+  mes: number;
   trimestre: string;
+  dpmo: number;
 };
 
 type FeedbackBreve = {
@@ -82,36 +83,22 @@ function mesesEmpresa(dataAdmissao: string | null): string {
   if (!dataAdmissao) return 'Não informado';
   const inicio = new Date(dataAdmissao);
   const agora = new Date();
-  const diffMs = agora.getTime() - inicio.getTime();
-  const meses = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30));
+  const meses = Math.floor((agora.getTime() - inicio.getTime()) / (1000 * 60 * 60 * 24 * 30));
   const anos = Math.floor(meses / 12);
   const mesesRestantes = meses % 12;
 
   if (anos === 0) return `${meses} ${meses === 1 ? 'mês' : 'meses'}`;
   if (mesesRestantes === 0) return `${anos} ${anos === 1 ? 'ano' : 'anos'}`;
-  return `${anos} ${anos === 1 ? 'ano' : 'anos'} e ${mesesRestantes} ${
-    mesesRestantes === 1 ? 'mês' : 'meses'
-  }`;
+  return `${anos} ${anos === 1 ? 'ano' : 'anos'} e ${mesesRestantes} meses`;
 }
 
 function diasParaAniversario(aniversario: string | null): string {
   if (!aniversario) return 'Não informado';
   const hoje = new Date();
   const data = new Date(aniversario);
-  const proximo = new Date(
-    hoje.getFullYear(),
-    data.getMonth(),
-    data.getDate()
-  );
-
-  if (proximo < hoje) {
-    proximo.setFullYear(hoje.getFullYear() + 1);
-  }
-
-  const diff = Math.ceil(
-    (proximo.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)
-  );
-
+  const proximo = new Date(hoje.getFullYear(), data.getMonth(), data.getDate());
+  if (proximo < hoje) proximo.setFullYear(hoje.getFullYear() + 1);
+  const diff = Math.ceil((proximo.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
   if (diff === 0) return '🎂 Hoje!';
   if (diff === 1) return 'Amanhã';
   return `Em ${diff} dias`;
@@ -119,14 +106,10 @@ function diasParaAniversario(aniversario: string | null): string {
 
 function corStatus(status: string): string {
   switch (status) {
-    case 'Supera':
-      return 'bg-green-500/20 text-green-400 border-green-500/30';
-    case 'Alinhado':
-      return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
-    case 'Abaixo':
-      return 'bg-red-500/20 text-red-400 border-red-500/30';
-    default:
-      return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+    case 'Supera': return 'bg-green-500/20 text-green-400 border-green-500/30';
+    case 'Alinhado': return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+    case 'Abaixo': return 'bg-red-500/20 text-red-400 border-red-500/30';
+    default: return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
   }
 }
 
@@ -134,7 +117,6 @@ function tempoRelativo(iso: string): string {
   const agora = new Date();
   const data = new Date(iso);
   const diff = Math.floor((agora.getTime() - data.getTime()) / 1000);
-
   if (diff < 3600) return `${Math.floor(diff / 60)}min atrás`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h atrás`;
   return `${Math.floor(diff / 86400)}d atrás`;
@@ -142,26 +124,11 @@ function tempoRelativo(iso: string): string {
 
 function iconeTipo(tipo: string): string {
   switch (tipo) {
-    case 'Reconhecimento':
-      return '🏆';
-    case 'Alinhamento':
-      return '🎯';
-    case 'Acompanhamento':
-      return '📊';
-    default:
-      return '✏️';
+    case 'Reconhecimento': return '🏆';
+    case 'Alinhamento': return '🎯';
+    case 'Acompanhamento': return '📊';
+    default: return '✏️';
   }
-}
-
-// Calcula semana ISO de uma data string YYYY-MM-DD
-function getSemanaIso(dataStr: string): { semana: number; ano: number } {
-  const data = new Date(dataStr + 'T12:00:00');
-  const d = new Date(Date.UTC(data.getFullYear(), data.getMonth(), data.getDate()));
-  const diaDaSemana = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - diaDaSemana);
-  const inicioAno = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const semana = Math.ceil((((d.getTime() - inicioAno.getTime()) / 86400000) + 1) / 7);
-  return { semana, ano: d.getUTCFullYear() };
 }
 
 export default function DetalheColaboradorPage() {
@@ -171,7 +138,7 @@ export default function DetalheColaboradorPage() {
 
   const [colaborador, setColaborador] = useState<Colaborador | null>(null);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
-  const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
+  const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
   const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>([]);
   const [metaIma, setMetaIma] = useState(1567);
   const [loading, setLoading] = useState(true);
@@ -194,7 +161,7 @@ export default function DetalheColaboradorPage() {
           setColaborador(data);
           if (data) {
             buscarHistorico(data.id_groot);
-            buscarDpmo(data.id_groot, data.nome);
+            buscarDpmoAgregado(data.id_groot, data.nome);
             buscarFeedbacks(data.id_groot);
             buscarMetaIma(data.processo);
           }
@@ -211,101 +178,82 @@ export default function DetalheColaboradorPage() {
 
   async function buscarMetaIma(processo: string | null) {
     if (!processo) return;
-    const chave =
-      processo === 'Checkin'
-        ? 'meta_ima_checkin'
-        : processo === 'P2M'
-        ? 'meta_ima_p2m'
-        : null;
+    const chave = processo === 'Checkin' ? 'meta_ima_checkin' : processo === 'P2M' ? 'meta_ima_p2m' : null;
     if (!chave) return;
-
-    const { data } = await supabase
-      .from('config')
-      .select('valor')
-      .eq('chave', chave)
-      .single();
+    const { data } = await supabase.from('config').select('valor').eq('chave', chave).single();
     if (data) setMetaIma(Number(data.valor));
   }
 
   async function buscarHistorico(idGroot: string) {
     try {
       setLoadingHistorico(true);
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('historico')
         .select('*')
         .eq('id_groot', idGroot)
         .order('data_referencia', { ascending: false });
-
-      if (error) {
-        console.error('Erro buscando histórico:', error.message);
-      } else {
-        setHistorico(data || []);
-      }
-    } catch (e) {
-      console.error(e);
+      setHistorico(data || []);
     } finally {
       setLoadingHistorico(false);
     }
   }
 
-  async function buscarDpmo(idGroot: string, nome: string) {
+  async function buscarDpmoAgregado(idGroot: string, nome: string) {
     try {
-      // Busca tanto por id_groot quanto pelo nome (caso ainda não vinculado)
+      // Busca por id_groot OU pelo nome (caso ainda não vinculado)
       const { data: porId } = await supabase
-        .from('dpmo_eventos')
+        .from('dpmo_agregado')
         .select('*')
         .eq('id_groot', idGroot)
-        .order('checkin_data', { ascending: false });
+        .order('ano', { ascending: false })
+        .order('semana', { ascending: false });
 
       const { data: porNome } = await supabase
-        .from('dpmo_eventos')
+        .from('dpmo_agregado')
         .select('*')
-        .eq('representante', nome.toUpperCase())
+        .ilike('representante', nome)
         .is('id_groot', null);
 
-      const todos: DpmoEvento[] = [];
+      const todos: DpmoAgregado[] = [];
       const idsVistos = new Set<number>();
-
       [...(porId || []), ...(porNome || [])].forEach((e) => {
         if (!idsVistos.has(e.id)) {
           idsVistos.add(e.id);
-          todos.push(e as DpmoEvento);
+          todos.push(e as DpmoAgregado);
         }
       });
 
-      setDpmoEventos(todos);
+      setDpmoAgregado(todos);
     } catch (e) {
       console.error('Erro buscando DPMO:', e);
     }
   }
 
   async function buscarFeedbacks(idGroot: string) {
-    try {
-      const { data } = await supabase
-        .from('feedbacks')
-        .select('feedback_id, tipo, classificacao, observacao, registrado_em')
-        .eq('id_groot', idGroot)
-        .order('registrado_em', { ascending: false })
-        .limit(3);
-      if (data) setFeedbacksRecentes(data as FeedbackBreve[]);
-    } catch (e) {
-      console.error(e);
-    }
+    const { data } = await supabase
+      .from('feedbacks')
+      .select('feedback_id, tipo, classificacao, observacao, registrado_em')
+      .eq('id_groot', idGroot)
+      .order('registrado_em', { ascending: false })
+      .limit(3);
+    if (data) setFeedbacksRecentes(data as FeedbackBreve[]);
   }
 
   async function excluir() {
     if (!colaborador) return;
-    const confirma = window.confirm(`Deseja excluir ${colaborador.nome}?`);
-    if (!confirma) return;
+    const ok = await window.showConfirm({
+      title: 'Excluir colaborador',
+      message: `Deseja excluir ${colaborador.nome}? Essa ação não pode ser desfeita.`,
+      confirmText: 'Excluir',
+      danger: true,
+    });
+    if (!ok) return;
 
-    const { error } = await supabase
-      .from('colaboradores')
-      .delete()
-      .eq('id', colaborador.id);
-
+    const { error } = await supabase.from('colaboradores').delete().eq('id', colaborador.id);
     if (error) {
-      alert('Erro: ' + error.message);
+      window.showToast('error', 'Erro: ' + error.message);
     } else {
+      window.showToast('success', 'Colaborador removido');
       router.push('/meu-time');
     }
   }
@@ -320,28 +268,11 @@ export default function DetalheColaboradorPage() {
 
   const stats = (() => {
     const validos = historicoFiltrado.filter((h) => h.prod_liquida > 0);
-    if (validos.length === 0)
-      return {
-        totalDias: 0,
-        mediaLiquida: 0,
-        mediaImpacto: 0,
-        diasSupera: 0,
-        diasAlinhado: 0,
-        diasAbaixo: 0,
-        melhorDia: null,
-        piorDia: null,
-        ultimoStatus: 'Sem dados',
-      };
-
+    if (validos.length === 0) return null;
     const somaLiq = validos.reduce((s, h) => s + h.prod_liquida, 0);
     const somaImp = validos.reduce((s, h) => s + h.impacto_net, 0);
-
-    const melhorDia = validos.reduce((max, h) =>
-      h.prod_liquida > max.prod_liquida ? h : max
-    );
-    const piorDia = validos.reduce((min, h) =>
-      h.prod_liquida < min.prod_liquida ? h : min
-    );
+    const melhorDia = validos.reduce((max, h) => (h.prod_liquida > max.prod_liquida ? h : max));
+    const piorDia = validos.reduce((min, h) => (h.prod_liquida < min.prod_liquida ? h : min));
 
     return {
       totalDias: validos.length,
@@ -350,82 +281,19 @@ export default function DetalheColaboradorPage() {
       diasSupera: validos.filter((h) => h.status_meta === 'Supera').length,
       diasAlinhado: validos.filter((h) => h.status_meta === 'Alinhado').length,
       diasAbaixo: validos.filter((h) => h.status_meta === 'Abaixo').length,
-      melhorDia: melhorDia,
-      piorDia: piorDia,
+      melhorDia,
+      piorDia,
       ultimoStatus: historicoFiltrado[0]?.status_meta || 'Sem dados',
     };
   })();
 
-  // 🎯 CÁLCULO DPMO — cruza dpmo_eventos (DIF) com historico (UNIDADES)
-  const dpmoPorSemana = (() => {
-    if (dpmoEventos.length === 0) return [];
-
-    // Agrupa DIF por semana/ano
-    const difPorSemana: Record<string, { def: number; ano: number; semana: number }> = {};
-    dpmoEventos.forEach((e) => {
-      const chave = `${e.ano}-S${e.semana}`;
-      if (!difPorSemana[chave]) {
-        difPorSemana[chave] = { def: 0, ano: e.ano, semana: e.semana };
-      }
-      difPorSemana[chave].def += e.qtd_dif;
-    });
-
-    // Agrupa UNIDADES (de historico) por semana/ano
-    const unidPorSemana: Record<string, number> = {};
-    historico.forEach((h) => {
-      const { semana, ano } = getSemanaIso(h.data_referencia);
-      const chave = `${ano}-S${semana}`;
-      unidPorSemana[chave] = (unidPorSemana[chave] || 0) + h.unidades;
-    });
-
-    // Junta tudo
-    const chavesUnicas = new Set<string>();
-    Object.keys(difPorSemana).forEach((k) => chavesUnicas.add(k));
-    Object.keys(unidPorSemana).forEach((k) => chavesUnicas.add(k));
-
-    const result: Array<{
-      chave: string;
-      ano: number;
-      semana: number;
-      defeitos: number;
-      unidades: number;
-      dpmo: number;
-    }> = [];
-
-    chavesUnicas.forEach((k) => {
-      const dif = difPorSemana[k];
-      const unid = unidPorSemana[k] || 0;
-      const defeitos = dif?.def || 0;
-      const dpmo = unid > 0 ? Math.round((defeitos / unid) * 1_000_000) : 0;
-
-      // Extrai ano/semana
-      const [anoStr, semStr] = k.split('-S');
-      result.push({
-        chave: k,
-        ano: parseInt(anoStr),
-        semana: parseInt(semStr),
-        defeitos,
-        unidades: unid,
-        dpmo,
-      });
-    });
-
-    // Ordena por semana DECRESCENTE (mais recente primeiro)
-    return result.sort((a, b) => {
-      if (a.ano !== b.ano) return b.ano - a.ano;
-      return b.semana - a.semana;
-    });
-  })();
-
-  // DPMO Total (todo o período)
-  const dpmoTotal = (() => {
-    const totalDef = dpmoEventos.reduce((s, e) => s + e.qtd_dif, 0);
-    const totalUnid = historico.reduce((s, h) => s + h.unidades, 0);
-    return {
-      defeitos: totalDef,
-      unidades: totalUnid,
-      dpmo: totalUnid > 0 ? Math.round((totalDef / totalUnid) * 1_000_000) : 0,
-    };
+  // 🎯 DPMO — usa dpmo_agregado (oficial do Looker)
+  const dpmoMedio = (() => {
+    if (dpmoAgregado.length === 0) return null;
+    const validos = dpmoAgregado.filter((d) => d.dpmo > 0);
+    if (validos.length === 0) return null;
+    const soma = validos.reduce((s, d) => s + d.dpmo, 0);
+    return Math.round(soma / validos.length);
   })();
 
   if (loading) {
@@ -440,13 +308,9 @@ export default function DetalheColaboradorPage() {
   if (erro || !colaborador) {
     return (
       <div className="space-y-6">
-        <Link href="/meu-time" className="text-gray-400 hover:text-white">
-          ← Voltar
-        </Link>
+        <Link href="/meu-time" className="text-gray-400 hover:text-white">← Voltar</Link>
         <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6">
-          <p className="text-red-400 font-bold">
-            {erro || 'Colaborador não encontrado'}
-          </p>
+          <p className="text-red-400 font-bold">{erro || 'Colaborador não encontrado'}</p>
         </div>
       </div>
     );
@@ -454,70 +318,41 @@ export default function DetalheColaboradorPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/meu-time"
-        className="text-gray-400 hover:text-white transition-colors inline-flex items-center gap-2"
-      >
+      <Link href="/meu-time" className="text-gray-400 hover:text-white transition-colors inline-flex items-center gap-2">
         ← Voltar para MEU TIME
       </Link>
 
       {/* Header */}
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-start gap-6 flex-wrap">
-          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-3xl flex-shrink-0">
+          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-3xl flex-shrink-0 shadow-lg shadow-yellow-500/30">
             {iniciais(colaborador.nome)}
           </div>
 
           <div className="flex-1 min-w-0">
-            <h1 className="text-3xl font-black text-white mb-2">
-              {colaborador.nome}
-            </h1>
-            <p className="text-gray-400 mb-3">
-              {colaborador.cargo || 'Sem cargo cadastrado'}
-            </p>
-
+            <h1 className="text-3xl font-black text-white mb-2">{colaborador.nome}</h1>
+            <p className="text-gray-400 mb-3">{colaborador.cargo || 'Sem cargo cadastrado'}</p>
             <div className="flex flex-wrap gap-2">
-              <span
-                className={`text-xs px-3 py-1 rounded-full font-bold ${
-                  colaborador.status === 'Ativo'
-                    ? 'bg-green-500/20 text-green-400'
-                    : colaborador.status === 'Afastado'
-                    ? 'bg-yellow-500/20 text-yellow-400'
-                    : 'bg-gray-500/20 text-gray-400'
-                }`}
-              >
+              <span className={`text-xs px-3 py-1 rounded-full font-bold ${colaborador.status === 'Ativo' ? 'bg-green-500/20 text-green-400' : colaborador.status === 'Afastado' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}`}>
                 {colaborador.status}
               </span>
               {colaborador.processo && (
-                <span className="text-xs px-3 py-1 rounded-full font-bold bg-cyan-500/20 text-cyan-400">
-                  {colaborador.processo}
-                </span>
+                <span className="text-xs px-3 py-1 rounded-full font-bold bg-cyan-500/20 text-cyan-400">{colaborador.processo}</span>
               )}
               {colaborador.carreira && (
-                <span className="text-xs px-3 py-1 rounded-full font-bold bg-[#FFD700]/20 text-[#FFD700]">
-                  {colaborador.carreira}
-                </span>
+                <span className="text-xs px-3 py-1 rounded-full font-bold bg-[#FFD700]/20 text-[#FFD700]">{colaborador.carreira}</span>
               )}
             </div>
           </div>
 
           <div className="flex flex-col gap-2">
-            <Link
-              href={`/meu-time/${colaborador.id}/feedbacks`}
-              className="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2"
-            >
+            <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2">
               💬 Feedbacks
             </Link>
-            <Link
-              href={`/meu-time/${colaborador.id}/editar`}
-              className="bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm"
-            >
+            <Link href={`/meu-time/${colaborador.id}/editar`} className="bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm">
               ✏️ Editar
             </Link>
-            <button
-              onClick={excluir}
-              className="bg-red-500/10 text-red-400 font-bold px-4 py-2 rounded-lg hover:bg-red-500/20 transition-colors text-sm"
-            >
+            <button onClick={excluir} className="bg-red-500/10 text-red-400 font-bold px-4 py-2 rounded-lg hover:bg-red-500/20 transition-colors text-sm">
               🗑️ Excluir
             </button>
           </div>
@@ -525,396 +360,246 @@ export default function DetalheColaboradorPage() {
       </div>
 
       {/* Estatísticas */}
-      {!loadingHistorico && stats.totalDias > 0 && (
+      {!loadingHistorico && stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">📊</span>
-              <span className="text-3xl font-black text-white">
-                {stats.mediaLiquida}
-              </span>
+              <span className="text-3xl font-black text-white">{stats.mediaLiquida}</span>
             </div>
             <p className="text-xs text-gray-400">Líquida média (pç/h)</p>
           </div>
-
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">📈</span>
-              <span
-                className={`text-3xl font-black ${
-                  stats.mediaImpacto > 0 ? 'text-green-400' : 'text-red-400'
-                }`}
-              >
-                {stats.mediaImpacto > 0 ? '+' : ''}
-                {stats.mediaImpacto}%
+              <span className={`text-3xl font-black ${stats.mediaImpacto > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {stats.mediaImpacto > 0 ? '+' : ''}{stats.mediaImpacto}%
               </span>
             </div>
             <p className="text-xs text-gray-400">Impacto NET médio</p>
           </div>
-
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">📅</span>
-              <span className="text-3xl font-black text-cyan-400">
-                {stats.totalDias}
-              </span>
+              <span className="text-3xl font-black text-cyan-400">{stats.totalDias}</span>
             </div>
             <p className="text-xs text-gray-400">Dias com dados</p>
           </div>
-
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4">
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">🎯</span>
-              <span
-                className={`text-xs px-2 py-1 rounded-full font-bold ${corStatus(
-                  stats.ultimoStatus
-                )}`}
-              >
-                {stats.ultimoStatus}
-              </span>
+              <span className={`text-xs px-2 py-1 rounded-full font-bold ${corStatus(stats.ultimoStatus)}`}>{stats.ultimoStatus}</span>
             </div>
             <p className="text-xs text-gray-400">Último status</p>
           </div>
         </div>
       )}
 
-      {/* 🎯 SEÇÃO DPMO — calculado cruzando as 2 tabelas */}
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
+      {/* 🎯 SEÇÃO DPMO — usa dpmo_agregado (oficial Looker) */}
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-lg font-bold text-purple-400 flex items-center gap-2">
             📊 DPMO (Qualidade)
           </h2>
-          <span className="text-xs text-gray-500">
-            Cálculo: (Σ Defeitos / Σ Unidades) × 1.000.000
-          </span>
+          <span className="text-xs text-gray-500">Fonte: Looker (Tabela Dinâmica)</span>
         </div>
 
-        {dpmoEventos.length === 0 && historico.length === 0 ? (
+        {dpmoAgregado.length === 0 ? (
           <div className="text-center py-8 text-gray-400 text-sm">
             <span className="text-4xl block mb-2">📭</span>
             <p>Sem dados de DPMO ainda.</p>
             <p className="text-xs text-gray-500 mt-1">
-              Suba o CSV INVENTÁRIO DPMO e o CSV de PRODUTIVIDADE pra ver os dados aqui.
+              Sobe o CSV TABELA DINÂMICA em MEU TIME → 📊 Upload DPMO
             </p>
           </div>
         ) : (
           <>
-            {/* Total Geral */}
-            <div
-              className={`rounded-lg p-4 border ${
-                dpmoTotal.dpmo > metaIma
-                  ? 'bg-red-500/10 border-red-500/30'
-                  : 'bg-green-500/10 border-green-500/30'
-              }`}
-            >
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                  <p className="text-xs text-gray-400 uppercase font-bold mb-1">
-                    Total Geral
-                  </p>
-                  <p
-                    className={`text-4xl font-black font-mono ${
-                      dpmoTotal.dpmo > metaIma
-                        ? 'text-red-400'
-                        : 'text-green-400'
-                    }`}
-                  >
-                    {dpmoTotal.dpmo.toLocaleString('pt-BR')}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {dpmoTotal.defeitos} defeitos / {dpmoTotal.unidades.toLocaleString('pt-BR')} unidades
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-gray-400">Meta IMA</p>
-                  <p className="text-2xl font-bold text-white">{metaIma}</p>
-                  <p
-                    className={`text-xs font-bold mt-1 ${
-                      dpmoTotal.dpmo > metaIma ? 'text-red-400' : 'text-green-400'
-                    }`}
-                  >
-                    {dpmoTotal.dpmo > metaIma ? '⚠️ acima da meta' : '✓ na meta'}
-                  </p>
+            {/* Total / Média */}
+            {dpmoMedio !== null && (
+              <div className={`rounded-lg p-4 border ${dpmoMedio > metaIma ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <p className="text-xs text-gray-400 uppercase font-bold mb-1">DPMO Médio</p>
+                    <p className={`text-4xl font-black font-mono ${dpmoMedio > metaIma ? 'text-red-400' : 'text-green-400'}`}>
+                      {dpmoMedio.toLocaleString('pt-BR')}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Média de {dpmoAgregado.length} semana(s) registrada(s)
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-gray-400">Meta IMA</p>
+                    <p className="text-2xl font-bold text-white">{metaIma}</p>
+                    <p className={`text-xs font-bold mt-1 ${dpmoMedio > metaIma ? 'text-red-400' : 'text-green-400'}`}>
+                      {dpmoMedio > metaIma ? '⚠️ acima da meta' : '✓ na meta'}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Tabela por semana */}
-            {dpmoPorSemana.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
-                      <th className="py-2 pr-2">Período</th>
-                      <th className="py-2 pr-2 text-right">Defeitos</th>
-                      <th className="py-2 pr-2 text-right">Unidades</th>
-                      <th className="py-2 pr-2 text-right">DPMO</th>
-                      <th className="py-2 pr-2">Status</th>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
+                    <th className="py-2 pr-2">Período</th>
+                    <th className="py-2 pr-2">Processo</th>
+                    <th className="py-2 pr-2 text-right">DPMO</th>
+                    <th className="py-2 pr-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dpmoAgregado.slice(0, 12).map((d) => (
+                    <tr key={d.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a]">
+                      <td className="py-2 pr-2 text-white">Semana {d.semana} / {d.ano}</td>
+                      <td className="py-2 pr-2">
+                        <span className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full font-bold">{d.processo}</span>
+                      </td>
+                      <td className={`py-2 pr-2 text-right font-mono font-bold ${d.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
+                        {d.dpmo.toLocaleString('pt-BR')}
+                      </td>
+                      <td className="py-2 pr-2">
+                        {d.dpmo > metaIma ? (
+                          <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-red-500/20 text-red-400">Acima</span>
+                        ) : (
+                          <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-green-500/20 text-green-400">Na meta</span>
+                        )}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {dpmoPorSemana.slice(0, 12).map((s) => (
-                      <tr
-                        key={s.chave}
-                        className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a]"
-                      >
-                        <td className="py-2 pr-2 text-white">
-                          Semana {s.semana} / {s.ano}
-                        </td>
-                        <td className="py-2 pr-2 text-right text-gray-300 font-mono">
-                          {s.defeitos}
-                        </td>
-                        <td className="py-2 pr-2 text-right text-gray-300 font-mono">
-                          {s.unidades.toLocaleString('pt-BR')}
-                        </td>
-                        <td
-                          className={`py-2 pr-2 text-right font-mono font-bold ${
-                            s.dpmo > metaIma ? 'text-red-400' : 'text-green-400'
-                          }`}
-                        >
-                          {s.dpmo > 0 ? s.dpmo.toLocaleString('pt-BR') : '-'}
-                        </td>
-                        <td className="py-2 pr-2">
-                          {s.dpmo === 0 ? (
-                            <span className="text-xs text-gray-500">
-                              Sem dados
-                            </span>
-                          ) : s.dpmo > metaIma ? (
-                            <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-red-500/20 text-red-400">
-                              Acima
-                            </span>
-                          ) : (
-                            <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-green-500/20 text-green-400">
-                              Na meta
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Alerta se faltam dados */}
-            {dpmoEventos.length > 0 && historico.length === 0 && (
-              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm">
-                <p className="text-yellow-400 font-bold">
-                  ⚠️ Faltam dados de Produtividade
-                </p>
-                <p className="text-yellow-300 text-xs mt-1">
-                  Os defeitos foram detectados mas não tem CSV de produtividade
-                  pra calcular o DPMO. Sobe o CSV de produtividade do mesmo período.
-                </p>
-              </div>
-            )}
-            {historico.length > 0 && dpmoEventos.length === 0 && (
-              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm">
-                <p className="text-yellow-400 font-bold">
-                  ⚠️ Faltam dados de DPMO
-                </p>
-                <p className="text-yellow-300 text-xs mt-1">
-                  Tem produtividade mas falta o CSV INVENTÁRIO DPMO pra ver os defeitos.
-                  Sobe em MEU TIME → 📊 Upload DPMO.
-                </p>
-              </div>
-            )}
+                  ))}
+                </tbody>
+              </table>
+              {dpmoAgregado.length > 12 && (
+                <p className="text-xs text-gray-500 text-center mt-2">... e mais {dpmoAgregado.length - 12} semana(s)</p>
+              )}
+            </div>
           </>
         )}
       </div>
 
       {/* Distribuição */}
-      {!loadingHistorico && stats.totalDias > 0 && (
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
-          <h3 className="text-sm font-bold text-gray-400 mb-4">
-            DISTRIBUIÇÃO DE STATUS
-          </h3>
+      {!loadingHistorico && stats && (
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+          <h3 className="text-sm font-bold text-gray-400 mb-4">DISTRIBUIÇÃO DE STATUS</h3>
           <div className="grid grid-cols-3 gap-4">
             <div className="text-center">
-              <div className="text-3xl font-black text-green-400">
-                {stats.diasSupera}
-              </div>
+              <div className="text-3xl font-black text-green-400">{stats.diasSupera}</div>
               <div className="text-xs text-gray-500 mt-1">Supera</div>
             </div>
             <div className="text-center border-x border-[#2a2a2a]">
-              <div className="text-3xl font-black text-blue-400">
-                {stats.diasAlinhado}
-              </div>
+              <div className="text-3xl font-black text-blue-400">{stats.diasAlinhado}</div>
               <div className="text-xs text-gray-500 mt-1">Alinhado</div>
             </div>
             <div className="text-center">
-              <div className="text-3xl font-black text-red-400">
-                {stats.diasAbaixo}
-              </div>
+              <div className="text-3xl font-black text-red-400">{stats.diasAbaixo}</div>
               <div className="text-xs text-gray-500 mt-1">Abaixo</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Melhor e pior dia */}
-      {!loadingHistorico && stats.melhorDia && stats.piorDia && (
+      {/* Melhor / Pior */}
+      {!loadingHistorico && stats && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4">
-            <p className="text-xs text-green-400 font-bold mb-1">
-              🏆 MELHOR DIA
-            </p>
-            <p className="text-2xl font-black text-white">
-              {stats.melhorDia.prod_liquida} pç/h
-            </p>
-            <p className="text-xs text-gray-400">
-              {formatarData(stats.melhorDia.data_referencia)}
-            </p>
+          <div className="bg-gradient-to-br from-green-500/10 to-green-600/5 border border-green-500/30 rounded-2xl p-4">
+            <p className="text-xs text-green-400 font-bold mb-1">🏆 MELHOR DIA</p>
+            <p className="text-2xl font-black text-white">{stats.melhorDia.prod_liquida} pç/h</p>
+            <p className="text-xs text-gray-400">{formatarData(stats.melhorDia.data_referencia)}</p>
           </div>
-          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4">
+          <div className="bg-gradient-to-br from-red-500/10 to-red-600/5 border border-red-500/30 rounded-2xl p-4">
             <p className="text-xs text-red-400 font-bold mb-1">📉 PIOR DIA</p>
-            <p className="text-2xl font-black text-white">
-              {stats.piorDia.prod_liquida} pç/h
-            </p>
-            <p className="text-xs text-gray-400">
-              {formatarData(stats.piorDia.data_referencia)}
-            </p>
+            <p className="text-2xl font-black text-white">{stats.piorDia.prod_liquida} pç/h</p>
+            <p className="text-xs text-gray-400">{formatarData(stats.piorDia.data_referencia)}</p>
           </div>
         </div>
       )}
 
       {/* Feedbacks recentes */}
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-[#FFD700]">
-            💬 Feedbacks Recentes
-          </h2>
-          <Link
-            href={`/meu-time/${colaborador.id}/feedbacks`}
-            className="text-sm text-blue-400 hover:text-blue-300 transition-colors font-bold"
-          >
-            Ver todos →
-          </Link>
+          <h2 className="text-lg font-bold text-[#FFD700]">💬 Feedbacks Recentes</h2>
+          <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="text-sm text-blue-400 hover:text-blue-300 transition-colors font-bold">Ver todos →</Link>
         </div>
 
         {feedbacksRecentes.length === 0 ? (
           <div className="text-center py-8">
             <span className="text-4xl block mb-2">📭</span>
             <p className="text-gray-400 text-sm mb-3">Nenhum feedback ainda</p>
-            <Link
-              href={`/meu-time/${colaborador.id}/feedbacks`}
-              className="inline-block bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm"
-            >
+            <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="inline-block bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm">
               + Registrar primeiro feedback
             </Link>
           </div>
         ) : (
           <div className="space-y-3">
             {feedbacksRecentes.map((fb) => (
-              <div
-                key={fb.feedback_id}
-                className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-4"
-              >
+              <div key={fb.feedback_id} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-4">
                 <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-xl">{iconeTipo(fb.tipo)}</span>
-                    <span className="text-sm font-bold text-white">
-                      {fb.tipo}
-                    </span>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(
-                        fb.classificacao
-                      )}`}
-                    >
-                      {fb.classificacao}
-                    </span>
+                    <span className="text-sm font-bold text-white">{fb.tipo}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(fb.classificacao)}`}>{fb.classificacao}</span>
                   </div>
-                  <span className="text-xs text-gray-500">
-                    {tempoRelativo(fb.registrado_em)}
-                  </span>
+                  <span className="text-xs text-gray-500">{tempoRelativo(fb.registrado_em)}</span>
                 </div>
-                <p className="text-gray-300 text-sm line-clamp-2">
-                  {fb.observacao}
-                </p>
+                <p className="text-gray-300 text-sm line-clamp-2">{fb.observacao}</p>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Dados cadastrais + Datas */}
+      {/* Dados + Datas */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
-          <h2 className="text-lg font-bold text-[#FFD700] mb-4">
-            📋 Dados Cadastrais
-          </h2>
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+          <h2 className="text-lg font-bold text-[#FFD700] mb-4">📋 Dados Cadastrais</h2>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between border-b border-[#2a2a2a] pb-2">
               <span className="text-gray-400">ID Groot</span>
-              <span className="text-white font-mono">
-                {colaborador.id_groot}
-              </span>
+              <span className="text-white font-mono">{colaborador.id_groot}</span>
             </div>
             <div className="flex justify-between border-b border-[#2a2a2a] pb-2">
               <span className="text-gray-400">Cargo</span>
-              <span className="text-white">
-                {colaborador.cargo || 'Não informado'}
-              </span>
+              <span className="text-white">{colaborador.cargo || 'Não informado'}</span>
             </div>
             <div className="flex justify-between border-b border-[#2a2a2a] pb-2">
               <span className="text-gray-400">Processo</span>
-              <span className="text-white">
-                {colaborador.processo || 'Não informado'}
-              </span>
+              <span className="text-white">{colaborador.processo || 'Não informado'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-400">Carreira</span>
-              <span className="text-[#FFD700] font-bold">
-                {colaborador.carreira || 'Não informado'}
-              </span>
+              <span className="text-[#FFD700] font-bold">{colaborador.carreira || 'Não informado'}</span>
             </div>
           </div>
         </div>
 
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
-          <h2 className="text-lg font-bold text-[#FFD700] mb-4">
-            📅 Datas Importantes
-          </h2>
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+          <h2 className="text-lg font-bold text-[#FFD700] mb-4">📅 Datas Importantes</h2>
           <div className="space-y-3 text-sm">
             <div>
               <p className="text-gray-400 mb-1">Data de Admissão</p>
-              <p className="text-white">
-                {formatarData(colaborador.data_admissao)}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                {mesesEmpresa(colaborador.data_admissao)} na empresa
-              </p>
+              <p className="text-white">{formatarData(colaborador.data_admissao)}</p>
+              <p className="text-xs text-gray-500 mt-1">{mesesEmpresa(colaborador.data_admissao)} na empresa</p>
             </div>
             <div className="pt-3 border-t border-[#2a2a2a]">
               <p className="text-gray-400 mb-1">Aniversário</p>
-              <p className="text-white">
-                {formatarData(colaborador.aniversario)}
-              </p>
-              <p className="text-xs text-pink-400 mt-1">
-                🎂 {diasParaAniversario(colaborador.aniversario)}
-              </p>
+              <p className="text-white">{formatarData(colaborador.aniversario)}</p>
+              <p className="text-xs text-pink-400 mt-1">🎂 {diasParaAniversario(colaborador.aniversario)}</p>
             </div>
           </div>
         </div>
       </div>
 
       {/* Histórico de produção */}
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6">
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <h2 className="text-lg font-bold text-[#FFD700]">
-            📊 Histórico de Produção
-          </h2>
-
+          <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico de Produção</h2>
           <div className="flex gap-1 bg-[#0a0a0a] rounded-lg p-1">
             {(['7', '30', '90', 'tudo'] as const).map((periodo) => (
               <button
                 key={periodo}
                 onClick={() => setFiltroPeriodo(periodo)}
-                className={`px-3 py-1.5 text-xs font-bold rounded transition-all ${
-                  filtroPeriodo === periodo
-                    ? 'bg-[#FFD700] text-black'
-                    : 'text-gray-400 hover:text-white'
-                }`}
+                className={`px-3 py-1.5 text-xs font-bold rounded transition-all ${filtroPeriodo === periodo ? 'bg-[#FFD700] text-black' : 'text-gray-400 hover:text-white'}`}
               >
                 {periodo === 'tudo' ? 'Tudo' : `${periodo}d`}
               </button>
@@ -930,18 +615,7 @@ export default function DetalheColaboradorPage() {
         ) : historicoFiltrado.length === 0 ? (
           <div className="text-center py-12">
             <span className="text-6xl block mb-4">📭</span>
-            <p className="text-gray-400 mb-2">
-              Sem dados de produção no período
-            </p>
-            <p className="text-xs text-gray-500">
-              Faça upload de um CSV em MEU TIME → 📤 Upload CSV
-            </p>
-            <Link
-              href="/meu-time/upload"
-              className="inline-block mt-4 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 px-4 py-2 rounded-lg text-sm font-bold transition-colors"
-            >
-              📤 Subir CSV agora
-            </Link>
+            <p className="text-gray-400 mb-2">Sem dados de produção no período</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -961,47 +635,19 @@ export default function DetalheColaboradorPage() {
               </thead>
               <tbody>
                 {historicoFiltrado.map((h) => (
-                  <tr
-                    key={h.id}
-                    className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors"
-                  >
-                    <td className="py-3 pr-3 text-white font-mono">
-                      {formatarDataCurta(h.data_referencia)}
-                    </td>
-                    <td className="py-3 pr-3 text-right text-white font-mono font-bold">
-                      {h.prod_liquida.toFixed(0)}
-                    </td>
-                    <td className="py-3 pr-3 text-right text-gray-300 font-mono">
-                      {h.unidades.toLocaleString('pt-BR')}
-                    </td>
-                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">
-                      {h.tempo_processo || '-'}
-                    </td>
-                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">
-                      {h.tempo_efetivo || '-'}
-                    </td>
-                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">
-                      {h.tempo_ocioso || '-'}
-                    </td>
-                    <td className="py-3 pr-3 text-right text-gray-300 text-xs">
-                      {h.utilizacao || '-'}
-                    </td>
-                    <td
-                      className={`py-3 pr-3 text-right font-mono font-bold ${
-                        h.impacto_net > 0 ? 'text-green-400' : 'text-red-400'
-                      }`}
-                    >
-                      {h.impacto_net > 0 ? '+' : ''}
-                      {h.impacto_net.toFixed(1)}%
+                  <tr key={h.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors">
+                    <td className="py-3 pr-3 text-white font-mono">{formatarDataCurta(h.data_referencia)}</td>
+                    <td className="py-3 pr-3 text-right text-white font-mono font-bold">{h.prod_liquida.toFixed(0)}</td>
+                    <td className="py-3 pr-3 text-right text-gray-300 font-mono">{h.unidades.toLocaleString('pt-BR')}</td>
+                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_processo || '-'}</td>
+                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_efetivo || '-'}</td>
+                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_ocioso || '-'}</td>
+                    <td className="py-3 pr-3 text-right text-gray-300 text-xs">{h.utilizacao || '-'}</td>
+                    <td className={`py-3 pr-3 text-right font-mono font-bold ${h.impacto_net > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {h.impacto_net > 0 ? '+' : ''}{h.impacto_net.toFixed(1)}%
                     </td>
                     <td className="py-3 pr-3">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(
-                          h.status_meta
-                        )}`}
-                      >
-                        {h.status_meta}
-                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(h.status_meta)}`}>{h.status_meta}</span>
                     </td>
                   </tr>
                 ))}
