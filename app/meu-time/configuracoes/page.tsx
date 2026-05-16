@@ -10,7 +10,37 @@ type ConfigItem = {
   descricao: string | null;
 };
 
-// Agrupamento visual das metas
+// Valores padrão MELI (fallback se a tabela estiver vazia)
+const PADRAO_MELI: Record<string, string> = {
+  meta_checkin_base: '296',
+  meta_checkin_alinhado_max: '310',
+  meta_p2m_base: '329',
+  meta_p2m_alinhado_max: '350',
+  meta_ocupacao_checkin: '75',
+  meta_ocupacao_p2m: '80',
+  meta_ima_checkin: '1567',
+  meta_ima_p2m: '1567',
+  offender_streak_min: '3',
+  birthday_alert_days: '7',
+  adaptacao_meses: '2',
+  abs_max_promocao: '3',
+};
+
+const DESCRICOES: Record<string, string> = {
+  meta_checkin_base: 'Líquida mínima Checkin (peças/hora)',
+  meta_checkin_alinhado_max: 'Líquida máxima alinhado Checkin',
+  meta_p2m_base: 'Líquida mínima P2M (peças/hora)',
+  meta_p2m_alinhado_max: 'Líquida máxima alinhado P2M',
+  meta_ocupacao_checkin: 'Ocupação mínima Checkin (%)',
+  meta_ocupacao_p2m: 'Ocupação mínima P2M (%)',
+  meta_ima_checkin: 'IMA máximo Checkin (PPM - menor é melhor)',
+  meta_ima_p2m: 'IMA máximo P2M (PPM - menor é melhor)',
+  offender_streak_min: 'Dias seguidos abaixo pra virar ofensor',
+  birthday_alert_days: 'Dias antes do aniversário pra alertar',
+  adaptacao_meses: 'Meses iniciais sem virar ofensor (adaptação)',
+  abs_max_promocao: 'ABS máximo (%) pra ficar apto a promoção',
+};
+
 const GRUPOS = [
   {
     titulo: '🎯 Metas de Líquida (peças/hora)',
@@ -56,6 +86,7 @@ export default function ConfiguracoesPage() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState(false);
+  const [vazioInicial, setVazioInicial] = useState(false);
 
   useEffect(() => {
     buscarConfig();
@@ -64,22 +95,35 @@ export default function ConfiguracoesPage() {
   async function buscarConfig() {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('config')
-        .select('*');
+      console.log('🔄 Buscando configurações...');
+
+      const { data, error } = await supabase.from('config').select('*');
 
       if (error) {
+        console.error('❌ Erro:', error);
         setErro(error.message);
-      } else if (data) {
-        const map: Record<string, string> = {};
+        // Mesmo com erro, mostra os padrões pra evitar tela vazia
+        setConfig({ ...PADRAO_MELI });
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn('⚠️ Tabela config está vazia. Carregando padrões MELI.');
+        setVazioInicial(true);
+        setConfig({ ...PADRAO_MELI });
+      } else {
+        const map: Record<string, string> = { ...PADRAO_MELI };
         (data as ConfigItem[]).forEach((item) => {
           map[item.chave] = item.valor;
         });
+        console.log('✅ Configurações carregadas:', Object.keys(map).length);
         setConfig(map);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Erro desconhecido';
+      console.error('❌ Erro geral:', e);
       setErro(msg);
+      setConfig({ ...PADRAO_MELI });
     } finally {
       setLoading(false);
     }
@@ -90,30 +134,39 @@ export default function ConfiguracoesPage() {
   }
 
   async function salvarTudo() {
+    console.log('💾 Salvando configurações...');
     setSalvando(true);
     setErro(null);
     setSucesso(false);
 
     try {
-      // Faz UPDATE de cada chave
-      const promises = Object.entries(config).map(([chave, valor]) =>
-        supabase
-          .from('config')
-          .update({ valor: String(valor), atualizado_em: new Date().toISOString() })
-          .eq('chave', chave)
-      );
+      // Monta array com TODAS as chaves
+      const linhas = Object.entries(config).map(([chave, valor]) => ({
+        chave,
+        valor: String(valor || '0'),
+        descricao: DESCRICOES[chave] || null,
+        atualizado_em: new Date().toISOString(),
+      }));
 
-      const resultados = await Promise.all(promises);
-      const erros = resultados.filter((r) => r.error);
+      console.log('📦 Vai salvar:', linhas);
 
-      if (erros.length > 0) {
-        setErro('Erro ao salvar: ' + erros.map((r) => r.error?.message).join('; '));
+      // UPSERT: insere se não existe, atualiza se existe
+      const { error } = await supabase
+        .from('config')
+        .upsert(linhas, { onConflict: 'chave' });
+
+      if (error) {
+        console.error('❌ Erro ao salvar:', error);
+        setErro('Erro ao salvar: ' + error.message);
       } else {
+        console.log('✅ Salvo com sucesso!');
         setSucesso(true);
-        setTimeout(() => setSucesso(false), 3000);
+        setVazioInicial(false);
+        setTimeout(() => setSucesso(false), 3500);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Erro desconhecido';
+      console.error('❌ Erro geral:', e);
       setErro(msg);
     } finally {
       setSalvando(false);
@@ -125,21 +178,7 @@ export default function ConfiguracoesPage() {
       'Deseja restaurar todas as metas pros valores padrão MELI?'
     );
     if (!confirma) return;
-
-    setConfig({
-      meta_checkin_base: '296',
-      meta_checkin_alinhado_max: '310',
-      meta_p2m_base: '329',
-      meta_p2m_alinhado_max: '350',
-      meta_ocupacao_checkin: '75',
-      meta_ocupacao_p2m: '80',
-      meta_ima_checkin: '1567',
-      meta_ima_p2m: '1567',
-      offender_streak_min: '3',
-      birthday_alert_days: '7',
-      adaptacao_meses: '2',
-      abs_max_promocao: '3',
-    });
+    setConfig({ ...PADRAO_MELI });
   }
 
   if (loading) {
@@ -153,7 +192,6 @@ export default function ConfiguracoesPage() {
 
   return (
     <div className="space-y-6 max-w-4xl">
-      {/* Header */}
       <Link
         href="/meu-time"
         className="text-gray-400 hover:text-white transition-colors inline-flex items-center gap-2"
@@ -170,11 +208,29 @@ export default function ConfiguracoesPage() {
         </p>
       </div>
 
-      {/* Mensagens */}
+      {/* Aviso se tabela tava vazia */}
+      {vazioInicial && (
+        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-4 flex items-start gap-3">
+          <span className="text-2xl">⚠️</span>
+          <div>
+            <p className="text-yellow-400 font-bold mb-1">
+              Primeira configuração
+            </p>
+            <p className="text-yellow-300 text-sm">
+              As metas estão com os valores padrão MELI. Clica em{' '}
+              <strong>Salvar todas configurações</strong> abaixo pra registrar
+              tudo no banco.
+            </p>
+          </div>
+        </div>
+      )}
+
       {sucesso && (
         <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4 flex items-center gap-3">
           <span className="text-2xl">✅</span>
-          <p className="text-green-400 font-bold">Configurações salvas!</p>
+          <p className="text-green-400 font-bold">
+            Configurações salvas! Vai persistir mesmo fechando o app.
+          </p>
         </div>
       )}
 
@@ -188,7 +244,6 @@ export default function ConfiguracoesPage() {
         </div>
       )}
 
-      {/* Grupos de metas */}
       {GRUPOS.map((grupo) => (
         <div
           key={grupo.titulo}
@@ -221,7 +276,6 @@ export default function ConfiguracoesPage() {
         </div>
       ))}
 
-      {/* Botões de ação */}
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 flex flex-wrap gap-3 sticky bottom-4">
         <button
           onClick={salvarTudo}
@@ -239,7 +293,6 @@ export default function ConfiguracoesPage() {
         </button>
       </div>
 
-      {/* Nota explicativa */}
       <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
         <p className="font-bold mb-2">ℹ️ Como o sistema usa essas metas:</p>
         <ul className="space-y-1 list-disc pl-5">
