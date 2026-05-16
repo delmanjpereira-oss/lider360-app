@@ -6,8 +6,13 @@ import Toaster from './components/Toaster';
 import ConfirmModal from './components/ConfirmModal';
 
 export const metadata: Metadata = {
-  title: 'LIDER 360 v2',
+  title: '🚀 LIDER 360',
   description: 'Sistema completo de gestão do time MELI',
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
 };
 
 export default function RootLayout({
