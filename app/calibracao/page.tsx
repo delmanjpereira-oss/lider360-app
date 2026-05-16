@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 
 type Colaborador = {
@@ -53,12 +53,7 @@ type LinhaCalib = {
   idGroot: string;
   nome: string;
   processo: string;
-  liqMes1: number;
-  liqMes2: number;
-  liqMes3: number;
-  ocupMes1: number;
-  ocupMes2: number;
-  ocupMes3: number;
+  medMes: Record<number, { liq: number; ocup: number }>;
   liqTrim: number;
   ocupTrim: number;
   ima: number;
@@ -69,6 +64,39 @@ type LinhaCalib = {
   aptidao: string;
   aptidaoPct: number;
 };
+
+const NOMES_MESES: Record<number, string> = {
+  1: 'Jan',
+  2: 'Fev',
+  3: 'Mar',
+  4: 'Abr',
+  5: 'Mai',
+  6: 'Jun',
+  7: 'Jul',
+  8: 'Ago',
+  9: 'Set',
+  10: 'Out',
+  11: 'Nov',
+  12: 'Dez',
+};
+
+const MESES_POR_TRIM: Record<string, number[]> = {
+  Q1: [1, 2, 3],
+  Q2: [4, 5, 6],
+  Q3: [7, 8, 9],
+  Q4: [10, 11, 12],
+};
+
+function getTrimestreDeData(dataStr: string): { quarter: string; ano: number; mes: number } {
+  const data = new Date(dataStr + 'T12:00:00');
+  const mes = data.getMonth() + 1;
+  const ano = data.getFullYear();
+  let q = 'Q1';
+  if (mes >= 4 && mes <= 6) q = 'Q2';
+  else if (mes >= 7 && mes <= 9) q = 'Q3';
+  else if (mes >= 10) q = 'Q4';
+  return { quarter: q, ano, mes };
+}
 
 function corNota(nota: string): string {
   if (nota === 'Supera') return 'bg-green-500/20 text-green-400';
@@ -84,36 +112,7 @@ function corAptidao(apt: string): string {
   return 'bg-gray-500 text-white';
 }
 
-const NOMES_MESES_TRIM: Record<string, string[]> = {
-  Q1: ['Jan', 'Fev', 'Mar'],
-  Q2: ['Abr', 'Mai', 'Jun'],
-  Q3: ['Jul', 'Ago', 'Set'],
-  Q4: ['Out', 'Nov', 'Dez'],
-};
-
-const MESES_POR_TRIM: Record<string, number[]> = {
-  Q1: [1, 2, 3],
-  Q2: [4, 5, 6],
-  Q3: [7, 8, 9],
-  Q4: [10, 11, 12],
-};
-
-function getTrimestreAtual(): { quarter: string; ano: number } {
-  const hoje = new Date();
-  const mes = hoje.getMonth() + 1;
-  let q = 'Q1';
-  if (mes >= 4 && mes <= 6) q = 'Q2';
-  else if (mes >= 7 && mes <= 9) q = 'Q3';
-  else if (mes >= 10) q = 'Q4';
-  return { quarter: q, ano: hoje.getFullYear() };
-}
-
 export default function CalibracaoPage() {
-  const trimAtual = getTrimestreAtual();
-  const [trimestreSelecionado, setTrimestreSelecionado] = useState(
-    `${trimAtual.ano}-${trimAtual.quarter}`
-  );
-
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
   const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
@@ -124,6 +123,7 @@ export default function CalibracaoPage() {
   const [metaOcup, setMetaOcup] = useState({ checkin: 75, p2m: 80 });
   const [metaLiq, setMetaLiq] = useState({ checkin: 296, p2m: 329 });
   const [loading, setLoading] = useState(true);
+  const [trimestreSelecionado, setTrimestreSelecionado] = useState<string>('');
 
   // Edição inline
   const [editandoIma, setEditandoIma] = useState<string | null>(null);
@@ -131,7 +131,7 @@ export default function CalibracaoPage() {
 
   useEffect(() => {
     carregar();
-  }, [trimestreSelecionado]);
+  }, []);
 
   async function carregar() {
     setLoading(true);
@@ -182,188 +182,230 @@ export default function CalibracaoPage() {
     }
   }
 
+  // 🎯 TRIMESTRES DISPONÍVEIS (calculado do histórico + dpmo)
+  const trimestresDisponiveis = useMemo(() => {
+    const set = new Set<string>();
+    historico.forEach((h) => {
+      const { quarter, ano } = getTrimestreDeData(h.data_referencia);
+      set.add(`${ano}-${quarter}`);
+    });
+    dpmoEventos.forEach((d) => {
+      set.add(`${d.ano}-${d.trimestre}`);
+    });
+    return Array.from(set).sort().reverse(); // Mais recente primeiro
+  }, [historico, dpmoEventos]);
+
+  // Define trimestre selecionado quando carrega
+  useEffect(() => {
+    if (!trimestreSelecionado && trimestresDisponiveis.length > 0) {
+      setTrimestreSelecionado(trimestresDisponiveis[0]);
+    }
+  }, [trimestresDisponiveis, trimestreSelecionado]);
+
   // Parse trimestre selecionado
-  const [anoSel, quarterSel] = trimestreSelecionado.split('-');
-  const anoNum = parseInt(anoSel);
-  const mesesTrim = MESES_POR_TRIM[quarterSel] || [1, 2, 3];
-  const nomesMesesTrim = NOMES_MESES_TRIM[quarterSel] || ['Jan', 'Fev', 'Mar'];
+  const [anoSel = '', quarterSel = ''] = trimestreSelecionado.split('-');
+  const anoNum = parseInt(anoSel) || new Date().getFullYear();
+  const mesesPossiveis = MESES_POR_TRIM[quarterSel] || [];
+
+  // 🎯 MESES DO TRIMESTRE QUE TÊM DADOS
+  const mesesComDados = useMemo(() => {
+    if (!quarterSel) return [];
+    const set = new Set<number>();
+    historico.forEach((h) => {
+      const { ano, mes, quarter } = getTrimestreDeData(h.data_referencia);
+      if (ano === anoNum && quarter === quarterSel) {
+        set.add(mes);
+      }
+    });
+    return mesesPossiveis.filter((m) => set.has(m)).sort();
+  }, [historico, anoNum, quarterSel, mesesPossiveis]);
 
   // ════════════════════════════════════════════════════════
   // CÁLCULO PRINCIPAL — monta linhas da calibração
   // ════════════════════════════════════════════════════════
-  const linhasCalibracao: LinhaCalib[] = colaboradores.map((c) => {
-    // Filtra histórico do colaborador no trimestre
-    const histColab = historico.filter((h) => {
-      if (h.id_groot !== c.id_groot) return false;
-      const data = new Date(h.data_referencia + 'T12:00:00');
-      const mes = data.getMonth() + 1;
-      const ano = data.getFullYear();
-      return ano === anoNum && mesesTrim.includes(mes);
-    });
+  const linhasCalibracao: LinhaCalib[] = useMemo(() => {
+    if (!quarterSel) return [];
 
-    // Médias mensais (líquida e ocupação)
-    const mediasPorMes: Record<number, { liq: number[]; ocup: number[] }> = {};
-    histColab.forEach((h) => {
-      const data = new Date(h.data_referencia + 'T12:00:00');
-      const mes = data.getMonth() + 1;
-      if (!mediasPorMes[mes]) mediasPorMes[mes] = { liq: [], ocup: [] };
-      if (h.prod_liquida > 0) mediasPorMes[mes].liq.push(h.prod_liquida);
-      // Parseia ocupação tipo "85%"
-      if (h.utilizacao) {
-        const num = parseFloat(h.utilizacao.replace('%', '').replace(',', '.'));
-        if (!isNaN(num) && num > 0) mediasPorMes[mes].ocup.push(num);
-      }
-    });
-
-    const mediaMes = (mes: number, tipo: 'liq' | 'ocup') => {
-      const arr = mediasPorMes[mes]?.[tipo] || [];
-      if (arr.length === 0) return 0;
-      return arr.reduce((s, v) => s + v, 0) / arr.length;
-    };
-
-    const liqMes1 = Math.round(mediaMes(mesesTrim[0], 'liq'));
-    const liqMes2 = Math.round(mediaMes(mesesTrim[1], 'liq'));
-    const liqMes3 = Math.round(mediaMes(mesesTrim[2], 'liq'));
-    const ocupMes1 = Math.round(mediaMes(mesesTrim[0], 'ocup'));
-    const ocupMes2 = Math.round(mediaMes(mesesTrim[1], 'ocup'));
-    const ocupMes3 = Math.round(mediaMes(mesesTrim[2], 'ocup'));
-
-    // Médias trimestrais (só meses com dado)
-    const liqsValidas = [liqMes1, liqMes2, liqMes3].filter((v) => v > 0);
-    const ocupsValidas = [ocupMes1, ocupMes2, ocupMes3].filter((v) => v > 0);
-    const liqTrim =
-      liqsValidas.length > 0
-        ? Math.round(liqsValidas.reduce((s, v) => s + v, 0) / liqsValidas.length)
-        : 0;
-    const ocupTrim =
-      ocupsValidas.length > 0
-        ? Math.round(ocupsValidas.reduce((s, v) => s + v, 0) / ocupsValidas.length)
-        : 0;
-
-    // ━━━━ IMA — Auto (cruzando DPMO com Histórico) ou Manual ━━━━
-    const quarterKey = `${anoNum}-${quarterSel}`;
-    const manualIma = imaManual.find(
-      (m) => m.id_groot === c.id_groot && m.quarter_ref === quarterKey
-    );
-
-    let ima = 0;
-    let imaOrigem: 'auto' | 'manual' | 'vazio' = 'vazio';
-
-    if (manualIma) {
-      ima = manualIma.valor_ima;
-      imaOrigem = 'manual';
-    } else if (c.processo === 'Checkin' || c.processo === 'P2M') {
-      // Calcula IMA automático: cruza DIF (dpmo_eventos) com UNIDADES (historico) do trimestre
-      const totalDif = dpmoEventos
-        .filter(
-          (e) =>
-            e.id_groot === c.id_groot &&
-            e.ano === anoNum &&
-            e.trimestre === quarterSel
-        )
-        .reduce((s, e) => s + e.qtd_dif, 0);
-      const totalUnidades = histColab.reduce((s, h) => s + h.unidades, 0);
-      if (totalUnidades > 0 && totalDif > 0) {
-        ima = Math.round((totalDif / totalUnidades) * 1_000_000);
-        imaOrigem = 'auto';
-      }
-    }
-
-    // ━━━━ QUE — combina Líquida + Ocupação + IMA ━━━━
-    let que = 'Sem dados';
-    if (c.processo === 'Checkin' || c.processo === 'P2M') {
-      const metaL =
-        c.processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
-      const metaO =
-        c.processo === 'Checkin' ? metaOcup.checkin : metaOcup.p2m;
-      const metaI = c.processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
-
-      let pontos = 0;
-      if (liqTrim >= metaL) pontos++;
-      if (ocupTrim >= metaO) pontos++;
-      if (ima > 0 && ima <= metaI) pontos++;
-
-      if (liqTrim === 0 && ocupTrim === 0 && ima === 0) que = 'Sem dados';
-      else if (pontos === 3) que = 'Supera';
-      else if (pontos >= 1) que = 'Alinhado';
-      else que = 'Abaixo';
-    } else if (c.processo === 'Sorting') {
-      // Sorting só usa líquida
-      if (liqTrim === 0) que = 'Sem dados';
-      else if (liqTrim > 0) que = 'Alinhado';
-    }
-
-    // ━━━━ COMO — automático (dos feedbacks) ou manual ━━━━
-    const manualComo = comoManual.find(
-      (m) => m.id_groot === c.id_groot && m.quarter_ref === quarterKey
-    );
-
-    let como = 'Sem feedbacks';
-    let comoOrigem: 'auto' | 'manual' = 'auto';
-
-    if (manualComo) {
-      como = manualComo.nota_como;
-      comoOrigem = 'manual';
-    } else {
-      // Calcula a partir dos feedbacks do trimestre
-      const fbsTrim = feedbacks.filter((f) => {
-        if (f.id_groot !== c.id_groot) return false;
-        const dataRef = f.data_referencia || f.registrado_em;
-        const data = new Date(dataRef);
-        const mes = data.getMonth() + 1;
-        const ano = data.getFullYear();
-        return ano === anoNum && mesesTrim.includes(mes);
+    return colaboradores.map((c) => {
+      // Filtra histórico do colaborador no trimestre
+      const histColab = historico.filter((h) => {
+        if (h.id_groot !== c.id_groot) return false;
+        const { quarter, ano } = getTrimestreDeData(h.data_referencia);
+        return ano === anoNum && quarter === quarterSel;
       });
 
-      if (fbsTrim.length > 0) {
-        const supera = fbsTrim.filter((f) => f.classificacao === 'Supera').length;
-        const alinhado = fbsTrim.filter((f) => f.classificacao === 'Alinhado').length;
-        const abaixo = fbsTrim.filter((f) => f.classificacao === 'Abaixo').length;
+      // Médias mensais (líquida e ocupação)
+      const mediasPorMes: Record<number, { liq: number[]; ocup: number[] }> = {};
+      histColab.forEach((h) => {
+        const { mes } = getTrimestreDeData(h.data_referencia);
+        if (!mediasPorMes[mes]) mediasPorMes[mes] = { liq: [], ocup: [] };
+        if (h.prod_liquida > 0) mediasPorMes[mes].liq.push(h.prod_liquida);
+        if (h.utilizacao) {
+          const num = parseFloat(h.utilizacao.replace('%', '').replace(',', '.'));
+          if (!isNaN(num) && num > 0) mediasPorMes[mes].ocup.push(num);
+        }
+      });
 
-        if (abaixo > supera + alinhado) como = 'Abaixo';
-        else if (supera >= alinhado && supera >= abaixo) como = 'Supera';
-        else como = 'Alinhado';
+      const mediaMes = (mes: number, tipo: 'liq' | 'ocup') => {
+        const arr = mediasPorMes[mes]?.[tipo] || [];
+        if (arr.length === 0) return 0;
+        return arr.reduce((s, v) => s + v, 0) / arr.length;
+      };
+
+      const medMes: Record<number, { liq: number; ocup: number }> = {};
+      mesesPossiveis.forEach((m) => {
+        medMes[m] = {
+          liq: Math.round(mediaMes(m, 'liq')),
+          ocup: Math.round(mediaMes(m, 'ocup')),
+        };
+      });
+
+      // Médias trimestrais (só meses com dado)
+      const liqsValidas = mesesPossiveis
+        .map((m) => medMes[m].liq)
+        .filter((v) => v > 0);
+      const ocupsValidas = mesesPossiveis
+        .map((m) => medMes[m].ocup)
+        .filter((v) => v > 0);
+      const liqTrim =
+        liqsValidas.length > 0
+          ? Math.round(liqsValidas.reduce((s, v) => s + v, 0) / liqsValidas.length)
+          : 0;
+      const ocupTrim =
+        ocupsValidas.length > 0
+          ? Math.round(ocupsValidas.reduce((s, v) => s + v, 0) / ocupsValidas.length)
+          : 0;
+
+      // IMA
+      const quarterKey = `${anoNum}-${quarterSel}`;
+      const manualIma = imaManual.find(
+        (m) => m.id_groot === c.id_groot && m.quarter_ref === quarterKey
+      );
+
+      let ima = 0;
+      let imaOrigem: 'auto' | 'manual' | 'vazio' = 'vazio';
+
+      if (manualIma) {
+        ima = manualIma.valor_ima;
+        imaOrigem = 'manual';
+      } else if (c.processo === 'Checkin' || c.processo === 'P2M') {
+        const totalDif = dpmoEventos
+          .filter(
+            (e) =>
+              e.id_groot === c.id_groot &&
+              e.ano === anoNum &&
+              e.trimestre === quarterSel
+          )
+          .reduce((s, e) => s + e.qtd_dif, 0);
+        const totalUnidades = histColab.reduce((s, h) => s + h.unidades, 0);
+        if (totalUnidades > 0 && totalDif > 0) {
+          ima = Math.round((totalDif / totalUnidades) * 1_000_000);
+          imaOrigem = 'auto';
+        }
       }
-    }
 
-    // ━━━━ APTIDÃO ━━━━
-    let aptidao = 'Sem dados';
-    let aptidaoPct = 0;
-    if (que !== 'Sem dados') {
-      if (que === 'Abaixo' || como === 'Abaixo') {
-        aptidao = 'NÃO APTO';
-        aptidaoPct = 30;
-      } else if (que === 'Supera' && (como === 'Supera' || como === 'Alinhado')) {
-        aptidao = 'APTO';
-        aptidaoPct = 100;
+      // QUE
+      let que = 'Sem dados';
+      if (c.processo === 'Checkin' || c.processo === 'P2M') {
+        const metaL =
+          c.processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
+        const metaO =
+          c.processo === 'Checkin' ? metaOcup.checkin : metaOcup.p2m;
+        const metaI = c.processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
+
+        let pontos = 0;
+        if (liqTrim >= metaL) pontos++;
+        if (ocupTrim >= metaO) pontos++;
+        if (ima > 0 && ima <= metaI) pontos++;
+
+        if (liqTrim === 0 && ocupTrim === 0 && ima === 0) que = 'Sem dados';
+        else if (pontos === 3) que = 'Supera';
+        else if (pontos >= 1) que = 'Alinhado';
+        else que = 'Abaixo';
+      } else if (c.processo === 'Sorting') {
+        if (liqTrim === 0) que = 'Sem dados';
+        else if (liqTrim > 0) que = 'Alinhado';
+      }
+
+      // COMO
+      const manualComo = comoManual.find(
+        (m) => m.id_groot === c.id_groot && m.quarter_ref === quarterKey
+      );
+
+      let como = 'Sem feedbacks';
+      let comoOrigem: 'auto' | 'manual' = 'auto';
+
+      if (manualComo) {
+        como = manualComo.nota_como;
+        comoOrigem = 'manual';
       } else {
-        aptidao = 'EM OBSERVAÇÃO';
-        aptidaoPct = 60;
-      }
-    }
+        const fbsTrim = feedbacks.filter((f) => {
+          if (f.id_groot !== c.id_groot) return false;
+          const dataRef = f.data_referencia || f.registrado_em;
+          const data = new Date(dataRef);
+          const mes = data.getMonth() + 1;
+          const ano = data.getFullYear();
+          return ano === anoNum && mesesPossiveis.includes(mes);
+        });
 
-    return {
-      id: c.id,
-      idGroot: c.id_groot,
-      nome: c.nome,
-      processo: c.processo || 'Sem processo',
-      liqMes1,
-      liqMes2,
-      liqMes3,
-      ocupMes1,
-      ocupMes2,
-      ocupMes3,
-      liqTrim,
-      ocupTrim,
-      ima,
-      imaOrigem,
-      que,
-      como,
-      comoOrigem,
-      aptidao,
-      aptidaoPct,
-    };
-  });
+        if (fbsTrim.length > 0) {
+          const supera = fbsTrim.filter((f) => f.classificacao === 'Supera').length;
+          const alinhado = fbsTrim.filter((f) => f.classificacao === 'Alinhado').length;
+          const abaixo = fbsTrim.filter((f) => f.classificacao === 'Abaixo').length;
+
+          if (abaixo > supera + alinhado) como = 'Abaixo';
+          else if (supera >= alinhado && supera >= abaixo) como = 'Supera';
+          else como = 'Alinhado';
+        }
+      }
+
+      // APTIDÃO
+      let aptidao = 'Sem dados';
+      let aptidaoPct = 0;
+      if (que !== 'Sem dados') {
+        if (que === 'Abaixo' || como === 'Abaixo') {
+          aptidao = 'NÃO APTO';
+          aptidaoPct = 30;
+        } else if (que === 'Supera' && (como === 'Supera' || como === 'Alinhado')) {
+          aptidao = 'APTO';
+          aptidaoPct = 100;
+        } else {
+          aptidao = 'EM OBSERVAÇÃO';
+          aptidaoPct = 60;
+        }
+      }
+
+      return {
+        id: c.id,
+        idGroot: c.id_groot,
+        nome: c.nome,
+        processo: c.processo || 'Sem processo',
+        medMes,
+        liqTrim,
+        ocupTrim,
+        ima,
+        imaOrigem,
+        que,
+        como,
+        comoOrigem,
+        aptidao,
+        aptidaoPct,
+      };
+    });
+  }, [
+    colaboradores,
+    historico,
+    dpmoEventos,
+    feedbacks,
+    imaManual,
+    comoManual,
+    anoNum,
+    quarterSel,
+    mesesPossiveis,
+    metaIma,
+    metaLiq,
+    metaOcup,
+  ]);
 
   // Agrupa por processo
   const porProcesso = {
@@ -377,15 +419,7 @@ export default function CalibracaoPage() {
   const totalObs = linhasCalibracao.filter((l) => l.aptidao === 'EM OBSERVAÇÃO').length;
   const totalNaoAptos = linhasCalibracao.filter((l) => l.aptidao === 'NÃO APTO').length;
 
-  // Lista de trimestres pra seletor (3 anos)
-  const trimestresDisponiveis: string[] = [];
-  for (let ano = new Date().getFullYear(); ano >= new Date().getFullYear() - 2; ano--) {
-    ['Q4', 'Q3', 'Q2', 'Q1'].forEach((q) => {
-      trimestresDisponiveis.push(`${ano}-${q}`);
-    });
-  }
-
-  // ━━━━ SALVAR IMA MANUAL ━━━━
+  // ━━━━ SALVAR / RESETAR ━━━━
   async function salvarImaManual(linha: LinhaCalib, valor: number) {
     const quarterKey = `${anoNum}-${quarterSel}`;
     const { error } = await supabase.from('ima_manual').upsert(
@@ -460,7 +494,6 @@ export default function CalibracaoPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-4xl font-black mb-2">
           🎯 Calibração <span className="text-[#FFD700]">Trimestral</span>
@@ -470,296 +503,359 @@ export default function CalibracaoPage() {
         </p>
       </div>
 
-      {/* Seletor de trimestre */}
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-4 flex-wrap">
-          <label className="text-sm font-bold text-gray-300">Trimestre:</label>
-          <select
-            value={trimestreSelecionado}
-            onChange={(e) => setTrimestreSelecionado(e.target.value)}
-            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-white font-bold focus:border-[#FFD700] focus:outline-none"
+      {/* Sem dados */}
+      {trimestresDisponiveis.length === 0 ? (
+        <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center">
+          <span className="text-6xl block mb-4">📭</span>
+          <h3 className="text-xl font-bold text-white mb-2">
+            Nenhum dado de produção ainda
+          </h3>
+          <p className="text-gray-400 mb-4">
+            Faça upload de pelo menos 1 CSV de produtividade pra começar
+          </p>
+          <a
+            href="/meu-time/upload"
+            className="inline-block bg-[#FFD700] text-black font-bold px-6 py-3 rounded-lg hover:bg-yellow-300 transition-colors"
           >
-            {trimestresDisponiveis.map((t) => {
-              const [a, q] = t.split('-');
-              const meses = NOMES_MESES_TRIM[q].join('/');
-              return (
-                <option key={t} value={t}>
-                  {a} • {q} ({meses})
-                </option>
-              );
-            })}
-          </select>
+            📤 Upload CSV
+          </a>
         </div>
-
-        <div className="flex items-center gap-3">
-          <div className="text-center">
-            <div className="text-2xl font-black text-green-400">{totalAptos}</div>
-            <div className="text-xs text-gray-500">Aptos</div>
-          </div>
-          <div className="w-px h-10 bg-[#2a2a2a]"></div>
-          <div className="text-center">
-            <div className="text-2xl font-black text-yellow-400">{totalObs}</div>
-            <div className="text-xs text-gray-500">Observação</div>
-          </div>
-          <div className="w-px h-10 bg-[#2a2a2a]"></div>
-          <div className="text-center">
-            <div className="text-2xl font-black text-red-400">{totalNaoAptos}</div>
-            <div className="text-xs text-gray-500">Não Aptos</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabela por processo */}
-      {(['Checkin', 'P2M', 'Sorting'] as const).map((proc) => {
-        const linhas = porProcesso[proc];
-        if (linhas.length === 0) return null;
-
-        return (
-          <div
-            key={proc}
-            className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl overflow-hidden"
-          >
-            <div className="bg-[#0a0a0a] px-6 py-3 border-b border-[#2a2a2a]">
-              <h2 className="text-lg font-bold text-[#FFD700]">
-                {proc === 'Checkin' ? '📦' : proc === 'P2M' ? '🚚' : '📋'} {proc}{' '}
-                <span className="text-sm font-normal text-gray-400">
-                  ({linhas.length} colaboradores)
-                </span>
-              </h2>
+      ) : (
+        <>
+          {/* Seletor de trimestre */}
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-4 flex-wrap">
+              <label className="text-sm font-bold text-gray-300">Trimestre:</label>
+              <select
+                value={trimestreSelecionado}
+                onChange={(e) => setTrimestreSelecionado(e.target.value)}
+                className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-white font-bold focus:border-[#FFD700] focus:outline-none"
+              >
+                {trimestresDisponiveis.map((t) => {
+                  const [a, q] = t.split('-');
+                  const meses = MESES_POR_TRIM[q]
+                    .map((m) => NOMES_MESES[m])
+                    .join('/');
+                  return (
+                    <option key={t} value={t}>
+                      {a} • {q} ({meses})
+                    </option>
+                  );
+                })}
+              </select>
+              <span className="text-xs text-gray-500">
+                {trimestresDisponiveis.length} trimestre(s) com dados
+              </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400">
-                    <th className="py-3 px-3">Colab.</th>
-                    <th className="py-3 px-2 text-center" colSpan={2}>
-                      {nomesMesesTrim[0]}
-                    </th>
-                    <th className="py-3 px-2 text-center" colSpan={2}>
-                      {nomesMesesTrim[1]}
-                    </th>
-                    <th className="py-3 px-2 text-center" colSpan={2}>
-                      {nomesMesesTrim[2]}
-                    </th>
-                    <th className="py-3 px-2 text-center bg-[#0a0a0a]" colSpan={2}>
-                      Trim.
-                    </th>
-                    <th className="py-3 px-3 text-center">IMA</th>
-                    <th className="py-3 px-2 text-center">QUE</th>
-                    <th className="py-3 px-2 text-center">COMO</th>
-                    <th className="py-3 px-2 text-center">APTIDÃO</th>
-                  </tr>
-                  <tr className="border-b border-[#2a2a2a] text-xs text-gray-500">
-                    <th className="py-1"></th>
-                    <th className="py-1 text-center">Líq</th>
-                    <th className="py-1 text-center">Oc%</th>
-                    <th className="py-1 text-center">Líq</th>
-                    <th className="py-1 text-center">Oc%</th>
-                    <th className="py-1 text-center">Líq</th>
-                    <th className="py-1 text-center">Oc%</th>
-                    <th className="py-1 text-center bg-[#0a0a0a]">Líq</th>
-                    <th className="py-1 text-center bg-[#0a0a0a]">Oc%</th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {linhas.map((l) => (
-                    <tr
-                      key={l.idGroot}
-                      className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors"
-                    >
-                      <td className="py-2 px-3">
-                        <div className="text-white text-xs font-bold truncate max-w-[140px]">
-                          {l.nome}
-                        </div>
-                        <div className="text-xs text-gray-500 font-mono">
-                          {l.idGroot}
-                        </div>
-                      </td>
-                      <td className="py-2 px-2 text-center text-gray-300 font-mono text-xs">
-                        {l.liqMes1 || '-'}
-                      </td>
-                      <td className="py-2 px-2 text-center text-gray-300 font-mono text-xs">
-                        {l.ocupMes1 || '-'}
-                      </td>
-                      <td className="py-2 px-2 text-center text-gray-300 font-mono text-xs">
-                        {l.liqMes2 || '-'}
-                      </td>
-                      <td className="py-2 px-2 text-center text-gray-300 font-mono text-xs">
-                        {l.ocupMes2 || '-'}
-                      </td>
-                      <td className="py-2 px-2 text-center text-gray-300 font-mono text-xs">
-                        {l.liqMes3 || '-'}
-                      </td>
-                      <td className="py-2 px-2 text-center text-gray-300 font-mono text-xs">
-                        {l.ocupMes3 || '-'}
-                      </td>
-                      <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono">
-                        {l.liqTrim || '-'}
-                      </td>
-                      <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono">
-                        {l.ocupTrim ? l.ocupTrim + '%' : '-'}
-                      </td>
+            <div className="flex items-center gap-3">
+              <div className="text-center">
+                <div className="text-2xl font-black text-green-400">
+                  {totalAptos}
+                </div>
+                <div className="text-xs text-gray-500">Aptos</div>
+              </div>
+              <div className="w-px h-10 bg-[#2a2a2a]"></div>
+              <div className="text-center">
+                <div className="text-2xl font-black text-yellow-400">
+                  {totalObs}
+                </div>
+                <div className="text-xs text-gray-500">Observação</div>
+              </div>
+              <div className="w-px h-10 bg-[#2a2a2a]"></div>
+              <div className="text-center">
+                <div className="text-2xl font-black text-red-400">
+                  {totalNaoAptos}
+                </div>
+                <div className="text-xs text-gray-500">Não Aptos</div>
+              </div>
+            </div>
+          </div>
 
-                      {/* IMA editável */}
-                      <td className="py-2 px-3 text-center">
-                        {editandoIma === l.idGroot ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              value={valorImaTemp}
-                              onChange={(e) => setValorImaTemp(e.target.value)}
-                              className="w-20 bg-[#0a0a0a] border border-[#FFD700] rounded px-2 py-1 text-white text-xs"
-                              autoFocus
-                            />
-                            <button
-                              onClick={() =>
-                                salvarImaManual(l, parseInt(valorImaTemp) || 0)
-                              }
-                              className="text-green-400 hover:text-green-300 text-xs"
-                            >
-                              ✓
-                            </button>
-                            <button
-                              onClick={() => setEditandoIma(null)}
-                              className="text-red-400 hover:text-red-300 text-xs"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <div
-                            className="cursor-pointer hover:bg-[#1a1a1a] rounded px-1 py-0.5"
-                            onClick={() => {
-                              setEditandoIma(l.idGroot);
-                              setValorImaTemp(l.ima.toString());
-                            }}
-                            title="Clica pra editar"
+          {/* Info dos meses com dados */}
+          {mesesComDados.length > 0 && mesesComDados.length < mesesPossiveis.length && (
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm">
+              <p className="text-yellow-300">
+                ℹ️ Esse trimestre tem dados de apenas{' '}
+                <strong>
+                  {mesesComDados.map((m) => NOMES_MESES[m]).join(', ')}
+                </strong>{' '}
+                ({mesesComDados.length} de {mesesPossiveis.length} meses).
+              </p>
+            </div>
+          )}
+
+          {/* Tabela por processo */}
+          {(['Checkin', 'P2M', 'Sorting'] as const).map((proc) => {
+            const linhas = porProcesso[proc];
+            if (linhas.length === 0) return null;
+
+            return (
+              <div
+                key={proc}
+                className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl overflow-hidden"
+              >
+                <div className="bg-[#0a0a0a] px-6 py-3 border-b border-[#2a2a2a]">
+                  <h2 className="text-lg font-bold text-[#FFD700]">
+                    {proc === 'Checkin' ? '📦' : proc === 'P2M' ? '🚚' : '📋'} {proc}{' '}
+                    <span className="text-sm font-normal text-gray-400">
+                      ({linhas.length} colaboradores)
+                    </span>
+                  </h2>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400">
+                        <th className="py-3 px-3" rowSpan={2}>
+                          Colab.
+                        </th>
+                        {mesesComDados.map((m) => (
+                          <th
+                            key={m}
+                            colSpan={2}
+                            className="py-3 px-2 text-center border-l border-[#2a2a2a]"
                           >
-                            <div className="text-white font-bold font-mono text-xs">
-                              {l.ima || '-'}
+                            {NOMES_MESES[m]}
+                          </th>
+                        ))}
+                        <th
+                          colSpan={2}
+                          className="py-3 px-2 text-center bg-[#0a0a0a] border-l border-[#2a2a2a]"
+                        >
+                          Trim.
+                        </th>
+                        <th className="py-3 px-3 text-center" rowSpan={2}>
+                          IMA
+                        </th>
+                        <th className="py-3 px-2 text-center" rowSpan={2}>
+                          QUE
+                        </th>
+                        <th className="py-3 px-2 text-center" rowSpan={2}>
+                          COMO
+                        </th>
+                        <th className="py-3 px-2 text-center" rowSpan={2}>
+                          APTIDÃO
+                        </th>
+                      </tr>
+                      <tr className="border-b border-[#2a2a2a] text-xs text-gray-500">
+                        {mesesComDados.map((m) => (
+                          <>
+                            <th
+                              key={`${m}-liq`}
+                              className="py-1 text-center border-l border-[#2a2a2a]"
+                            >
+                              Líq
+                            </th>
+                            <th key={`${m}-oc`} className="py-1 text-center">
+                              Oc%
+                            </th>
+                          </>
+                        ))}
+                        <th className="py-1 text-center bg-[#0a0a0a] border-l border-[#2a2a2a]">
+                          Líq
+                        </th>
+                        <th className="py-1 text-center bg-[#0a0a0a]">Oc%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {linhas.map((l) => (
+                        <tr
+                          key={l.idGroot}
+                          className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors"
+                        >
+                          <td className="py-2 px-3">
+                            <div className="text-white text-xs font-bold truncate max-w-[140px]">
+                              {l.nome}
                             </div>
-                            {l.imaOrigem === 'manual' && (
-                              <div className="flex items-center justify-center gap-1">
-                                <span className="text-[8px] text-yellow-400 font-bold">
-                                  manual
-                                </span>
+                            <div className="text-xs text-gray-500 font-mono">
+                              {l.idGroot}
+                            </div>
+                          </td>
+                          {mesesComDados.map((m) => (
+                            <>
+                              <td
+                                key={`${l.idGroot}-${m}-liq`}
+                                className="py-2 px-2 text-center text-gray-300 font-mono text-xs border-l border-[#2a2a2a]"
+                              >
+                                {l.medMes[m]?.liq || '-'}
+                              </td>
+                              <td
+                                key={`${l.idGroot}-${m}-oc`}
+                                className="py-2 px-2 text-center text-gray-300 font-mono text-xs"
+                              >
+                                {l.medMes[m]?.ocup
+                                  ? l.medMes[m].ocup + '%'
+                                  : '-'}
+                              </td>
+                            </>
+                          ))}
+                          <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono border-l border-[#2a2a2a]">
+                            {l.liqTrim || '-'}
+                          </td>
+                          <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono">
+                            {l.ocupTrim ? l.ocupTrim + '%' : '-'}
+                          </td>
+
+                          <td className="py-2 px-3 text-center">
+                            {editandoIma === l.idGroot ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  value={valorImaTemp}
+                                  onChange={(e) => setValorImaTemp(e.target.value)}
+                                  className="w-20 bg-[#0a0a0a] border border-[#FFD700] rounded px-2 py-1 text-white text-xs"
+                                  autoFocus
+                                />
                                 <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    resetarIma(l);
-                                  }}
-                                  className="text-[8px] text-gray-500 hover:text-red-400"
+                                  onClick={() =>
+                                    salvarImaManual(l, parseInt(valorImaTemp) || 0)
+                                  }
+                                  className="text-green-400 hover:text-green-300 text-xs"
+                                >
+                                  ✓
+                                </button>
+                                <button
+                                  onClick={() => setEditandoIma(null)}
+                                  className="text-red-400 hover:text-red-300 text-xs"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <div
+                                className="cursor-pointer hover:bg-[#1a1a1a] rounded px-1 py-0.5"
+                                onClick={() => {
+                                  setEditandoIma(l.idGroot);
+                                  setValorImaTemp(l.ima.toString());
+                                }}
+                                title="Clica pra editar"
+                              >
+                                <div className="text-white font-bold font-mono text-xs">
+                                  {l.ima || '-'}
+                                </div>
+                                {l.imaOrigem === 'manual' && (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <span className="text-[8px] text-yellow-400 font-bold">
+                                      manual
+                                    </span>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        resetarIma(l);
+                                      }}
+                                      className="text-[8px] text-gray-500 hover:text-red-400"
+                                      title="Resetar"
+                                    >
+                                      ↺
+                                    </button>
+                                  </div>
+                                )}
+                                {l.imaOrigem === 'auto' && (
+                                  <div className="text-[8px] text-green-400">
+                                    auto
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="py-2 px-2 text-center">
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full font-bold ${corNota(
+                                l.que
+                              )}`}
+                            >
+                              {l.que}
+                            </span>
+                          </td>
+
+                          <td className="py-2 px-2 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <select
+                                value={l.como === 'Sem feedbacks' ? '' : l.como}
+                                onChange={(e) => {
+                                  if (e.target.value)
+                                    salvarComoManual(l, e.target.value);
+                                }}
+                                className={`text-xs px-2 py-0.5 rounded-full font-bold border-0 cursor-pointer ${corNota(
+                                  l.como
+                                )}`}
+                              >
+                                <option value="">{l.como}</option>
+                                <option value="Supera">Supera</option>
+                                <option value="Alinhado">Alinhado</option>
+                                <option value="Abaixo">Abaixo</option>
+                              </select>
+                              {l.comoOrigem === 'manual' && (
+                                <button
+                                  onClick={() => resetarComo(l)}
+                                  className="text-[10px] text-gray-500 hover:text-red-400"
                                   title="Resetar"
                                 >
                                   ↺
                                 </button>
-                              </div>
-                            )}
-                            {l.imaOrigem === 'auto' && (
-                              <div className="text-[8px] text-green-400">
-                                auto
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </td>
+                              )}
+                            </div>
+                          </td>
 
-                      {/* QUE */}
-                      <td className="py-2 px-2 text-center">
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded-full font-bold ${corNota(
-                            l.que
-                          )}`}
-                        >
-                          {l.que}
-                        </span>
-                      </td>
-
-                      {/* COMO editável */}
-                      <td className="py-2 px-2 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <select
-                            value={l.como === 'Sem feedbacks' ? '' : l.como}
-                            onChange={(e) => {
-                              if (e.target.value) salvarComoManual(l, e.target.value);
-                            }}
-                            className={`text-xs px-2 py-0.5 rounded-full font-bold border-0 cursor-pointer ${corNota(
-                              l.como
-                            )}`}
-                          >
-                            <option value="">{l.como}</option>
-                            <option value="Supera">Supera</option>
-                            <option value="Alinhado">Alinhado</option>
-                            <option value="Abaixo">Abaixo</option>
-                          </select>
-                          {l.comoOrigem === 'manual' && (
-                            <button
-                              onClick={() => resetarComo(l)}
-                              className="text-[10px] text-gray-500 hover:text-red-400"
-                              title="Resetar"
+                          <td className="py-2 px-2 text-center">
+                            <span
+                              className={`text-xs px-2 py-1 rounded font-bold ${corAptidao(
+                                l.aptidao
+                              )}`}
                             >
-                              ↺
-                            </button>
-                          )}
-                        </div>
-                      </td>
+                              {l.aptidao}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
 
-                      {/* APTIDÃO */}
-                      <td className="py-2 px-2 text-center">
-                        <span
-                          className={`text-xs px-2 py-1 rounded font-bold ${corAptidao(
-                            l.aptidao
-                          )}`}
-                        >
-                          {l.aptidao}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {linhasCalibracao.length === 0 && (
+            <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center">
+              <span className="text-6xl block mb-4">📭</span>
+              <h3 className="text-xl font-bold text-white mb-2">
+                Nenhum colaborador ativo
+              </h3>
+              <p className="text-gray-400">Cadastre colaboradores no MEU TIME</p>
             </div>
+          )}
+
+          {/* Legenda */}
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
+            <p className="font-bold mb-2">💡 Como funciona:</p>
+            <ul className="space-y-1 list-disc pl-5 text-xs">
+              <li>
+                <strong>Trimestres</strong> aparecem só quando têm dados. Meses
+                vazios não são mostrados.
+              </li>
+              <li>
+                <strong>QUE</strong> = Líquida + Ocupação + IMA do trimestre (3
+                indicadores valem 1 ponto cada)
+              </li>
+              <li>
+                <strong>COMO</strong> = derivado dos feedbacks do trimestre. Você
+                pode SOBRESCREVER clicando no campo
+              </li>
+              <li>
+                <strong>IMA</strong> = calculado automaticamente (DPMO ÷ Unidades).
+                Pode editar clicando no número
+              </li>
+              <li>
+                <strong>APTIDÃO</strong>: QUE=Supera + COMO≥Alinhado → APTO | Algum
+                Abaixo → NÃO APTO | Resto → EM OBSERVAÇÃO
+              </li>
+            </ul>
           </div>
-        );
-      })}
-
-      {linhasCalibracao.length === 0 && (
-        <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center">
-          <span className="text-6xl block mb-4">📭</span>
-          <h3 className="text-xl font-bold text-white mb-2">
-            Nenhum colaborador ativo
-          </h3>
-          <p className="text-gray-400">Cadastre colaboradores no MEU TIME</p>
-        </div>
+        </>
       )}
-
-      {/* Legenda */}
-      <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
-        <p className="font-bold mb-2">💡 Como funciona:</p>
-        <ul className="space-y-1 list-disc pl-5 text-xs">
-          <li>
-            <strong>QUE</strong> = Líquida + Ocupação + IMA do trimestre (3
-            indicadores valem 1 ponto cada)
-          </li>
-          <li>
-            <strong>COMO</strong> = derivado dos feedbacks do trimestre. Você
-            pode SOBRESCREVER clicando no campo
-          </li>
-          <li>
-            <strong>IMA</strong> = calculado automaticamente (DPMO ÷ Unidades).
-            Pode editar clicando no número
-          </li>
-          <li>
-            <strong>APTIDÃO</strong>: QUE=Supera + COMO≥Alinhado → APTO | Algum
-            Abaixo → NÃO APTO | Resto → EM OBSERVAÇÃO
-          </li>
-        </ul>
-      </div>
     </div>
   );
 }
