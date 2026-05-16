@@ -307,19 +307,41 @@ export default function DpmoPage() {
     const itens: LinhaAgregada[] = [];
 
     linhas.forEach((linha, idx) => {
-      const nome = pegarValor(linha, ['CK_NOME_COMPLETO', 'NOME_COMPLETO', 'nome']);
+      const nome = pegarValor(linha, [
+        'CK_NOME_COMPLETO',
+        'P2M_NOME_COMPLETO',
+        'TP_NOME_COMPLETO',
+        'SH_NOME_COMPLETO',
+        'OV_NOME_COMPLETO',
+        'NOME_COMPLETO',
+        'nome',
+      ]);
 
       // Tenta achar a coluna de semana
-      const semanaStr = pegarValor(linha, ['WEEK | CK', 'WEEK_CK', 'WEEK', 'SEMANA']);
+      const semanaStr = pegarValor(linha, [
+        'WEEK | CK',
+        'WEEK | P2M',
+        'WEEK | TP',
+        'WEEK | SH',
+        'WEEK | OV',
+        'WEEK_CK',
+        'WEEK_P2M',
+        'WEEK',
+        'SEMANA',
+      ]);
 
-      // Tenta achar a coluna de DPMO (pode ser "DPMO | CK", "DPMO_CK", "DPMO CK")
+      // Tenta achar a coluna de DPMO (pode ser "DPMO | CK", "DPMO | P2M", etc)
       const dpmoStr = pegarValor(linha, [
         'DPMO | CK',
+        'DPMO | P2M',
+        'DPMO | TP',
+        'DPMO | SH',
+        'DPMO | OV',
         'DPMO_CK',
+        'DPMO_P2M',
         'DPMO CK',
-        'DPMO',
-        'DMPO P2M',
         'DPMO P2M',
+        'DPMO',
       ]);
 
       if (!nome || !semanaStr || !dpmoStr) {
