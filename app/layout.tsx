@@ -2,10 +2,12 @@ import './globals.css';
 import type { Metadata } from 'next';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
+import Toaster from './components/Toaster';
+import ConfirmModal from './components/ConfirmModal';
 
 export const metadata: Metadata = {
-  title: 'LÍDER 360 — Painel do Líder Operacional',
-  description: 'Sistema de gestão para Team Leaders do Mercado Livre',
+  title: 'LIDER 360 v2',
+  description: 'Sistema completo de gestão do time MELI',
 };
 
 export default function RootLayout({
@@ -15,21 +17,18 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR">
-      <body className="bg-[#0a0a0a] text-white">
-        <div className="flex min-h-screen">
-          {/* Sidebar fixa à esquerda */}
+      <body className="bg-[#0a0a0a] text-white min-h-screen">
+        <div className="flex">
           <Sidebar />
-
-          {/* Área principal */}
-          <div className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col min-h-screen">
             <Topbar />
-
-            {/* Conteúdo da página atual */}
-            <main className="flex-1 p-8 overflow-auto">
+            <main className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full">
               {children}
             </main>
           </div>
         </div>
+        <Toaster />
+        <ConfirmModal />
       </body>
     </html>
   );
