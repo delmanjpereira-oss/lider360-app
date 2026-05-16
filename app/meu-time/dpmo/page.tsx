@@ -57,7 +57,13 @@ function norm(s: string): string {
 }
 
 function normalizarNome(nome: string): string {
-  return String(nome || '').toUpperCase().trim().replace(/\s+/g, ' ');
+  // Remove acentos, converte pra maiúscula, tira espaços extras
+  return String(nome || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .toUpperCase()
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 function parseDataCsv(str: string): Date | null {
