@@ -133,17 +133,36 @@ export default function UploadPage() {
 
   useEffect(() => {
     async function carregarBase() {
-      const { data: colabs } = await supabase
+      console.log('🔄 Carregando colaboradores e metas...');
+      const { data: colabs, error: errColabs } = await supabase
         .from('colaboradores')
         .select('id_groot, nome, processo');
-      if (colabs) setColaboradores(colabs as ColaboradorMap[]);
 
-      const { data: conf } = await supabase.from('config').select('chave, valor');
+      if (errColabs) {
+        console.error('❌ Erro ao buscar colaboradores:', errColabs);
+        setErro('Erro ao buscar colaboradores: ' + errColabs.message);
+        return;
+      }
+
+      if (colabs) {
+        console.log('✅ Colaboradores carregados:', colabs.length);
+        setColaboradores(colabs as ColaboradorMap[]);
+      }
+
+      const { data: conf, error: errConf } = await supabase.from('config').select('chave, valor');
+
+      if (errConf) {
+        console.error('❌ Erro ao buscar config:', errConf);
+        setErro('Erro ao buscar configurações: ' + errConf.message);
+        return;
+      }
+
       if (conf) {
         const map: Record<string, number> = {};
         (conf as { chave: string; valor: string }[]).forEach((c) => {
           map[c.chave] = Number(c.valor);
         });
+        console.log('✅ Metas carregadas:', map);
         setMetas(map);
       }
     }
@@ -153,6 +172,8 @@ export default function UploadPage() {
   function onArquivoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
+
+    console.log('📂 Arquivo selecionado:', f.name);
 
     setArquivo(f);
     setErro(null);
@@ -167,7 +188,11 @@ export default function UploadPage() {
       skipEmptyLines: true,
       complete: (result) => {
         setCarregando(false);
+        console.log('📊 CSV lido:', result.data.length, 'linhas');
+        console.log('📋 Cabeçalhos:', result.meta.fields);
+
         if (result.errors.length > 0) {
+          console.error('❌ Erros do papaparse:', result.errors);
           setErro('Erro ao ler CSV: ' + result.errors[0].message);
           return;
         }
@@ -176,17 +201,36 @@ export default function UploadPage() {
       },
       error: (err) => {
         setCarregando(false);
+        console.error('❌ Erro papaparse:', err);
         setErro('Erro: ' + err.message);
       },
     });
   }
 
-  function processar() {
-    if (!linhas.length) return;
+  function enviar() {
+    console.log('🚀 Botão ENVIAR clicado!');
+    console.log('   - Processo selecionado:', processoSelecionado);
+    console.log('   - Linhas:', linhas.length);
+    console.log('   - Colaboradores cadastrados:', colaboradores.length);
+    console.log('   - Metas:', Object.keys(metas).length);
 
-    // VALIDAÇÃO: precisa escolher o processo
+    if (!linhas.length) {
+      setErro('⚠️ Nenhum arquivo carregado ainda. Selecione um CSV antes.');
+      return;
+    }
+
     if (!processoSelecionado) {
-      setErro('⚠️ Selecione o processo (Checkin / P2M / Sorting) antes de processar.');
+      setErro('⚠️ Selecione o processo (Checkin / P2M / Sorting) antes de enviar.');
+      return;
+    }
+
+    if (colaboradores.length === 0) {
+      setErro('⚠️ Nenhum colaborador cadastrado. Cadastre primeiro em MEU TIME.');
+      return;
+    }
+
+    if (Object.keys(metas).length === 0) {
+      setErro('⚠️ Configurações de metas não carregadas. Volte para Configurações e salve as metas.');
       return;
     }
 
@@ -197,6 +241,8 @@ export default function UploadPage() {
     colaboradores.forEach((c) => {
       mapaCadastro[normalizarIdGroot(c.id_groot)] = c;
     });
+
+    console.log('🗺️  Mapa de cadastro montado com', Object.keys(mapaCadastro).length, 'IDs');
 
     const naoVinc: string[] = [];
     const registrosBrutos: Array<{
@@ -213,17 +259,21 @@ export default function UploadPage() {
       ima: number;
     }> = [];
 
-    linhas.forEach((linha) => {
+    linhas.forEach((linha, idx) => {
       const idGrootRaw = pegarValor(linha, ['id_groot', 'id groot', 'groot', 'id']);
       const idGroot = normalizarIdGroot(idGrootRaw);
       const nomeCsv = pegarValor(linha, ['nome', 'agente', 'representante']);
 
+      console.log(`Linha ${idx + 1}: ID="${idGrootRaw}" → "${idGroot}" | Nome="${nomeCsv}"`);
+
       if (!idGroot || !mapaCadastro[idGroot]) {
+        console.log(`   ⚠️  Não vinculado`);
         if (nomeCsv) naoVinc.push(nomeCsv + ' (ID: ' + idGrootRaw + ')');
         return;
       }
 
-      // PROCESSO vem do seletor da tela (não mais do CSV nem do cadastro)
+      console.log(`   ✅ Vinculado a ${mapaCadastro[idGroot].nome}`);
+
       const processo = processoSelecionado;
 
       const prodLiquida = parseNumber(
@@ -271,6 +321,9 @@ export default function UploadPage() {
       });
     });
 
+    console.log('✅ Total vinculados:', registrosBrutos.length);
+    console.log('⚠️  Não vinculados:', naoVinc.length);
+
     const netPorProc: Record<string, { volume: number; horas: number }> = {};
     registrosBrutos.forEach((r) => {
       const horas = hmsToSeconds(r.tempoProcesso) / 3600;
@@ -285,6 +338,8 @@ export default function UploadPage() {
       const a = netPorProc[proc];
       netMedia[proc] = a.horas > 0 ? a.volume / a.horas : 0;
     });
+
+    console.log('📈 NET média por processo:', netMedia);
 
     const finais: RegistroProcessado[] = registrosBrutos.map((r) => {
       const horas = hmsToSeconds(r.tempoProcesso) / 3600;
@@ -306,22 +361,38 @@ export default function UploadPage() {
       };
     });
 
+    console.log('✅ Processamento concluído. Mostrando preview de', finais.length, 'registros');
+
     setProcessado(finais);
     setNaoVinculados(naoVinc);
+
+    // Mensagem amigável se ninguém foi vinculado
+    if (finais.length === 0 && naoVinc.length > 0) {
+      setErro(
+        `⚠️ Nenhum colaborador do CSV foi vinculado. Verifique se os IDs do CSV batem com os IDs do cadastro. Total não vinculados: ${naoVinc.length}`
+      );
+    }
   }
 
-  async function salvarTudo() {
+  async function confirmarEnvio() {
     if (!processado.length || !arquivo) return;
+    console.log('💾 Confirmar envio clicado!');
     setSalvando(true);
     setErro(null);
     setSucesso(null);
 
     try {
-      await supabase
+      // Apaga registros antigos do mesmo dia + arquivo
+      const { error: errDel } = await supabase
         .from('historico')
         .delete()
         .eq('data_referencia', dataRef)
         .eq('arquivo_origem', arquivo.name);
+
+      if (errDel) {
+        console.error('❌ Erro no delete:', errDel);
+        // não interrompe, pode ser primeira vez
+      }
 
       const dataObj = new Date(dataRef + 'T12:00:00');
       const mes = dataObj.getMonth() + 1;
@@ -351,10 +422,16 @@ export default function UploadPage() {
         ano_referencia: dataObj.getFullYear(),
       }));
 
+      console.log('💾 Inserindo', linhasInsert.length, 'registros...');
+
       const { error: errInsert } = await supabase
         .from('historico')
         .insert(linhasInsert);
-      if (errInsert) throw new Error(errInsert.message);
+
+      if (errInsert) {
+        console.error('❌ Erro ao inserir:', errInsert);
+        throw new Error(errInsert.message);
+      }
 
       const uploadId = 'UP-' + Math.random().toString(36).substring(2, 10).toUpperCase();
       await supabase.from('uploads').insert({
@@ -367,6 +444,8 @@ export default function UploadPage() {
         usuario: 'delman.jpereira@mercadolivre.com',
         modelo_csv: 'produtividade',
       });
+
+      console.log('✅ Tudo salvo com sucesso!');
 
       setSucesso(
         `✅ ${processado.length} registros salvos! ${naoVinculados.length} não vinculados.`
@@ -383,11 +462,19 @@ export default function UploadPage() {
       }, 2500);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Erro desconhecido';
+      console.error('❌ Erro geral:', e);
       setErro(msg);
     } finally {
       setSalvando(false);
     }
   }
+
+  // Mostra status dos requisitos pra debug visual
+  const podeEnviar =
+    linhas.length > 0 &&
+    processoSelecionado !== '' &&
+    colaboradores.length > 0 &&
+    Object.keys(metas).length > 0;
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -426,9 +513,6 @@ export default function UploadPage() {
         <h2 className="text-lg font-bold text-[#FFD700]">
           1️⃣ Qual processo desse CSV?
         </h2>
-        <p className="text-sm text-gray-400">
-          Esse processo será aplicado a TODAS as linhas do arquivo
-        </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <button
@@ -522,17 +606,49 @@ export default function UploadPage() {
         )}
       </div>
 
-      {/* BOTÃO PROCESSAR */}
-      {linhas.length > 0 && processado.length === 0 && (
+      {/* BOTÃO ENVIAR (sempre clicável — mostra erro se algo faltar) */}
+      {processado.length === 0 && (
         <button
-          onClick={processar}
-          disabled={!processoSelecionado}
-          className="w-full bg-[#FFD700] text-black font-bold py-4 rounded-lg hover:bg-yellow-300 transition-colors text-lg disabled:opacity-40 disabled:cursor-not-allowed"
+          onClick={enviar}
+          className={`w-full font-bold py-4 rounded-lg transition-colors text-lg ${
+            podeEnviar
+              ? 'bg-[#FFD700] text-black hover:bg-yellow-300'
+              : 'bg-[#FFD700]/50 text-black/70 hover:bg-[#FFD700]/70'
+          }`}
         >
-          {!processoSelecionado
-            ? '⚠️ Selecione o processo primeiro'
-            : '🔧 Processar e calcular Impacto NET'}
+          📤 Enviar
         </button>
+      )}
+
+      {/* Checklist visual (debug amigável) */}
+      {processado.length === 0 && (
+        <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3 text-xs space-y-1">
+          <p className="text-gray-400 font-bold mb-2">Status do envio:</p>
+          <p className={processoSelecionado ? 'text-green-400' : 'text-gray-500'}>
+            {processoSelecionado ? '✅' : '⬜'} Processo selecionado{' '}
+            {processoSelecionado && `(${processoSelecionado})`}
+          </p>
+          <p className={linhas.length > 0 ? 'text-green-400' : 'text-gray-500'}>
+            {linhas.length > 0 ? '✅' : '⬜'} Arquivo CSV carregado{' '}
+            {linhas.length > 0 && `(${linhas.length} linhas)`}
+          </p>
+          <p
+            className={
+              colaboradores.length > 0 ? 'text-green-400' : 'text-red-400'
+            }
+          >
+            {colaboradores.length > 0 ? '✅' : '❌'} Colaboradores cadastrados{' '}
+            ({colaboradores.length})
+          </p>
+          <p
+            className={
+              Object.keys(metas).length > 0 ? 'text-green-400' : 'text-red-400'
+            }
+          >
+            {Object.keys(metas).length > 0 ? '✅' : '❌'} Metas configuradas (
+            {Object.keys(metas).length})
+          </p>
+        </div>
       )}
 
       {/* PREVIEW */}
@@ -547,7 +663,7 @@ export default function UploadPage() {
               processoSelecionado === 'P2M' ? 'bg-orange-500/20 text-orange-400' :
               'bg-emerald-500/20 text-emerald-400'
             }`}>
-              Processo: {processoSelecionado}
+              {processoSelecionado}
             </span>
           </div>
 
@@ -622,33 +738,14 @@ export default function UploadPage() {
           </div>
 
           <button
-            onClick={salvarTudo}
+            onClick={confirmarEnvio}
             disabled={salvando}
             className="w-full bg-green-500 text-white font-bold py-4 rounded-lg hover:bg-green-400 transition-colors text-lg disabled:opacity-50"
           >
-            {salvando ? '💾 Salvando...' : `💾 Salvar ${processado.length} registros no banco`}
+            {salvando ? '💾 Salvando...' : `✅ Confirmar envio`}
           </button>
         </div>
       )}
-
-      {/* Documentação */}
-      <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
-        <p className="font-bold mb-2">📋 Cabeçalhos aceitos no CSV:</p>
-        <ul className="space-y-1 list-disc pl-5 text-xs">
-          <li><strong>ID GROOT</strong> (obrigatório) — vincula ao colaborador</li>
-          <li><strong>NOME</strong> — pra referência visual</li>
-          <li><strong>LIQUIDA / PROD_LIQUIDA</strong> — peças/hora líquida</li>
-          <li><strong>UNIDADES / VOLUME</strong> — quantidade de peças</li>
-          <li><strong>TEMPO_PROCESSO</strong> — HH:MM:SS</li>
-          <li><strong>TEMPO_EFETIVO</strong> — HH:MM:SS</li>
-          <li><strong>TEMPO_OCIOSO</strong> — HH:MM:SS</li>
-          <li><strong>UTILIZACAO</strong> — Ex: 85%</li>
-          <li><strong>IMA</strong> — opcional</li>
-        </ul>
-        <p className="text-xs text-blue-200 mt-3">
-          💡 <strong>Processo</strong> NÃO precisa estar no CSV — você escolhe ali em cima e ele se aplica a todas as linhas.
-        </p>
-      </div>
     </div>
   );
 }
