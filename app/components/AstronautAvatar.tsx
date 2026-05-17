@@ -38,9 +38,6 @@ export function AstronautAvatar({
       className={className}
       style={{ display: 'block' }}
     >
-      {/* Fundo branco arredondado */}
-      <rect x="0" y="0" width="200" height="200" rx="20" fill="#fff" />
-
       {/* === CORPO/COLETE === */}
       {/* Macacão (corpo todo branco) */}
       <path
