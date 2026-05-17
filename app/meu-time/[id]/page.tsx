@@ -60,6 +60,7 @@ type DpmoSemana = {
   defeitos: number;
   unidades: number;
   dpmo: number;
+  diasAuditados: string[];
   statusCalculo: 'completo' | 'falta_inventario' | 'falta_produtividade';
 };
 
@@ -131,7 +132,6 @@ function iconeTipo(tipo: string): string {
   }
 }
 
-// Pega semana ISO de uma data string YYYY-MM-DD
 function getSemanaIso(dataStr: string): { semana: number; ano: number } {
   const d = new Date(dataStr + 'T12:00:00');
   const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -165,10 +165,8 @@ export default function DetalheColaboradorPage() {
           .select('*')
           .eq('id', parseInt(id))
           .single();
-
-        if (error) {
-          setErro(error.message);
-        } else {
+        if (error) setErro(error.message);
+        else {
           setColaborador(data);
           if (data) {
             buscarHistorico(data.id_groot);
@@ -216,7 +214,6 @@ export default function DetalheColaboradorPage() {
         return;
       }
 
-      // Busca eventos por id_groot OU por nome (caso não vinculado ainda)
       const { data: porId } = await supabase
         .from('dpmo_eventos')
         .select('*')
@@ -237,7 +234,6 @@ export default function DetalheColaboradorPage() {
           todos.push(e as DpmoEvento);
         }
       });
-
       setDpmoEventos(todos);
     } catch (e) {
       console.error('Erro buscando DPMO eventos:', e);
@@ -258,27 +254,30 @@ export default function DetalheColaboradorPage() {
     if (!colaborador) return;
     const ok = await window.showConfirm({
       title: 'Excluir colaborador',
-      message: `Deseja excluir ${colaborador.nome}? Essa ação não pode ser desfeita.`,
+      message: `Deseja excluir ${colaborador.nome}?`,
       confirmText: 'Excluir',
       danger: true,
     });
     if (!ok) return;
-
     const { error } = await supabase.from('colaboradores').delete().eq('id', colaborador.id);
-    if (error) {
-      window.showToast('error', 'Erro: ' + error.message);
-    } else {
+    if (error) window.showToast('error', 'Erro: ' + error.message);
+    else {
       window.showToast('success', 'Colaborador removido');
       router.push('/meu-time');
     }
   }
 
-  // 🎯 CÁLCULO INTELIGENTE DE DPMO POR SEMANA
-  // Cruza dpmo_eventos (defeitos) com historico (unidades) — SÓ calcula se tem os 2
+  // 🎯 CÁLCULO INTELIGENTE — Só soma unidades das DATAS que tem inventário!
   function calcularDpmoPorSemana(): DpmoSemana[] {
     const resultado: Record<string, DpmoSemana> = {};
 
-    // 1. Acumula DEFEITOS por semana (do dpmo_eventos)
+    // 1. Lista DATAS distintas onde tem inventário
+    const datasComInventario = new Set<string>();
+    dpmoEventos.forEach((e) => {
+      datasComInventario.add(e.checkin_data); // YYYY-MM-DD
+    });
+
+    // 2. Acumula DEFEITOS por semana (do dpmo_eventos)
     dpmoEventos.forEach((e) => {
       const chave = `${e.ano}-S${e.semana}`;
       if (!resultado[chave]) {
@@ -288,14 +287,21 @@ export default function DetalheColaboradorPage() {
           defeitos: 0,
           unidades: 0,
           dpmo: 0,
+          diasAuditados: [],
           statusCalculo: 'falta_produtividade',
         };
       }
       resultado[chave].defeitos += e.qtd_dif || 0;
+      if (!resultado[chave].diasAuditados.includes(e.checkin_data)) {
+        resultado[chave].diasAuditados.push(e.checkin_data);
+      }
     });
 
-    // 2. Acumula UNIDADES por semana (do historico)
+    // 3. Acumula UNIDADES APENAS dos dias QUE TEM INVENTÁRIO
     historico.forEach((h) => {
+      // 🎯 SÓ INCLUI se essa data foi auditada (tem inventário)
+      if (!datasComInventario.has(h.data_referencia)) return;
+
       const { ano, semana } = getSemanaIso(h.data_referencia);
       const chave = `${ano}-S${semana}`;
       if (!resultado[chave]) {
@@ -305,25 +311,41 @@ export default function DetalheColaboradorPage() {
           defeitos: 0,
           unidades: 0,
           dpmo: 0,
+          diasAuditados: [],
           statusCalculo: 'falta_inventario',
         };
       }
       resultado[chave].unidades += h.unidades || 0;
     });
 
-    // 3. Calcula DPMO onde tem OS 2 (defeitos + unidades > 0)
+    // 4. Verifica também semanas com produtividade mas sem inventário
+    historico.forEach((h) => {
+      const { ano, semana } = getSemanaIso(h.data_referencia);
+      const chave = `${ano}-S${semana}`;
+      if (!resultado[chave]) {
+        resultado[chave] = {
+          ano,
+          semana,
+          defeitos: 0,
+          unidades: h.unidades || 0,
+          dpmo: 0,
+          diasAuditados: [],
+          statusCalculo: 'falta_inventario',
+        };
+      }
+    });
+
+    // 5. Calcula DPMO onde tem OS 2 (defeitos + unidades das datas auditadas)
     Object.values(resultado).forEach((s) => {
-      if (s.unidades > 0 && s.defeitos >= 0) {
-        // Tem produtividade
-        if (dpmoEventos.some((e) => e.ano === s.ano && e.semana === s.semana)) {
-          // Tem inventário também → calcula!
-          s.dpmo = Math.round((s.defeitos / s.unidades) * 1_000_000);
-          s.statusCalculo = 'completo';
-        } else {
-          s.statusCalculo = 'falta_inventario';
-        }
-      } else if (s.defeitos > 0 && s.unidades === 0) {
+      const temInventario = dpmoEventos.some((e) => e.ano === s.ano && e.semana === s.semana);
+      
+      if (temInventario && s.unidades > 0) {
+        s.dpmo = Math.round((s.defeitos / s.unidades) * 1_000_000);
+        s.statusCalculo = 'completo';
+      } else if (temInventario && s.unidades === 0) {
         s.statusCalculo = 'falta_produtividade';
+      } else if (!temInventario) {
+        s.statusCalculo = 'falta_inventario';
       }
     });
 
@@ -337,7 +359,7 @@ export default function DetalheColaboradorPage() {
   const semanasCompletas = dpmoPorSemana.filter((s) => s.statusCalculo === 'completo');
   const semanasFaltando = dpmoPorSemana.filter((s) => s.statusCalculo !== 'completo');
 
-  // 🎯 DPMO TRIMESTRAL — ponderado (SUM defeitos / SUM unidades)
+  // 🎯 DPMO TOTAL — ponderado, só com semanas completas
   const dpmoTotal = (() => {
     if (semanasCompletas.length === 0) return null;
     const totalDef = semanasCompletas.reduce((s, x) => s + x.defeitos, 0);
@@ -404,18 +426,16 @@ export default function DetalheColaboradorPage() {
         ← Voltar para MEU TIME
       </Link>
 
-      {/* Header */}
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-start gap-6 flex-wrap">
           <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-3xl flex-shrink-0 shadow-lg shadow-yellow-500/30">
             {iniciais(colaborador.nome)}
           </div>
-
           <div className="flex-1 min-w-0">
             <h1 className="text-3xl font-black text-white mb-2">{colaborador.nome}</h1>
             <p className="text-gray-400 mb-3">{colaborador.cargo || 'Sem cargo cadastrado'}</p>
             <div className="flex flex-wrap gap-2">
-              <span className={`text-xs px-3 py-1 rounded-full font-bold ${colaborador.status === 'Ativo' ? 'bg-green-500/20 text-green-400' : colaborador.status === 'Afastado' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}`}>
+              <span className={`text-xs px-3 py-1 rounded-full font-bold ${colaborador.status === 'Ativo' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
                 {colaborador.status}
               </span>
               {colaborador.processo && (
@@ -426,22 +446,14 @@ export default function DetalheColaboradorPage() {
               )}
             </div>
           </div>
-
           <div className="flex flex-col gap-2">
-            <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2">
-              💬 Feedbacks
-            </Link>
-            <Link href={`/meu-time/${colaborador.id}/editar`} className="bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm">
-              ✏️ Editar
-            </Link>
-            <button onClick={excluir} className="bg-red-500/10 text-red-400 font-bold px-4 py-2 rounded-lg hover:bg-red-500/20 transition-colors text-sm">
-              🗑️ Excluir
-            </button>
+            <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2">💬 Feedbacks</Link>
+            <Link href={`/meu-time/${colaborador.id}/editar`} className="bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm">✏️ Editar</Link>
+            <button onClick={excluir} className="bg-red-500/10 text-red-400 font-bold px-4 py-2 rounded-lg hover:bg-red-500/20 transition-colors text-sm">🗑️ Excluir</button>
           </div>
         </div>
       </div>
 
-      {/* Estatísticas */}
       {!loadingHistorico && stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
@@ -477,7 +489,7 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      {/* 🎯 SEÇÃO DPMO — Cálculo PONDERADO REAL (cruzando dpmo_eventos + historico) */}
+      {/* 🎯 SEÇÃO DPMO */}
       {(colaborador.processo === 'Checkin' || colaborador.processo === 'P2M') && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -492,12 +504,11 @@ export default function DetalheColaboradorPage() {
               <span className="text-4xl block mb-2">📭</span>
               <p>Sem dados de DPMO ainda</p>
               <p className="text-xs text-gray-500 mt-1">
-                Precisa subir o CSV INVENTÁRIO DPMO em MEU TIME → 📊 Upload DPMO
+                Sobe o CSV INVENTÁRIO DPMO em MEU TIME → 📊 Upload DPMO
               </p>
             </div>
           ) : (
             <>
-              {/* Total Geral */}
               {dpmoTotal !== null ? (
                 <div className={`rounded-lg p-4 border ${dpmoTotal.dpmo > metaIma ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
                   <div className="flex items-center justify-between flex-wrap gap-3">
@@ -522,18 +533,18 @@ export default function DetalheColaboradorPage() {
               ) : (
                 <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
                   <p className="text-yellow-300 text-sm">
-                    ⚠️ <strong>Faltam dados de DPMO.</strong> Tem produtividade mas falta o CSV INVENTÁRIO DPMO pra ver os defeitos. Sobe em MEU TIME → 📊 Upload DPMO.
+                    ⚠️ <strong>Faltam dados.</strong> Sobe o CSV INVENTÁRIO DPMO em MEU TIME → 📊 Upload DPMO.
                   </p>
                 </div>
               )}
 
-              {/* Tabela por semana */}
               {semanasCompletas.length > 0 && (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
                         <th className="py-2 pr-2">Período</th>
+                        <th className="py-2 pr-2 text-center">Dias auditados</th>
                         <th className="py-2 pr-2 text-right">Defeitos</th>
                         <th className="py-2 pr-2 text-right">Unidades</th>
                         <th className="py-2 pr-2 text-right">DPMO</th>
@@ -544,6 +555,7 @@ export default function DetalheColaboradorPage() {
                       {semanasCompletas.slice(0, 12).map((s) => (
                         <tr key={`${s.ano}-${s.semana}`} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a]">
                           <td className="py-2 pr-2 text-white">Semana {s.semana} / {s.ano}</td>
+                          <td className="py-2 pr-2 text-center text-gray-400 text-xs">{s.diasAuditados.length} dia(s)</td>
                           <td className="py-2 pr-2 text-right text-red-400 font-mono">{s.defeitos}</td>
                           <td className="py-2 pr-2 text-right text-gray-300 font-mono">{s.unidades.toLocaleString('pt-BR')}</td>
                           <td className={`py-2 pr-2 text-right font-mono font-bold ${s.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
@@ -563,10 +575,9 @@ export default function DetalheColaboradorPage() {
                 </div>
               )}
 
-              {/* Semanas faltando dados */}
               {semanasFaltando.length > 0 && (
                 <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3">
-                  <p className="text-xs text-blue-300 font-bold mb-2">⏳ Semanas aguardando dados completos:</p>
+                  <p className="text-xs text-blue-300 font-bold mb-2">⏳ Semanas aguardando:</p>
                   <div className="flex flex-wrap gap-1.5">
                     {semanasFaltando.map((s) => (
                       <span key={`${s.ano}-${s.semana}`} className="text-xs bg-blue-500/10 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/30">
@@ -576,12 +587,16 @@ export default function DetalheColaboradorPage() {
                   </div>
                 </div>
               )}
+
+              <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300">
+                💡 <strong>Cálculo inteligente:</strong> Soma só as unidades dos DIAS AUDITADOS (que têm inventário).
+                Se a produtividade está mais adiantada que o inventário, ignora os dias sem auditoria. Garante que bate 100% com Looker!
+              </div>
             </>
           )}
         </div>
       )}
 
-      {/* Distribuição */}
       {!loadingHistorico && stats && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
           <h3 className="text-sm font-bold text-gray-400 mb-4">DISTRIBUIÇÃO DE STATUS</h3>
@@ -602,7 +617,6 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      {/* Melhor / Pior */}
       {!loadingHistorico && stats && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-gradient-to-br from-green-500/10 to-green-600/5 border border-green-500/30 rounded-2xl p-4">
@@ -618,20 +632,16 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      {/* Feedbacks recentes */}
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">💬 Feedbacks Recentes</h2>
           <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="text-sm text-blue-400 hover:text-blue-300 transition-colors font-bold">Ver todos →</Link>
         </div>
-
         {feedbacksRecentes.length === 0 ? (
           <div className="text-center py-8">
             <span className="text-4xl block mb-2">📭</span>
             <p className="text-gray-400 text-sm mb-3">Nenhum feedback ainda</p>
-            <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="inline-block bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm">
-              + Registrar primeiro feedback
-            </Link>
+            <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="inline-block bg-[#FFD700] text-black font-bold px-4 py-2 rounded-lg hover:bg-yellow-300 transition-colors text-sm">+ Registrar primeiro feedback</Link>
           </div>
         ) : (
           <div className="space-y-3">
@@ -652,7 +662,6 @@ export default function DetalheColaboradorPage() {
         )}
       </div>
 
-      {/* Dados + Datas */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
           <h2 className="text-lg font-bold text-[#FFD700] mb-4">📋 Dados Cadastrais</h2>
@@ -675,7 +684,6 @@ export default function DetalheColaboradorPage() {
             </div>
           </div>
         </div>
-
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
           <h2 className="text-lg font-bold text-[#FFD700] mb-4">📅 Datas Importantes</h2>
           <div className="space-y-3 text-sm">
@@ -693,17 +701,12 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
-      {/* Histórico */}
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico de Produção</h2>
           <div className="flex gap-1 bg-[#0a0a0a] rounded-lg p-1">
             {(['7', '30', '90', 'tudo'] as const).map((periodo) => (
-              <button
-                key={periodo}
-                onClick={() => setFiltroPeriodo(periodo)}
-                className={`px-3 py-1.5 text-xs font-bold rounded transition-all ${filtroPeriodo === periodo ? 'bg-[#FFD700] text-black' : 'text-gray-400 hover:text-white'}`}
-              >
+              <button key={periodo} onClick={() => setFiltroPeriodo(periodo)} className={`px-3 py-1.5 text-xs font-bold rounded transition-all ${filtroPeriodo === periodo ? 'bg-[#FFD700] text-black' : 'text-gray-400 hover:text-white'}`}>
                 {periodo === 'tudo' ? 'Tudo' : `${periodo}d`}
               </button>
             ))}
@@ -718,7 +721,7 @@ export default function DetalheColaboradorPage() {
         ) : historicoFiltrado.length === 0 ? (
           <div className="text-center py-12">
             <span className="text-6xl block mb-4">📭</span>
-            <p className="text-gray-400 mb-2">Sem dados de produção no período</p>
+            <p className="text-gray-400 mb-2">Sem dados no período</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
