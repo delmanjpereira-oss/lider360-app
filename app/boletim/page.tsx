@@ -336,8 +336,8 @@ export default function BoletimPage() {
                 </div>
               </div>
             </div>
-            <label className="cursor-pointer bg-[#FFD700] hover:bg-yellow-400 text-black px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors text-xs font-bold">
-              <span>📂</span> CSV
+            <label className="cursor-pointer w-12 h-12 flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-blue-600/10 hover:from-blue-500/40 hover:to-blue-600/30 text-blue-300 rounded-xl transition-all text-2xl border border-blue-500/30 hover:border-blue-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-500/20 active:translate-y-0" title="Upload CSV Check-in">
+              📤
               <input
                 type="file"
                 accept=".csv"
@@ -385,8 +385,8 @@ export default function BoletimPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <label className="cursor-pointer bg-[#FFD700] hover:bg-yellow-400 text-black px-2 py-2 rounded-lg flex items-center gap-1 transition-colors text-xs font-bold" title="Upload Produtividade P2M">
-                <span>📂</span> Prod.
+              <label className="cursor-pointer w-12 h-12 flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-orange-600/10 hover:from-orange-500/40 hover:to-orange-600/30 text-orange-300 rounded-xl transition-all text-2xl border border-orange-500/30 hover:border-orange-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-orange-500/20 active:translate-y-0" title="Upload Produtividade P2M">
+                📤
                 <input
                   type="file"
                   accept=".csv"
@@ -397,8 +397,8 @@ export default function BoletimPage() {
                   }}
                 />
               </label>
-              <label className="cursor-pointer bg-emerald-500 hover:bg-emerald-400 text-black px-2 py-2 rounded-lg flex items-center gap-1 transition-colors text-xs font-bold" title="Upload Ocupação (Totefullness)">
-                <span>📈</span> Ocup.
+              <label className="cursor-pointer w-12 h-12 flex items-center justify-center bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 hover:from-emerald-500/40 hover:to-emerald-600/30 text-emerald-300 rounded-xl transition-all text-2xl border border-emerald-500/30 hover:border-emerald-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20 active:translate-y-0" title="Upload Ocupação P2M (Totefullness)">
+                📦
                 <input
                   type="file"
                   accept=".csv"
@@ -408,6 +408,7 @@ export default function BoletimPage() {
                     if (f) processarCSV(f, 'ocupacao');
                   }}
                 />
+              </label>
               </label>
             </div>
           </div>
