@@ -66,7 +66,7 @@ type LinhaCalib = {
   idGroot: string;
   nome: string;
   processo: string;
-  medMes: Record<number, { liq: number; ocup: number }>;
+  medMes: Record<number, { liq: number; ocup: number; ima: number }>;
   liqTrim: number;
   ocupTrim: number;
   ima: number;
@@ -241,11 +241,12 @@ export default function CalibracaoPage() {
         return arr.reduce((s, v) => s + v, 0) / arr.length;
       };
 
-      const medMes: Record<number, { liq: number; ocup: number }> = {};
+      const medMes: Record<number, { liq: number; ocup: number; ima: number }> = {};
       mesesPossiveis.forEach((m) => {
         medMes[m] = {
           liq: Math.round(mediaMes(m, 'liq')),
           ocup: Math.round(mediaMes(m, 'ocup')),
+          ima: 0, // 🎯 Calculado abaixo
         };
       });
 
@@ -322,6 +323,41 @@ export default function CalibracaoPage() {
         } else if (eventosTrim.length > 0 && unidadesAuditadas === 0) {
           imaOrigem = 'aguardando';
         }
+
+        // 🎯 CÁLCULO IMA POR MÊS — Looker style ponderado
+        mesesPossiveis.forEach((mes) => {
+          // Defeitos só do mês X
+          const eventosMes = eventosTrim.filter((e) => e.mes === mes);
+          if (eventosMes.length === 0) {
+            medMes[mes].ima = 0;
+            return;
+          }
+
+          const defMes = eventosMes.reduce((s, e) => s + (e.qtd_dif || 0), 0);
+          const semanasMes = new Set<string>(eventosMes.map((e) => `${e.ano}-${e.semana}`));
+
+          // Unidades só dos dias do mês X
+          const unidadesMes = histColab
+            .filter((h) => h.processo === c.processo)
+            .filter((h) => {
+              if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return false;
+              // Confere se é desse mês
+              const dataDia = new Date(h.data_referencia + 'T12:00:00');
+              if (dataDia.getMonth() + 1 !== mes) return false;
+              // Confere se é semana auditada
+              const utc = new Date(Date.UTC(dataDia.getFullYear(), dataDia.getMonth(), dataDia.getDate()));
+              const dow = utc.getUTCDay() || 7;
+              utc.setUTCDate(utc.getUTCDate() + 4 - dow);
+              const inicio = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+              const sem = Math.ceil((((utc.getTime() - inicio.getTime()) / 86400000) + 1) / 7);
+              return semanasMes.has(`${utc.getUTCFullYear()}-${sem}`);
+            })
+            .reduce((s, h) => s + (h.unidades || 0), 0);
+
+          if (unidadesMes > 0) {
+            medMes[mes].ima = Math.round((defMes / unidadesMes) * 1_000_000);
+          }
+        });
       }
 
       // QUE
@@ -413,23 +449,29 @@ export default function CalibracaoPage() {
     const incluiOcup = processo !== 'Checkin'; // Checkin não tem ocupação ainda
 
     const headers: string[] = ['ID', 'Nome', 'Processo'];
+    // Pra cada mês: Líq + IMA + (Oc% se P2M)
     mesesComDados.forEach((m) => {
       headers.push(`${NOMES_MESES[m]}_Liq`);
+      headers.push(`${NOMES_MESES[m]}_IMA`);
       if (incluiOcup) headers.push(`${NOMES_MESES[m]}_Ocup`);
     });
-    headers.push('IMA');
+    // Trim: Líq + IMA + (Oc% se P2M)
     headers.push('Trim_Liq');
+    headers.push('Trim_IMA');
     if (incluiOcup) headers.push('Trim_Ocup');
     headers.push('QUE', 'COMO', 'APTIDAO');
 
     const rows = linhas.map((l) => {
       const row: (string | number)[] = [l.idGroot, l.nome, l.processo];
+      // Pra cada mês: Líq + IMA + Oc% (se P2M)
       mesesComDados.forEach((m) => {
         row.push(l.medMes[m]?.liq || '-');
+        row.push(l.imaOrigem === 'aguardando' ? 'aguardando' : (l.medMes[m]?.ima || '0'));
         if (incluiOcup) row.push(l.medMes[m]?.ocup ? `${l.medMes[m].ocup}%` : '-');
       });
-      row.push(l.imaOrigem === 'aguardando' ? 'aguardando' : (l.ima || '-'));
+      // Trim
       row.push(l.liqTrim || '-');
+      row.push(l.imaOrigem === 'aguardando' ? 'aguardando' : (l.ima || '0'));
       if (incluiOcup) row.push(l.ocupTrim ? `${l.ocupTrim}%` : '-');
       row.push(l.que);
       row.push(l.como);
@@ -806,7 +848,7 @@ export default function CalibracaoPage() {
                                 {l.imaOrigem === 'aguardando' ? (
                                   <span className="text-blue-400">⏳</span>
                                 ) : (
-                                  <span className="text-purple-300 font-bold">{l.ima || '0'}</span>
+                                  <span className="text-purple-300 font-bold">{l.medMes[m]?.ima || '0'}</span>
                                 )}
                               </td>
                               {proc !== 'Checkin' && (
