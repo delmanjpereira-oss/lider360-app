@@ -127,46 +127,24 @@ export function MascoteApollo() {
         </div>
       )}
 
-      {/* Cabeça (astronauta) */}
+      {/* Astronauta (sem fundo, sem badge) */}
       <button
         onClick={() => setBolhaAberta(!bolhaAberta)}
         className="relative cursor-pointer transition-transform hover:scale-110"
         style={{
-          filter: `drop-shadow(0 8px 16px ${corBorda}40)`,
+          filter: `drop-shadow(0 8px 20px ${corBorda}60) drop-shadow(0 0 8px ${corBorda}40)`,
         }}
         title="Clique pra ver mensagem"
       >
-        <div
-          className="rounded-2xl overflow-hidden"
-          style={{
-            width: '80px',
-            height: '80px',
-            border: `3px solid ${corBorda}`,
-            boxShadow: `0 0 20px ${corBorda}30`,
-            background: '#fff',
-          }}
-        >
-          <AstronautAvatar size={74} humor={humor} />
-        </div>
-
-        {/* Badge de humor */}
-        <div
-          className="absolute -top-1 -right-1 w-7 h-7 rounded-full border-2 border-white flex items-center justify-center text-base font-bold shadow-lg"
-          style={{ background: corBorda }}
-        >
-          {humor === 'sad' && '😢'}
-          {humor === 'surprised' && '😲'}
-          {humor === 'party' && '🎉'}
-          {humor === 'happy' && '😊'}
-        </div>
+        <AstronautAvatar size={90} humor={humor} />
 
         {/* Pulso pra alertas */}
         {(humor === 'sad' || humor === 'party') && (
           <div
-            className="absolute inset-0 rounded-2xl animate-ping"
+            className="absolute inset-0 rounded-full animate-ping pointer-events-none"
             style={{
               background: corBorda,
-              opacity: 0.2,
+              opacity: 0.15,
             }}
           />
         )}
