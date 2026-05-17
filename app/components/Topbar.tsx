@@ -26,7 +26,7 @@ export default function Topbar() {
     <header className="bg-gradient-to-r from-[#0a0a0a] via-[#0f0f0f] to-[#0a0a0a] border-b border-[#1a1a1a] px-6 py-3 flex items-center justify-between sticky top-0 z-30 backdrop-blur-md bg-opacity-90">
       {/* Lado esquerdo - Logos + saudação */}
       <div className="flex items-center gap-4">
-        {/* 🤝 Logo Mercado Livre - oficial da web */}
+        {/* 🤝 Logo Mercado Livre - símbolo handshake oficial */}
         <div
           className="flex items-center justify-center w-14 h-10 rounded-xl shadow-md overflow-hidden"
           style={{
@@ -36,11 +36,11 @@ export default function Topbar() {
           title="Mercado Livre"
         >
           <img
-            src="https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/6.10.2/mercadolibre/logo-pt.svg"
+            src="https://logodownload.org/wp-content/uploads/2018/09/mercado-livre-icone.png"
             alt="Mercado Livre"
             style={{
-              width: '40px',
-              height: 'auto',
+              width: '32px',
+              height: '32px',
               objectFit: 'contain',
             }}
           />
