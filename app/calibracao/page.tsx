@@ -509,10 +509,10 @@ export default function CalibracaoPage() {
       <!-- TABELA -->
       <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
         <thead>
-          <!-- Linha de SEÇÕES -->
-          <tr>
-            <th rowspan="2" style="padding: 16px 18px; text-align: center; background: #2a2a2a; color: #FFD700; font-size: 14px; font-weight: 900; border: 2px solid #FFD700; vertical-align: middle; min-width: 160px;">
-              ID<br/>COLABORADOR
+          <!-- Linha 1: SEÇÕES PRINCIPAIS (mesma altura pra todas) -->
+          <tr style="height: 50px;">
+            <th style="padding: 14px 18px; text-align: center; background: #2a2a2a; color: #FFD700; font-size: 14px; font-weight: 900; border: 2px solid #FFD700; min-width: 160px;">
+              ID COLABORADOR
             </th>
             <th colspan="${mesesTrim.length}" style="padding: 14px 12px; text-align: center; background: #d4a017; color: #000; font-weight: 900; font-size: 13px; border: 2px solid #FFD700;">
               📈 PRODUTIVIDADE
@@ -522,21 +522,27 @@ export default function CalibracaoPage() {
                 🎯 QUALIDADE
               </th>
             ` : ''}
-            <th rowspan="2" style="padding: 16px 18px; text-align: center; background: #047857; color: #ffffff; font-weight: 900; font-size: 14px; border: 2px solid #10b981; vertical-align: middle; min-width: 160px;">
+            <th style="padding: 14px 18px; text-align: center; background: #047857; color: #ffffff; font-weight: 900; font-size: 14px; border: 2px solid #10b981; min-width: 160px;">
               🏆 TRIMESTRE
             </th>
           </tr>
-          <!-- Linha de SUB-CABEÇALHOS -->
+          <!-- Linha 2: SUB-CABEÇALHOS -->
           <tr style="background: #1a1a1a;">
+            <th style="padding: 8px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #888; font-size: 10px; font-weight: bold;">
+              &nbsp;
+            </th>
             ${mesesTrim.map((m) => `
-              <th style="padding: 7px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #FFD700; font-size: 10px; font-weight: bold;">${NOMES_MESES[m]}</th>
+              <th style="padding: 8px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #FFD700; font-size: 10px; font-weight: bold;">${NOMES_MESES[m]}</th>
             `).join('')}
             ${temIma ? `
-              <th style="padding: 7px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">IMA</th>
+              <th style="padding: 8px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">IMA</th>
             ` : ''}
             ${temOcup ? `
-              <th style="padding: 7px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">Ocupação</th>
+              <th style="padding: 8px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">Ocupação</th>
             ` : ''}
+            <th style="padding: 8px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #888; font-size: 10px; font-weight: bold;">
+              &nbsp;
+            </th>
           </tr>
         </thead>
         <tbody>
