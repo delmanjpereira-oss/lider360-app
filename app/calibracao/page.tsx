@@ -20,15 +20,14 @@ type HistoricoLinha = {
   unidades: number;
 };
 
-type DpmoAgregado = {
+type DpmoEvento = {
   id_groot: string | null;
   representante: string;
-  processo: string;
+  qtd_dif: number;
   semana: number;
   ano: number;
   mes: number;
   trimestre: string;
-  dpmo: number;
 };
 
 type FeedbackTrim = {
@@ -50,7 +49,9 @@ type LinhaCalib = {
   liqTrim: number;
   ocupTrim: number;
   ima: number;
-  imaOrigem: 'auto' | 'manual' | 'vazio';
+  imaDefeitos: number;
+  imaUnidades: number;
+  imaOrigem: 'auto' | 'manual' | 'vazio' | 'aguardando';
   que: string;
   como: string;
   comoOrigem: 'auto' | 'manual';
@@ -70,12 +71,7 @@ const MESES_POR_TRIM: Record<string, number[]> = {
 };
 
 function normalizarNome(nome: string): string {
-  return String(nome || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-    .trim()
-    .replace(/\s+/g, ' ');
+  return String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim().replace(/\s+/g, ' ');
 }
 
 function getTrimestreDeData(dataStr: string): { quarter: string; ano: number; mes: number } {
@@ -106,7 +102,7 @@ function corAptidao(apt: string): string {
 export default function CalibracaoPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
-  const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
+  const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
   const [feedbacks, setFeedbacks] = useState<FeedbackTrim[]>([]);
   const [imaManual, setImaManual] = useState<ImaManual[]>([]);
   const [comoManual, setComoManual] = useState<ComoManual[]>([]);
@@ -115,7 +111,6 @@ export default function CalibracaoPage() {
   const [metaLiq, setMetaLiq] = useState({ checkin: 296, p2m: 329 });
   const [loading, setLoading] = useState(true);
   const [trimestreSelecionado, setTrimestreSelecionado] = useState<string>('');
-
   const [editandoIma, setEditandoIma] = useState<string | null>(null);
   const [valorImaTemp, setValorImaTemp] = useState('');
 
@@ -126,20 +121,19 @@ export default function CalibracaoPage() {
   async function carregar() {
     setLoading(true);
     try {
-      const [colabResp, histResp, dpmoResp, fbResp, imaResp, comoResp, confResp] =
-        await Promise.all([
-          supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
-          supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
-          supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, mes, trimestre, dpmo'),
-          supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
-          supabase.from('ima_manual').select('*'),
-          supabase.from('como_manual').select('*'),
-          supabase.from('config').select('chave, valor'),
-        ]);
+      const [colabResp, histResp, dpmoResp, fbResp, imaResp, comoResp, confResp] = await Promise.all([
+        supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
+        supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
+        supabase.from('dpmo_eventos').select('id_groot, representante, qtd_dif, semana, ano, mes, trimestre'),
+        supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
+        supabase.from('ima_manual').select('*'),
+        supabase.from('como_manual').select('*'),
+        supabase.from('config').select('chave, valor'),
+      ]);
 
       if (colabResp.data) setColaboradores(colabResp.data);
       if (histResp.data) setHistorico(histResp.data);
-      if (dpmoResp.data) setDpmoAgregado(dpmoResp.data as DpmoAgregado[]);
+      if (dpmoResp.data) setDpmoEventos(dpmoResp.data as DpmoEvento[]);
       if (fbResp.data) setFeedbacks(fbResp.data as FeedbackTrim[]);
       if (imaResp.data) setImaManual(imaResp.data);
       if (comoResp.data) setComoManual(comoResp.data);
@@ -157,18 +151,17 @@ export default function CalibracaoPage() {
     }
   }
 
-  // Trimestres com dados (do histórico OU dpmo_agregado)
   const trimestresDisponiveis = useMemo(() => {
     const set = new Set<string>();
     historico.forEach((h) => {
       const { quarter, ano } = getTrimestreDeData(h.data_referencia);
       set.add(`${ano}-${quarter}`);
     });
-    dpmoAgregado.forEach((d) => {
+    dpmoEventos.forEach((d) => {
       set.add(`${d.ano}-${d.trimestre}`);
     });
     return Array.from(set).sort().reverse();
-  }, [historico, dpmoAgregado]);
+  }, [historico, dpmoEventos]);
 
   useEffect(() => {
     if (!trimestreSelecionado && trimestresDisponiveis.length > 0) {
@@ -189,15 +182,6 @@ export default function CalibracaoPage() {
     });
     return mesesPossiveis.filter((m) => set.has(m)).sort();
   }, [historico, anoNum, quarterSel, mesesPossiveis]);
-
-  // Mapa nome normalizado → id_groot
-  const mapaNomes = useMemo(() => {
-    const m: Record<string, string> = {};
-    colaboradores.forEach((c) => {
-      m[normalizarNome(c.nome)] = c.id_groot;
-    });
-    return m;
-  }, [colaboradores]);
 
   const linhasCalibracao: LinhaCalib[] = useMemo(() => {
     if (!quarterSel) return [];
@@ -239,35 +223,45 @@ export default function CalibracaoPage() {
       const liqTrim = liqsValidas.length > 0 ? Math.round(liqsValidas.reduce((s, v) => s + v, 0) / liqsValidas.length) : 0;
       const ocupTrim = ocupsValidas.length > 0 ? Math.round(ocupsValidas.reduce((s, v) => s + v, 0) / ocupsValidas.length) : 0;
 
-      // 🎯 IMA — vem do dpmo_agregado (média dos DPMOs do trimestre)
+      // 🎯 CÁLCULO IMA PONDERADO — cruza dpmo_eventos (defeitos) + historico (unidades)
       const quarterKey = `${anoNum}-${quarterSel}`;
       const manualIma = imaManual.find((m) => m.id_groot === c.id_groot && m.quarter_ref === quarterKey);
 
       let ima = 0;
-      let imaOrigem: 'auto' | 'manual' | 'vazio' = 'vazio';
+      let imaDefeitos = 0;
+      let imaUnidades = 0;
+      let imaOrigem: 'auto' | 'manual' | 'vazio' | 'aguardando' = 'vazio';
 
       if (manualIma) {
         ima = manualIma.valor_ima;
         imaOrigem = 'manual';
       } else if (c.processo === 'Checkin' || c.processo === 'P2M') {
-        // Mapeia processo do cadastro → processo do DPMO (Checkin → CK)
-        const processoDpmo = c.processo === 'Checkin' ? 'CK' : 'P2M';
-
-        // Filtra DPMOs do trimestre — só do processo certo
+        // 1. Soma defeitos do trimestre (do dpmo_eventos)
         const nomeNorm = normalizarNome(c.nome);
-        const dpmosDoTrim = dpmoAgregado.filter((d) => {
+        const defeitosTrim = dpmoEventos.filter((d) => {
           if (d.ano !== anoNum || d.trimestre !== quarterSel) return false;
-          if (d.dpmo <= 0) return false;
-          if (d.processo !== processoDpmo) return false; // 🎯 filtra processo
           if (d.id_groot === c.id_groot) return true;
           if (!d.id_groot && normalizarNome(d.representante) === nomeNorm) return true;
           return false;
         });
 
-        if (dpmosDoTrim.length > 0) {
-          const soma = dpmosDoTrim.reduce((s, d) => s + d.dpmo, 0);
-          ima = Math.round(soma / dpmosDoTrim.length);
+        // 2. Soma unidades do trimestre (do historico) — só do processo certo
+        const unidadesTrim = histColab
+          .filter((h) => h.processo === c.processo)
+          .reduce((s, h) => s + (h.unidades || 0), 0);
+
+        const totalDef = defeitosTrim.reduce((s, d) => s + (d.qtd_dif || 0), 0);
+
+        // Calcula só se tem os 2 dados
+        if (unidadesTrim > 0 && defeitosTrim.length > 0) {
+          imaDefeitos = totalDef;
+          imaUnidades = unidadesTrim;
+          ima = Math.round((totalDef / unidadesTrim) * 1_000_000);
           imaOrigem = 'auto';
+        } else if (unidadesTrim > 0 && defeitosTrim.length === 0) {
+          imaOrigem = 'aguardando'; // tem produtividade mas falta inventário
+        } else if (defeitosTrim.length > 0 && unidadesTrim === 0) {
+          imaOrigem = 'aguardando'; // tem inventário mas falta produtividade
         }
       }
 
@@ -338,6 +332,8 @@ export default function CalibracaoPage() {
         liqTrim,
         ocupTrim,
         ima,
+        imaDefeitos,
+        imaUnidades,
         imaOrigem,
         que,
         como,
@@ -345,7 +341,7 @@ export default function CalibracaoPage() {
         aptidao,
       };
     });
-  }, [colaboradores, historico, dpmoAgregado, feedbacks, imaManual, comoManual, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup, mapaNomes]);
+  }, [colaboradores, historico, dpmoEventos, feedbacks, imaManual, comoManual, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
 
   const porProcesso = {
     Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin'),
@@ -356,6 +352,7 @@ export default function CalibracaoPage() {
   const totalAptos = linhasCalibracao.filter((l) => l.aptidao === 'APTO').length;
   const totalObs = linhasCalibracao.filter((l) => l.aptidao === 'EM OBSERVAÇÃO').length;
   const totalNaoAptos = linhasCalibracao.filter((l) => l.aptidao === 'NÃO APTO').length;
+  const totalAguardando = linhasCalibracao.filter((l) => l.imaOrigem === 'aguardando').length;
 
   async function salvarImaManual(linha: LinhaCalib, valor: number) {
     const quarterKey = `${anoNum}-${quarterSel}`;
@@ -363,13 +360,8 @@ export default function CalibracaoPage() {
       { id_groot: linha.idGroot, nome: linha.nome, processo: linha.processo, quarter_ref: quarterKey, valor_ima: valor, atualizado_em: new Date().toISOString() },
       { onConflict: 'id_groot,quarter_ref' }
     );
-    if (error) {
-      window.showToast('error', error.message);
-    } else {
-      setEditandoIma(null);
-      carregar();
-      window.showToast('success', 'IMA atualizado');
-    }
+    if (error) window.showToast('error', error.message);
+    else { setEditandoIma(null); carregar(); window.showToast('success', 'IMA atualizado'); }
   }
 
   async function salvarComoManual(linha: LinhaCalib, nota: string) {
@@ -411,7 +403,7 @@ export default function CalibracaoPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-4xl font-black mb-2">🎯 Calibração <span className="text-[#FFD700]">Trimestral</span></h1>
-        <p className="text-gray-400">QUE + COMO = Aptidão · IMA vem do DPMO oficial do Looker</p>
+        <p className="text-gray-400">IMA = (Σ Defeitos / Σ Unidades) × 1M · Bate 100% com Looker</p>
       </div>
 
       {trimestresDisponiveis.length === 0 ? (
@@ -453,12 +445,29 @@ export default function CalibracaoPage() {
                 <div className="text-2xl font-black text-red-400">{totalNaoAptos}</div>
                 <div className="text-xs text-gray-500">Não Aptos</div>
               </div>
+              {totalAguardando > 0 && (
+                <>
+                  <div className="w-px h-10 bg-[#2a2a2a]"></div>
+                  <div className="text-center">
+                    <div className="text-2xl font-black text-blue-400">{totalAguardando}</div>
+                    <div className="text-xs text-gray-500">Aguardando IMA</div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
           {mesesComDados.length > 0 && mesesComDados.length < mesesPossiveis.length && (
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm">
               <p className="text-yellow-300">ℹ️ Esse trimestre tem dados de apenas <strong>{mesesComDados.map((m) => NOMES_MESES[m]).join(', ')}</strong>.</p>
+            </div>
+          )}
+
+          {totalAguardando > 0 && (
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-sm">
+              <p className="text-blue-300">
+                ⏳ <strong>{totalAguardando} colaboradores</strong> aguardando dados de DPMO. Sobe o CSV INVENTÁRIO DPMO em MEU TIME pra completar o cálculo.
+              </p>
             </div>
           )}
 
@@ -526,24 +535,33 @@ export default function CalibracaoPage() {
                               </div>
                             ) : (
                               <div className="cursor-pointer hover:bg-[#1a1a1a] rounded px-1 py-0.5" onClick={() => { setEditandoIma(l.idGroot); setValorImaTemp(l.ima.toString()); }} title="Clica pra editar">
-                                <div className="text-white font-bold font-mono text-xs">{l.ima || '-'}</div>
+                                {l.imaOrigem === 'aguardando' ? (
+                                  <div className="text-blue-400 font-bold text-xs">⏳</div>
+                                ) : (
+                                  <div className="text-white font-bold font-mono text-xs">{l.ima || '-'}</div>
+                                )}
                                 {l.imaOrigem === 'manual' && (
                                   <div className="flex items-center justify-center gap-1">
                                     <span className="text-[8px] text-yellow-400 font-bold">manual</span>
                                     <button onClick={(e) => { e.stopPropagation(); resetarIma(l); }} className="text-[8px] text-gray-500 hover:text-red-400">↺</button>
                                   </div>
                                 )}
-                                {l.imaOrigem === 'auto' && <div className="text-[8px] text-green-400">auto</div>}
+                                {l.imaOrigem === 'auto' && (
+                                  <div className="text-[8px] text-green-400" title={`${l.imaDefeitos} defeitos / ${l.imaUnidades.toLocaleString('pt-BR')} unidades`}>
+                                    {l.imaDefeitos}/{(l.imaUnidades/1000).toFixed(0)}k
+                                  </div>
+                                )}
+                                {l.imaOrigem === 'aguardando' && (
+                                  <div className="text-[8px] text-blue-400">aguarda</div>
+                                )}
                               </div>
                             )}
                           </td>
 
-                          {/* QUE */}
                           <td className="py-2 px-2 text-center">
                             <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${corNota(l.que)}`}>{l.que}</span>
                           </td>
 
-                          {/* COMO */}
                           <td className="py-2 px-2 text-center">
                             <div className="flex items-center justify-center gap-1">
                               <select value={l.como === 'Sem feedbacks' ? '' : l.como} onChange={(e) => { if (e.target.value) salvarComoManual(l, e.target.value); }} className={`text-xs px-2 py-0.5 rounded-full font-bold border-0 cursor-pointer ${corNota(l.como)}`}>
@@ -558,7 +576,6 @@ export default function CalibracaoPage() {
                             </div>
                           </td>
 
-                          {/* APTIDÃO */}
                           <td className="py-2 px-2 text-center">
                             <span className={`text-xs px-2 py-1 rounded font-bold ${corAptidao(l.aptidao)}`}>{l.aptidao}</span>
                           </td>
@@ -572,11 +589,12 @@ export default function CalibracaoPage() {
           })}
 
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
-            <p className="font-bold mb-2">💡 Como funciona:</p>
+            <p className="font-bold mb-2">💡 Como funciona o cálculo:</p>
             <ul className="space-y-1 list-disc pl-5 text-xs">
-              <li><strong>IMA automático</strong> = média dos DPMOs do trimestre (do CSV TABELA DINÂMICA do Looker)</li>
-              <li><strong>QUE</strong> = Líquida + Ocupação + IMA (3 pontos: Supera / 1-2: Alinhado / 0: Abaixo)</li>
-              <li><strong>COMO</strong> = derivado dos feedbacks. Pode SOBRESCREVER clicando.</li>
+              <li><strong>IMA</strong> = (Σ Defeitos do INVENTÁRIO ÷ Σ Unidades da PRODUTIVIDADE) × 1M — bate 100% com Looker</li>
+              <li><strong>⏳ Aguardando</strong> = colaborador tem só 1 dos 2 CSVs (produtividade OU inventário). Sobe o outro pra completar</li>
+              <li><strong>QUE</strong> = Líquida + Ocupação + IMA (3: Supera / 1-2: Alinhado / 0: Abaixo)</li>
+              <li><strong>COMO</strong> = derivado dos feedbacks. Pode SOBRESCREVER clicando</li>
               <li><strong>APTIDÃO</strong>: QUE=Supera + COMO≥Alinhado → APTO | Algum Abaixo → NÃO APTO | Resto → EM OBSERVAÇÃO</li>
             </ul>
           </div>
