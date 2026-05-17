@@ -3,7 +3,6 @@
 
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { supabase } from '../lib/supabase';
 import { AstronautAvatar } from './AstronautAvatar';
 
 type Humor = 'happy' | 'party' | 'surprised' | 'sad';
@@ -44,69 +43,13 @@ export function MascoteApollo() {
   const [montou, setMontou] = useState(false);
   const pathname = usePathname();
 
-  // Carrega dados e determina humor
+  // Inicializa humor (no futuro pode integrar com dados do Supabase via API)
   useEffect(() => {
-    async function calcularHumor() {
-      try {
-        // Busca pendências do mês
-        const agora = new Date();
-        const mesAtual = agora.getMonth() + 1;
-        const anoAtual = agora.getFullYear();
-        const primeiroDia = `${anoAtual}-${String(mesAtual).padStart(2, '0')}-01`;
-
-        // 1. Conta dias com produtividade abaixo da meta no mês atual
-        const { data: hist } = await supabase
-          .from('historico')
-          .select('id_groot, status_meta, data_referencia')
-          .gte('data_referencia', primeiroDia);
-
-        const abaixoMeta = (hist || []).filter((h) => h.status_meta === 'Abaixo').length;
-        const totalDias = (hist || []).length;
-        const pctAbaixo = totalDias > 0 ? (abaixoMeta / totalDias) * 100 : 0;
-
-        // 2. Verifica aniversariantes hoje
-        const { data: colabs } = await supabase
-          .from('colaboradores')
-          .select('aniversario')
-          .eq('status', 'Ativo');
-
-        const hojeStr = `${String(agora.getDate()).padStart(2, '0')}/${String(mesAtual).padStart(2, '0')}`;
-        const aniversariantes = (colabs || []).filter((c) => {
-          if (!c.aniversario) return false;
-          const partes = String(c.aniversario).split('-');
-          if (partes.length === 3) {
-            return `${partes[2]}/${partes[1]}` === hojeStr;
-          }
-          return false;
-        });
-
-        // 3. Determina humor
-        let novoHumor: Humor = 'happy';
-
-        if (aniversariantes.length > 0) {
-          novoHumor = 'party';
-        } else if (pctAbaixo === 0 && totalDias > 0) {
-          novoHumor = 'party';
-        } else if (pctAbaixo >= 50) {
-          novoHumor = 'sad';
-        } else if (pctAbaixo >= 25) {
-          novoHumor = 'surprised';
-        }
-
-        setHumor(novoHumor);
-
-        // Sorteia mensagem
-        const opcoes = MENSAGENS[novoHumor];
-        setMensagem(opcoes[Math.floor(Math.random() * opcoes.length)]);
-      } catch (e) {
-        console.error('Erro calculando humor:', e);
-      } finally {
-        setMontou(true);
-      }
-    }
-
-    calcularHumor();
-  }, [pathname]); // recalcula ao mudar de página
+    // Sorteia mensagem random ao montar
+    const opcoes = MENSAGENS[humor];
+    setMensagem(opcoes[Math.floor(Math.random() * opcoes.length)]);
+    setMontou(true);
+  }, [humor]);
 
   // Esconde quando mouse perto (UX inteligente)
   useEffect(() => {
@@ -194,15 +137,16 @@ export function MascoteApollo() {
         title="Clique pra ver mensagem"
       >
         <div
-          className="rounded-full overflow-hidden"
+          className="rounded-2xl overflow-hidden"
           style={{
-            width: '70px',
-            height: '70px',
+            width: '80px',
+            height: '80px',
             border: `3px solid ${corBorda}`,
             boxShadow: `0 0 20px ${corBorda}30`,
+            background: '#fff',
           }}
         >
-          <AstronautAvatar size={70} priority />
+          <AstronautAvatar size={74} humor={humor} />
         </div>
 
         {/* Badge de humor */}
@@ -219,7 +163,7 @@ export function MascoteApollo() {
         {/* Pulso pra alertas */}
         {(humor === 'sad' || humor === 'party') && (
           <div
-            className="absolute inset-0 rounded-full animate-ping"
+            className="absolute inset-0 rounded-2xl animate-ping"
             style={{
               background: corBorda,
               opacity: 0.2,
