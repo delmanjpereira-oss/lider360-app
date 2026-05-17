@@ -637,13 +637,13 @@ export default function BoletimPage() {
                     </span>
                   </h3>
                 </div>
-                <table className="w-full text-sm">
+                <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr className="bg-[#FFD700]">
-                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">ID</th>
-                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Líquida</th>
-                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Qtd de Peças</th>
-                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Falta</th>
+                    <tr className="bg-[#FFD700]" style={{ height: '40px' }}>
+                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>ID</th>
+                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Líquida</th>
+                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Qtd de Peças</th>
+                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Falta</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -654,15 +654,15 @@ export default function BoletimPage() {
                       const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
 
                       return (
-                        <tr key={`ck-${l.id}`} className="border-b border-gray-300">
-                          <td className="py-2 px-4 text-center text-gray-800 font-bold text-sm">{l.id}</td>
-                          <td className={`py-2 px-4 text-center font-bold text-sm ${corLiq}`}>
+                        <tr key={`ck-${l.id}`} className="border-b border-gray-300" style={{ height: '36px' }}>
+                          <td className="px-4 text-center text-gray-800 font-bold text-sm" style={{ verticalAlign: 'middle', lineHeight: '1' }}>{l.id}</td>
+                          <td className={`px-4 text-center font-bold text-sm ${corLiq}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
                             {l.liquida > 0 ? l.liquida : '-'}
                           </td>
-                          <td className={`py-2 px-4 text-center font-bold text-sm ${corVol}`}>
+                          <td className={`px-4 text-center font-bold text-sm ${corVol}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
                             {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
                           </td>
-                          <td className={`py-2 px-4 text-center font-bold text-sm ${corFalta}`}>
+                          <td className={`px-4 text-center font-bold text-sm ${corFalta}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
                             {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
                           </td>
                         </tr>
@@ -684,14 +684,14 @@ export default function BoletimPage() {
                     </span>
                   </h3>
                 </div>
-                <table className="w-full text-sm">
+                <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr className="bg-[#FFD700]">
-                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">ID</th>
-                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Líquida</th>
-                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Qtd de Peças</th>
-                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Falta</th>
-                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Ocupação</th>
+                    <tr className="bg-[#FFD700]" style={{ height: '40px' }}>
+                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>ID</th>
+                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Líquida</th>
+                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Qtd de Peças</th>
+                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Falta</th>
+                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Ocupação</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -703,18 +703,18 @@ export default function BoletimPage() {
                       const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
 
                       return (
-                        <tr key={`p2m-${l.id}`} className="border-b border-gray-300">
-                          <td className="py-2 px-4 text-center text-gray-800 font-bold text-sm">{l.id}</td>
-                          <td className={`py-2 px-4 text-center font-bold text-sm ${corLiq}`}>
+                        <tr key={`p2m-${l.id}`} className="border-b border-gray-300" style={{ height: '36px' }}>
+                          <td className="px-4 text-center text-gray-800 font-bold text-sm" style={{ verticalAlign: 'middle', lineHeight: '1' }}>{l.id}</td>
+                          <td className={`px-4 text-center font-bold text-sm ${corLiq}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
                             {l.liquida > 0 ? l.liquida : '-'}
                           </td>
-                          <td className={`py-2 px-4 text-center font-bold text-sm ${corVol}`}>
+                          <td className={`px-4 text-center font-bold text-sm ${corVol}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
                             {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
                           </td>
-                          <td className={`py-2 px-4 text-center font-bold text-sm ${corFalta}`}>
+                          <td className={`px-4 text-center font-bold text-sm ${corFalta}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
                             {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
                           </td>
-                          <td className={`py-2 px-4 text-center font-bold text-sm ${corOcup}`}>
+                          <td className={`px-4 text-center font-bold text-sm ${corOcup}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
                             {l.ocupacao > 0 ? `${l.ocupacao.toFixed(0)}%` : '-'}
                           </td>
                         </tr>
