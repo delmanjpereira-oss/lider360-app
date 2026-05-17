@@ -161,7 +161,7 @@ export default function DetalheColaboradorPage() {
           setColaborador(data);
           if (data) {
             buscarHistorico(data.id_groot);
-            buscarDpmoAgregado(data.id_groot, data.nome);
+            buscarDpmoAgregado(data.id_groot, data.nome, data.processo);
             buscarFeedbacks(data.id_groot);
             buscarMetaIma(data.processo);
           }
@@ -198,13 +198,26 @@ export default function DetalheColaboradorPage() {
     }
   }
 
-  async function buscarDpmoAgregado(idGroot: string, nome: string) {
+  async function buscarDpmoAgregado(idGroot: string, nome: string, processoColaborador: string | null) {
     try {
-      // Busca por id_groot OU pelo nome (caso ainda não vinculado)
+      // Mapeia processo do cadastro pro processo do DPMO
+      // Checkin → CK, P2M → P2M, Sorting → não tem DPMO
+      const processoDpmo =
+        processoColaborador === 'Checkin' ? 'CK' :
+        processoColaborador === 'P2M' ? 'P2M' :
+        null;
+
+      if (!processoDpmo) {
+        setDpmoAgregado([]);
+        return;
+      }
+
+      // Busca por id_groot OU pelo nome (caso ainda não vinculado), filtrando pelo processo
       const { data: porId } = await supabase
         .from('dpmo_agregado')
         .select('*')
         .eq('id_groot', idGroot)
+        .eq('processo', processoDpmo)
         .order('ano', { ascending: false })
         .order('semana', { ascending: false });
 
@@ -212,6 +225,7 @@ export default function DetalheColaboradorPage() {
         .from('dpmo_agregado')
         .select('*')
         .ilike('representante', nome)
+        .eq('processo', processoDpmo)
         .is('id_groot', null);
 
       const todos: DpmoAgregado[] = [];
