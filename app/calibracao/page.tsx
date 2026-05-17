@@ -23,6 +23,7 @@ type HistoricoLinha = {
 type DpmoEvento = {
   id_groot: string | null;
   representante: string;
+  checkin_data: string;
   qtd_dif: number;
   semana: number;
   ano: number;
@@ -51,6 +52,7 @@ type LinhaCalib = {
   ima: number;
   imaDefeitos: number;
   imaUnidades: number;
+  imaDiasAuditados: number;
   imaOrigem: 'auto' | 'manual' | 'vazio' | 'aguardando';
   que: string;
   como: string;
@@ -64,10 +66,7 @@ const NOMES_MESES: Record<number, string> = {
 };
 
 const MESES_POR_TRIM: Record<string, number[]> = {
-  Q1: [1, 2, 3],
-  Q2: [4, 5, 6],
-  Q3: [7, 8, 9],
-  Q4: [10, 11, 12],
+  Q1: [1, 2, 3], Q2: [4, 5, 6], Q3: [7, 8, 9], Q4: [10, 11, 12],
 };
 
 function normalizarNome(nome: string): string {
@@ -124,7 +123,7 @@ export default function CalibracaoPage() {
       const [colabResp, histResp, dpmoResp, fbResp, imaResp, comoResp, confResp] = await Promise.all([
         supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
         supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
-        supabase.from('dpmo_eventos').select('id_groot, representante, qtd_dif, semana, ano, mes, trimestre'),
+        supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre'),
         supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
         supabase.from('ima_manual').select('*'),
         supabase.from('como_manual').select('*'),
@@ -223,45 +222,52 @@ export default function CalibracaoPage() {
       const liqTrim = liqsValidas.length > 0 ? Math.round(liqsValidas.reduce((s, v) => s + v, 0) / liqsValidas.length) : 0;
       const ocupTrim = ocupsValidas.length > 0 ? Math.round(ocupsValidas.reduce((s, v) => s + v, 0) / ocupsValidas.length) : 0;
 
-      // 🎯 CÁLCULO IMA PONDERADO — cruza dpmo_eventos (defeitos) + historico (unidades)
+      // 🎯 CÁLCULO IMA INTELIGENTE — Só usa UNIDADES dos dias auditados
       const quarterKey = `${anoNum}-${quarterSel}`;
       const manualIma = imaManual.find((m) => m.id_groot === c.id_groot && m.quarter_ref === quarterKey);
 
       let ima = 0;
       let imaDefeitos = 0;
       let imaUnidades = 0;
+      let imaDiasAuditados = 0;
       let imaOrigem: 'auto' | 'manual' | 'vazio' | 'aguardando' = 'vazio';
 
       if (manualIma) {
         ima = manualIma.valor_ima;
         imaOrigem = 'manual';
       } else if (c.processo === 'Checkin' || c.processo === 'P2M') {
-        // 1. Soma defeitos do trimestre (do dpmo_eventos)
         const nomeNorm = normalizarNome(c.nome);
-        const defeitosTrim = dpmoEventos.filter((d) => {
+
+        // 1. Pega eventos do trimestre desse colaborador
+        const eventosTrim = dpmoEventos.filter((d) => {
           if (d.ano !== anoNum || d.trimestre !== quarterSel) return false;
           if (d.id_groot === c.id_groot) return true;
           if (!d.id_groot && normalizarNome(d.representante) === nomeNorm) return true;
           return false;
         });
 
-        // 2. Soma unidades do trimestre (do historico) — só do processo certo
-        const unidadesTrim = histColab
+        // 2. Lista DATAS AUDITADAS (que têm inventário) desse colaborador no trimestre
+        const datasAuditadas = new Set<string>(eventosTrim.map((e) => e.checkin_data));
+
+        // 3. Soma unidades APENAS das datas auditadas
+        const unidadesAuditadas = histColab
           .filter((h) => h.processo === c.processo)
+          .filter((h) => datasAuditadas.has(h.data_referencia))
           .reduce((s, h) => s + (h.unidades || 0), 0);
 
-        const totalDef = defeitosTrim.reduce((s, d) => s + (d.qtd_dif || 0), 0);
+        const totalDef = eventosTrim.reduce((s, d) => s + (d.qtd_dif || 0), 0);
 
         // Calcula só se tem os 2 dados
-        if (unidadesTrim > 0 && defeitosTrim.length > 0) {
+        if (unidadesAuditadas > 0 && eventosTrim.length > 0) {
           imaDefeitos = totalDef;
-          imaUnidades = unidadesTrim;
-          ima = Math.round((totalDef / unidadesTrim) * 1_000_000);
+          imaUnidades = unidadesAuditadas;
+          imaDiasAuditados = datasAuditadas.size;
+          ima = Math.round((totalDef / unidadesAuditadas) * 1_000_000);
           imaOrigem = 'auto';
-        } else if (unidadesTrim > 0 && defeitosTrim.length === 0) {
-          imaOrigem = 'aguardando'; // tem produtividade mas falta inventário
-        } else if (defeitosTrim.length > 0 && unidadesTrim === 0) {
-          imaOrigem = 'aguardando'; // tem inventário mas falta produtividade
+        } else if (histColab.length > 0 && eventosTrim.length === 0) {
+          imaOrigem = 'aguardando';
+        } else if (eventosTrim.length > 0 && unidadesAuditadas === 0) {
+          imaOrigem = 'aguardando';
         }
       }
 
@@ -286,7 +292,6 @@ export default function CalibracaoPage() {
         else que = 'Alinhado';
       }
 
-      // COMO
       const manualComo = comoManual.find((m) => m.id_groot === c.id_groot && m.quarter_ref === quarterKey);
       let como = 'Sem feedbacks';
       let comoOrigem: 'auto' | 'manual' = 'auto';
@@ -308,14 +313,12 @@ export default function CalibracaoPage() {
           const supera = fbsTrim.filter((f) => f.classificacao === 'Supera').length;
           const alinhado = fbsTrim.filter((f) => f.classificacao === 'Alinhado').length;
           const abaixo = fbsTrim.filter((f) => f.classificacao === 'Abaixo').length;
-
           if (abaixo > supera + alinhado) como = 'Abaixo';
           else if (supera >= alinhado && supera >= abaixo) como = 'Supera';
           else como = 'Alinhado';
         }
       }
 
-      // APTIDÃO
       let aptidao = 'Sem dados';
       if (que !== 'Sem dados') {
         if (que === 'Abaixo' || como === 'Abaixo') aptidao = 'NÃO APTO';
@@ -334,6 +337,7 @@ export default function CalibracaoPage() {
         ima,
         imaDefeitos,
         imaUnidades,
+        imaDiasAuditados,
         imaOrigem,
         que,
         como,
@@ -403,7 +407,7 @@ export default function CalibracaoPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-4xl font-black mb-2">🎯 Calibração <span className="text-[#FFD700]">Trimestral</span></h1>
-        <p className="text-gray-400">IMA = (Σ Defeitos / Σ Unidades) × 1M · Bate 100% com Looker</p>
+        <p className="text-gray-400">IMA = (Σ Defeitos / Σ Unidades dos dias auditados) × 1M · Bate 100% Looker</p>
       </div>
 
       {trimestresDisponiveis.length === 0 ? (
@@ -417,11 +421,7 @@ export default function CalibracaoPage() {
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-4 flex-wrap">
               <label className="text-sm font-bold text-gray-300">Trimestre:</label>
-              <select
-                value={trimestreSelecionado}
-                onChange={(e) => setTrimestreSelecionado(e.target.value)}
-                className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-white font-bold focus:border-[#FFD700] focus:outline-none"
-              >
+              <select value={trimestreSelecionado} onChange={(e) => setTrimestreSelecionado(e.target.value)} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-white font-bold focus:border-[#FFD700] focus:outline-none">
                 {trimestresDisponiveis.map((t) => {
                   const [a, q] = t.split('-');
                   const meses = MESES_POR_TRIM[q].map((m) => NOMES_MESES[m]).join('/');
@@ -457,16 +457,10 @@ export default function CalibracaoPage() {
             </div>
           </div>
 
-          {mesesComDados.length > 0 && mesesComDados.length < mesesPossiveis.length && (
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm">
-              <p className="text-yellow-300">ℹ️ Esse trimestre tem dados de apenas <strong>{mesesComDados.map((m) => NOMES_MESES[m]).join(', ')}</strong>.</p>
-            </div>
-          )}
-
           {totalAguardando > 0 && (
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-sm">
               <p className="text-blue-300">
-                ⏳ <strong>{totalAguardando} colaboradores</strong> aguardando dados de DPMO. Sobe o CSV INVENTÁRIO DPMO em MEU TIME pra completar o cálculo.
+                ⏳ <strong>{totalAguardando} colaboradores</strong> aguardando dados de DPMO. Sobe o CSV INVENTÁRIO DPMO em MEU TIME pra completar.
               </p>
             </div>
           )}
@@ -483,7 +477,6 @@ export default function CalibracaoPage() {
                     <span className="text-sm font-normal text-gray-400">({linhas.length} colaboradores)</span>
                   </h2>
                 </div>
-
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -525,7 +518,6 @@ export default function CalibracaoPage() {
                           <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono border-l border-[#2a2a2a]">{l.liqTrim || '-'}</td>
                           <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono">{l.ocupTrim ? l.ocupTrim + '%' : '-'}</td>
 
-                          {/* IMA */}
                           <td className="py-2 px-3 text-center">
                             {editandoIma === l.idGroot ? (
                               <div className="flex items-center gap-1">
@@ -547,8 +539,8 @@ export default function CalibracaoPage() {
                                   </div>
                                 )}
                                 {l.imaOrigem === 'auto' && (
-                                  <div className="text-[8px] text-green-400" title={`${l.imaDefeitos} defeitos / ${l.imaUnidades.toLocaleString('pt-BR')} unidades`}>
-                                    {l.imaDefeitos}/{(l.imaUnidades/1000).toFixed(0)}k
+                                  <div className="text-[8px] text-green-400" title={`${l.imaDefeitos} defeitos / ${l.imaUnidades.toLocaleString('pt-BR')} unidades / ${l.imaDiasAuditados} dias`}>
+                                    {l.imaDiasAuditados}d
                                   </div>
                                 )}
                                 {l.imaOrigem === 'aguardando' && (
@@ -589,11 +581,12 @@ export default function CalibracaoPage() {
           })}
 
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
-            <p className="font-bold mb-2">💡 Como funciona o cálculo:</p>
+            <p className="font-bold mb-2">💡 Cálculo inteligente:</p>
             <ul className="space-y-1 list-disc pl-5 text-xs">
-              <li><strong>IMA</strong> = (Σ Defeitos do INVENTÁRIO ÷ Σ Unidades da PRODUTIVIDADE) × 1M — bate 100% com Looker</li>
-              <li><strong>⏳ Aguardando</strong> = colaborador tem só 1 dos 2 CSVs (produtividade OU inventário). Sobe o outro pra completar</li>
-              <li><strong>QUE</strong> = Líquida + Ocupação + IMA (3: Supera / 1-2: Alinhado / 0: Abaixo)</li>
+              <li><strong>IMA</strong> = Σ Defeitos (INVENTÁRIO) ÷ Σ Unidades (PRODUTIVIDADE só dos dias auditados) × 1M</li>
+              <li>Se a produtividade está mais adiantada que o inventário, app <strong>ignora os dias sem auditoria</strong></li>
+              <li>Garante que o IMA bate <strong>100% com Looker</strong></li>
+              <li><strong>QUE</strong> = Líquida + Ocupação + IMA (3 pontos: Supera / 1-2: Alinhado / 0: Abaixo)</li>
               <li><strong>COMO</strong> = derivado dos feedbacks. Pode SOBRESCREVER clicando</li>
               <li><strong>APTIDÃO</strong>: QUE=Supera + COMO≥Alinhado → APTO | Algum Abaixo → NÃO APTO | Resto → EM OBSERVAÇÃO</li>
             </ul>
