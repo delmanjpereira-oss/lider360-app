@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import Toaster from './components/Toaster';
 import ConfirmModal from './components/ConfirmModal';
+import { MascoteApollo } from './components/MascoteApollo';
 
 export const metadata: Metadata = {
   title: 'LIDER 360',
@@ -34,6 +35,7 @@ export default function RootLayout({
         </div>
         <Toaster />
         <ConfirmModal />
+        <MascoteApollo />
       </body>
     </html>
   );
