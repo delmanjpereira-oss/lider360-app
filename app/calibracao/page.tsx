@@ -511,18 +511,18 @@ export default function CalibracaoPage() {
         <thead>
           <!-- Linha de SEÇÕES -->
           <tr>
-            <th rowspan="2" style="padding: 14px 16px; text-align: center; background: #1a1a1a; color: #FFD700; font-size: 13px; font-weight: 900; border-bottom: 2px solid #FFD700; vertical-align: middle; min-width: 140px; letter-spacing: 0.5px;">
-              ID COLABORADOR
+            <th rowspan="2" style="padding: 16px 18px; text-align: center; background: #2a2a2a; color: #FFD700; font-size: 14px; font-weight: 900; border: 2px solid #FFD700; vertical-align: middle; min-width: 160px;">
+              ID<br/>COLABORADOR
             </th>
-            <th colspan="${mesesTrim.length}" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #FFD700, #d4a017); color: #000; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #FFD700;">
+            <th colspan="${mesesTrim.length}" style="padding: 14px 12px; text-align: center; background: #d4a017; color: #000; font-weight: 900; font-size: 13px; border: 2px solid #FFD700;">
               📈 PRODUTIVIDADE
             </th>
             ${colsQualidade > 0 ? `
-              <th colspan="${colsQualidade}" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #a855f7;">
+              <th colspan="${colsQualidade}" style="padding: 14px 12px; text-align: center; background: #7c3aed; color: #fff; font-weight: 900; font-size: 13px; border: 2px solid #a855f7;">
                 🎯 QUALIDADE
               </th>
             ` : ''}
-            <th rowspan="2" style="padding: 14px 16px; text-align: center; background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 900; font-size: 13px; letter-spacing: 0.5px; border: 1px solid #10b981; vertical-align: middle; min-width: 140px;">
+            <th rowspan="2" style="padding: 16px 18px; text-align: center; background: #047857; color: #ffffff; font-weight: 900; font-size: 14px; border: 2px solid #10b981; vertical-align: middle; min-width: 160px;">
               🏆 TRIMESTRE
             </th>
           </tr>
