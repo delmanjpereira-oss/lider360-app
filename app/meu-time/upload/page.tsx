@@ -116,6 +116,42 @@ function classificar(
   return 'Sem dados';
 }
 
+// 🎯 Detecta data no nome do arquivo
+// Formatos suportados: 2026-05-16, 2026_05_16, 16-05-2026, 16_05_2026, 2026.05.16
+function detectarDataNoNome(nomeArquivo: string): string | null {
+  // Limpa o nome (remove extensão e caracteres especiais)
+  const nome = nomeArquivo.replace(/\.csv$/i, '');
+
+  // Padrão 1: YYYY-MM-DD ou YYYY_MM_DD ou YYYY.MM.DD (ano primeiro)
+  const padraoAno = nome.match(/(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})/);
+  if (padraoAno) {
+    const ano = padraoAno[1];
+    const mes = padraoAno[2].padStart(2, '0');
+    const dia = padraoAno[3].padStart(2, '0');
+    // Valida
+    const mesNum = parseInt(mes);
+    const diaNum = parseInt(dia);
+    if (mesNum >= 1 && mesNum <= 12 && diaNum >= 1 && diaNum <= 31) {
+      return `${ano}-${mes}-${dia}`;
+    }
+  }
+
+  // Padrão 2: DD-MM-YYYY ou DD_MM_YYYY (dia primeiro)
+  const padraoDia = nome.match(/(\d{1,2})[-_.](\d{1,2})[-_.](20\d{2})/);
+  if (padraoDia) {
+    const dia = padraoDia[1].padStart(2, '0');
+    const mes = padraoDia[2].padStart(2, '0');
+    const ano = padraoDia[3];
+    const mesNum = parseInt(mes);
+    const diaNum = parseInt(dia);
+    if (mesNum >= 1 && mesNum <= 12 && diaNum >= 1 && diaNum <= 31) {
+      return `${ano}-${mes}-${dia}`;
+    }
+  }
+
+  return null;
+}
+
 export default function UploadPage() {
   const [arquivo, setArquivo] = useState<File | null>(null);
   const [dataRef, setDataRef] = useState(
@@ -161,6 +197,17 @@ export default function UploadPage() {
     if (!f) return;
 
     console.log('📂 Arquivo selecionado:', f.name);
+
+    // 🎯 Tenta detectar a data no nome do arquivo
+    // Formatos suportados: 2026-05-16, 2026_05_16, 16-05-2026, 16_05_2026
+    const dataDetectada = detectarDataNoNome(f.name);
+    if (dataDetectada) {
+      setDataRef(dataDetectada);
+      console.log('📅 Data detectada automaticamente:', dataDetectada);
+      if (typeof window !== 'undefined' && window.showToast) {
+        window.showToast('info', `Data detectada: ${dataDetectada.split('-').reverse().join('/')}`);
+      }
+    }
 
     setArquivo(f);
     setErro(null);
@@ -535,6 +582,9 @@ export default function UploadPage() {
               onChange={(e) => setDataRef(e.target.value)}
               className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-white focus:border-[#FFD700] focus:outline-none"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              ✨ Detectada automaticamente pelo nome do arquivo (se tiver data)
+            </p>
           </div>
 
           <div>
