@@ -1,57 +1,93 @@
 // app/components/MascoteApollo.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { AstronautAvatar } from './AstronautAvatar';
 
 type Humor = 'happy' | 'party' | 'surprised' | 'sad';
+type Mensagem = { titulo: string; texto: string };
 
-type MensagemHumor = {
-  titulo: string;
-  texto: string;
-};
-
-const MENSAGENS: Record<Humor, MensagemHumor[]> = {
-  happy: [
-    { titulo: 'Tudo tranquilo', texto: 'Time alinhado, poucas pendências. Continue assim! 🚀' },
-    { titulo: 'Tá fluindo', texto: 'Operação rodando bem. Mantém o ritmo!' },
-    { titulo: 'Bom trabalho', texto: 'Equipe está no caminho certo. Parabéns pela liderança!' },
-  ],
-  party: [
-    { titulo: '🎉 Tudo zerado!', texto: 'Sem pendências, sem ofensores! Hora de comemorar com o time!' },
-    { titulo: '🏆 Time campeão', texto: 'Todos batendo a meta! Você é referência!' },
-    { titulo: '🎊 Resultados excelentes', texto: 'O time está dando show! Continue inspirando!' },
-  ],
-  surprised: [
-    { titulo: '⚠️ Atenção, líder!', texto: 'Algumas pendências precisam de olhar. Dá uma checada quando puder.' },
-    { titulo: '👀 Olho aqui', texto: 'Alguns colaboradores merecem atenção essa semana.' },
-    { titulo: '🔔 Tem pendência', texto: 'Não deixa acumular! Resolva os pontos rápido.' },
-  ],
-  sad: [
-    { titulo: '🚨 Emergência', texto: 'Muita coisa acumulada! Hora de priorizar feedbacks urgentes.' },
-    { titulo: '📉 Atenção máxima', texto: 'Time precisa de você agora. Vamos colocar a casa em ordem!' },
-    { titulo: '🆘 Crítico', texto: 'Vários colaboradores com indicadores ruins. Bora resolver?' },
-  ],
-};
+// Configurações de timing
+const INTERVALO_ENTRE_MSGS = 35000; // 35s entre uma mensagem e outra
+const DURACAO_MSG = 9000; // 9s que a mensagem fica visível
+const DELAY_INICIAL = 3000; // 3s pra primeira mensagem aparecer
 
 export function MascoteApollo() {
   const [humor, setHumor] = useState<Humor>('happy');
+  const [mensagens, setMensagens] = useState<Mensagem[]>([]);
+  const [indiceMsg, setIndiceMsg] = useState(0);
+  const [bolhaVisivel, setBolhaVisivel] = useState(false);
   const [escondido, setEscondido] = useState(false);
-  const [bolhaAberta, setBolhaAberta] = useState(false);
-  const [mensagem, setMensagem] = useState<MensagemHumor>(MENSAGENS.happy[0]);
   const [montou, setMontou] = useState(false);
   const pathname = usePathname();
+  const ciclosRef = useRef<NodeJS.Timeout[]>([]);
 
-  // Inicializa humor (no futuro pode integrar com dados do Supabase via API)
+  // 🎯 Busca dados da API ao montar/mudar página
   useEffect(() => {
-    // Sorteia mensagem random ao montar
-    const opcoes = MENSAGENS[humor];
-    setMensagem(opcoes[Math.floor(Math.random() * opcoes.length)]);
-    setMontou(true);
-  }, [humor]);
+    async function buscarStatus() {
+      try {
+        const res = await fetch('/api/mascote-status');
+        const data = await res.json();
+        setHumor(data.humor || 'happy');
+        setMensagens(data.mensagens || []);
+      } catch (e) {
+        console.error('Erro buscando mascote:', e);
+        // Fallback se a API falhar
+        setMensagens([
+          { titulo: '👋 Olá!', texto: 'Bem-vindo ao LIDER 360!' },
+        ]);
+      } finally {
+        setMontou(true);
+      }
+    }
 
-  // Esconde quando mouse perto (UX inteligente)
+    buscarStatus();
+
+    // Re-busca dados a cada 5 minutos (atualização automática)
+    const intervalRefresh = setInterval(buscarStatus, 5 * 60 * 1000);
+    return () => clearInterval(intervalRefresh);
+  }, [pathname]);
+
+  // 🎯 Ciclo automático de mensagens
+  useEffect(() => {
+    if (!montou || mensagens.length === 0) return;
+
+    // Limpa timers anteriores
+    ciclosRef.current.forEach((t) => clearTimeout(t));
+    ciclosRef.current = [];
+
+    function mostrarProximaMensagem(indice: number) {
+      setIndiceMsg(indice % mensagens.length);
+      setBolhaVisivel(true);
+
+      // Esconde depois de DURACAO_MSG
+      const timerEsconder = setTimeout(() => {
+        setBolhaVisivel(false);
+      }, DURACAO_MSG);
+      ciclosRef.current.push(timerEsconder);
+
+      // Mostra próxima depois de INTERVALO_ENTRE_MSGS
+      const timerProxima = setTimeout(() => {
+        mostrarProximaMensagem(indice + 1);
+      }, INTERVALO_ENTRE_MSGS);
+      ciclosRef.current.push(timerProxima);
+    }
+
+    // Primeira mensagem com delay inicial
+    const timerInicial = setTimeout(() => {
+      mostrarProximaMensagem(0);
+    }, DELAY_INICIAL);
+    ciclosRef.current.push(timerInicial);
+
+    // Cleanup
+    return () => {
+      ciclosRef.current.forEach((t) => clearTimeout(t));
+      ciclosRef.current = [];
+    };
+  }, [mensagens, montou]);
+
+  // 🎯 Esconde quando mouse perto (UX inteligente)
   useEffect(() => {
     function handleMouseMove(e: MouseEvent) {
       const el = document.getElementById('mascoteApollo');
@@ -62,7 +98,7 @@ export function MascoteApollo() {
         e.clientX <= rect.right + 20 &&
         e.clientY >= rect.top - 70 &&
         e.clientY <= rect.bottom + 20;
-      setEscondido(isNear && !bolhaAberta);
+      setEscondido(isNear);
     }
 
     function handleFocusIn(e: FocusEvent) {
@@ -85,12 +121,9 @@ export function MascoteApollo() {
       document.removeEventListener('focusin', handleFocusIn);
       document.removeEventListener('focusout', handleFocusOut);
     };
-  }, [bolhaAberta]);
+  }, []);
 
-  // Não renderiza no SSR
   if (!montou) return null;
-
-  // Não mostra em rotas de auth/login
   if (pathname?.includes('/login')) return null;
 
   const corBorda =
@@ -102,39 +135,44 @@ export function MascoteApollo() {
       ? '#a855f7'
       : '#FFD700';
 
+  const mensagemAtual = mensagens[indiceMsg];
+
   return (
     <div
       id="mascoteApollo"
-      className={`fixed right-4 bottom-4 z-50 flex items-end gap-2 transition-all duration-200 ${
+      className={`fixed right-4 bottom-4 z-50 flex items-end gap-2 transition-all duration-300 ${
         escondido ? 'opacity-0 translate-y-4 pointer-events-none' : ''
       } ${humor === 'party' ? 'animate-party-float' : 'animate-mascot-float'}`}
     >
-      {/* Bolha de mensagem */}
-      {bolhaAberta && (
+      {/* Bolha de mensagem (auto) */}
+      {bolhaVisivel && mensagemAtual && (
         <div
-          className="bg-gradient-to-b from-[#fffef8] to-[#fff7db] rounded-2xl rounded-br-md p-3 border-2 shadow-2xl max-w-[280px] cursor-pointer"
+          className="bg-gradient-to-b from-[#fffef8] to-[#fff7db] rounded-2xl rounded-br-md p-3 border-2 shadow-2xl max-w-[280px] cursor-pointer animate-fade-in-up"
           style={{ borderColor: `${corBorda}80` }}
-          onClick={() => setBolhaAberta(false)}
+          onClick={() => setBolhaVisivel(false)}
         >
           <strong className="block text-[#8a6400] text-[10px] uppercase tracking-widest mb-1 font-black">
-            🚀 Assistente Apollo
+            🚀 Apollo
           </strong>
           <p className="text-[13px] font-bold text-[#1c1c1c] leading-snug">
-            <strong className="block mb-1">{mensagem.titulo}</strong>
-            {mensagem.texto}
+            <strong className="block mb-1">{mensagemAtual.titulo}</strong>
+            {mensagemAtual.texto}
           </p>
-          <p className="text-[10px] text-gray-500 mt-2 text-right">clique pra fechar</p>
         </div>
       )}
 
-      {/* Astronauta (sem fundo, sem badge) */}
+      {/* Astronauta */}
       <button
-        onClick={() => setBolhaAberta(!bolhaAberta)}
+        onClick={() => {
+          // Clique força mostrar próxima mensagem
+          setBolhaVisivel(true);
+          setIndiceMsg((i) => (i + 1) % mensagens.length);
+        }}
         className="relative cursor-pointer transition-transform hover:scale-110"
         style={{
           filter: `drop-shadow(0 8px 20px ${corBorda}60) drop-shadow(0 0 8px ${corBorda}40)`,
         }}
-        title="Clique pra ver mensagem"
+        title="Clique pra ver próxima mensagem"
       >
         <AstronautAvatar size={90} humor={humor} />
 
