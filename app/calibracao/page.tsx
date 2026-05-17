@@ -214,11 +214,8 @@ export default function CalibracaoPage() {
         const { mes } = getTrimestreDeData(h.data_referencia);
         if (!mediasPorMes[mes]) mediasPorMes[mes] = { liq: [], ocup: [] };
         if (h.prod_liquida > 0) mediasPorMes[mes].liq.push(h.prod_liquida);
-        // ⚠️ Utilização SÓ pra Checkin (vem do CSV de produtividade)
-        if (c.processo === 'Checkin' && h.utilizacao) {
-          const num = parseFloat(h.utilizacao.replace('%', '').replace(',', '.'));
-          if (!isNaN(num) && num > 0) mediasPorMes[mes].ocup.push(num);
-        }
+        // ⚠️ Utilização do CSV de produtividade NÃO é usada como ocupação
+        // Ocupação real virá de tabelas específicas (ocupacao_p2m, ocupacao_checkin futuro)
       });
 
       // 🎯 Pra P2M, ocupação vem da tabela ocupacao_p2m (CSV Totefullness)
@@ -232,6 +229,10 @@ export default function CalibracaoPage() {
           if (o.ocupacao_pct > 0) mediasPorMes[o.mes].ocup.push(o.ocupacao_pct);
         });
       }
+
+      // 🚧 Pra Checkin, ocupação vem da tabela ocupacao_checkin (FUTURA — ainda não criada)
+      // Por enquanto, Checkin NÃO TEM ocupação na calibração
+      // Quando criar a tabela e o CSV específico, adicionar lógica aqui similar à do P2M
 
       const mediaMes = (mes: number, tipo: 'liq' | 'ocup') => {
         const arr = mediasPorMes[mes]?.[tipo] || [];
@@ -406,20 +407,25 @@ export default function CalibracaoPage() {
     const linhas = porProcesso[processo];
     if (linhas.length === 0) return;
 
+    const incluiOcup = processo !== 'Checkin'; // Checkin não tem ocupação ainda
+
     const headers: string[] = ['ID', 'Nome', 'Processo'];
     mesesComDados.forEach((m) => {
-      headers.push(`${NOMES_MESES[m]}_Liq`, `${NOMES_MESES[m]}_Ocup`);
+      headers.push(`${NOMES_MESES[m]}_Liq`);
+      if (incluiOcup) headers.push(`${NOMES_MESES[m]}_Ocup`);
     });
-    headers.push('Trim_Liq', 'Trim_Ocup', 'IMA', 'QUE', 'COMO', 'APTIDAO');
+    headers.push('Trim_Liq');
+    if (incluiOcup) headers.push('Trim_Ocup');
+    headers.push('IMA', 'QUE', 'COMO', 'APTIDAO');
 
     const rows = linhas.map((l) => {
       const row: (string | number)[] = [l.idGroot, l.nome, l.processo];
       mesesComDados.forEach((m) => {
         row.push(l.medMes[m]?.liq || '-');
-        row.push(l.medMes[m]?.ocup ? `${l.medMes[m].ocup}%` : '-');
+        if (incluiOcup) row.push(l.medMes[m]?.ocup ? `${l.medMes[m].ocup}%` : '-');
       });
       row.push(l.liqTrim || '-');
-      row.push(l.ocupTrim ? `${l.ocupTrim}%` : '-');
+      if (incluiOcup) row.push(l.ocupTrim ? `${l.ocupTrim}%` : '-');
       row.push(l.imaOrigem === 'aguardando' ? 'aguardando' : (l.ima || '-'));
       row.push(l.que);
       row.push(l.como);
@@ -452,7 +458,6 @@ export default function CalibracaoPage() {
     if (linhas.length === 0) return;
 
     const procEmoji = processo === 'Checkin' ? '📦' : processo === 'P2M' ? '🚚' : '📋';
-    const corProc = processo === 'Checkin' ? '#22d3ee' : processo === 'P2M' ? '#f97316' : '#10b981';
 
     // 🎯 Acha a DATA MÁXIMA dos dados (até quando os dados foram puxados)
     let dataMax = '';
@@ -464,17 +469,31 @@ export default function CalibracaoPage() {
     const mesAtualNome = new Date().toLocaleDateString('pt-BR', { month: 'long' }).toUpperCase();
     const anoAtual = new Date().getFullYear();
 
-    // Quantidade de colunas de qualidade depende do processo
+    // 🎯 Definição de colunas de QUALIDADE por processo
+    // Checkin: só IMA (ocupação futura, ainda não tem CSV)
+    // P2M: IMA + Ocupação
+    // Sorting: nada
     const temIma = processo === 'Checkin' || processo === 'P2M';
-    const temOcup = processo === 'P2M';
+    const temOcup = processo === 'P2M'; // Checkin não tem por enquanto
     const colsQualidade = (temIma ? 1 : 0) + (temOcup ? 1 : 0);
 
     const div = document.createElement('div');
     div.style.cssText = `
       position: fixed; top: -9999px; left: -9999px;
-      width: 760px; padding: 24px; background: #0a0a0a; color: white;
+      width: 700px; padding: 24px; background: #0a0a0a; color: white;
       font-family: -apple-system, system-ui, sans-serif;
     `;
+
+    // 🎨 Cores simples: VERDE (na meta ou superando) + VERMELHO (abaixo)
+    function corStatus(valor: number, meta: number, inverso: boolean = false): string {
+      if (valor === 0) return '#6b7280'; // cinza (sem dados)
+      if (inverso) {
+        // IMA: quanto menor melhor
+        return valor <= meta ? '#10b981' : '#ef4444';
+      }
+      // Produtividade e Ocupação: quanto maior melhor
+      return valor >= meta ? '#10b981' : '#ef4444';
+    }
 
     div.innerHTML = `
       <!-- HEADER -->
@@ -489,25 +508,32 @@ export default function CalibracaoPage() {
 
       <!-- TABELA -->
       <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-        <!-- Linha de cabeçalhos de SEÇÃO -->
         <thead>
+          <!-- Linha de SEÇÕES -->
           <tr>
-            <th rowspan="2" style="padding: 8px 6px; text-align: left; border-bottom: 2px solid #FFD700; background: #1a1a1a; color: #FFD700; font-size: 11px;">ID</th>
-            <th colspan="2" style="padding: 8px 6px; text-align: center; background: linear-gradient(135deg, #FFD700, #d4a017); color: #000; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #FFD700;">📈 PRODUTIVIDADE</th>
+            <th rowspan="2" style="padding: 10px 8px; text-align: center; background: #1a1a1a; color: #FFD700; font-size: 11px; font-weight: 900; border-bottom: 2px solid #FFD700; vertical-align: middle;">
+              ID<br/>COLABORADOR
+            </th>
+            <th colspan="1" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #FFD700, #d4a017); color: #000; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #FFD700;">
+              📈 PRODUTIVIDADE
+            </th>
             ${colsQualidade > 0 ? `
-              <th colspan="${colsQualidade}" style="padding: 8px 6px; text-align: center; background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #a855f7;">🎯 QUALIDADE</th>
+              <th colspan="${colsQualidade}" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #a855f7;">
+                🎯 QUALIDADE
+              </th>
             ` : ''}
-            <th rowspan="2" style="padding: 8px 6px; text-align: center; background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #10b981;">🏆 TRIM</th>
+            <th rowspan="2" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #10b981; vertical-align: middle;">
+              🏆<br/>TRIMESTRE
+            </th>
           </tr>
-          <!-- Linha de sub-cabeçalhos -->
+          <!-- Linha de SUB-CABEÇALHOS -->
           <tr style="background: #1a1a1a;">
-            <th style="padding: 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #FFD700; font-size: 10px; font-weight: bold;">Líq (pç/h)</th>
-            <th style="padding: 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #FFD700; font-size: 10px; font-weight: bold;">Status</th>
+            <th style="padding: 7px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #FFD700; font-size: 10px; font-weight: bold;">Líquida (pç/h)</th>
             ${temIma ? `
-              <th style="padding: 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">IMA</th>
+              <th style="padding: 7px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">IMA</th>
             ` : ''}
             ${temOcup ? `
-              <th style="padding: 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">Ocupação</th>
+              <th style="padding: 7px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">Ocupação</th>
             ` : ''}
           </tr>
         </thead>
@@ -516,59 +542,47 @@ export default function CalibracaoPage() {
             const isPar = idx % 2 === 0;
             const bg = isPar ? '#141414' : '#0f0f0f';
 
-            // PRODUTIVIDADE - Líquida do trimestre
+            // PRODUTIVIDADE
             const liq = l.liqTrim || 0;
             const metaL = processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
-            let corLiq = '#6b7280', emojiLiq = '⏳', txtLiq = '-';
-            if (liq > 0) {
-              if (liq >= metaL * 1.05) { corLiq = '#10b981'; emojiLiq = '🟢'; txtLiq = 'Supera'; }
-              else if (liq >= metaL) { corLiq = '#3b82f6'; emojiLiq = '🔵'; txtLiq = 'Na meta'; }
-              else { corLiq = '#ef4444'; emojiLiq = '🔴'; txtLiq = 'Abaixo'; }
-            }
+            const corLiq = corStatus(liq, metaL);
 
             // IMA
             let imaHtml = '';
             if (temIma) {
               const ima = l.ima || 0;
               const metaI = processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
-              let corIma = '#6b7280', imaTxt = '⏳';
+              let corIma = '#6b7280', imaTxt = '⏳ aguarda';
               if (l.imaOrigem === 'aguardando') {
-                corIma = '#3b82f6';
-                imaTxt = '⏳ aguarda';
+                corIma = '#6b7280';
+                imaTxt = '⏳';
               } else if (ima > 0) {
-                if (ima <= metaI * 0.7) { corIma = '#10b981'; imaTxt = `🟢 ${ima.toLocaleString('pt-BR')}`; }
-                else if (ima <= metaI) { corIma = '#3b82f6'; imaTxt = `🔵 ${ima.toLocaleString('pt-BR')}`; }
-                else { corIma = '#ef4444'; imaTxt = `🔴 ${ima.toLocaleString('pt-BR')}`; }
+                corIma = corStatus(ima, metaI, true); // inverso (quanto menor melhor)
+                imaTxt = ima.toLocaleString('pt-BR');
               }
-              imaHtml = `<td style="padding: 8px 6px; text-align: center; color: ${corIma}; font-family: monospace; font-weight: bold; font-size: 12px;">${imaTxt}</td>`;
+              imaHtml = `<td style="padding: 10px 8px; text-align: center; color: ${corIma}; font-family: monospace; font-weight: bold; font-size: 13px;">${imaTxt}</td>`;
             }
 
-            // OCUPAÇÃO (só P2M)
+            // OCUPAÇÃO (só P2M por enquanto)
             let ocupHtml = '';
             if (temOcup) {
               const ocup = l.ocupTrim || 0;
               const metaO = metaOcup.p2m;
               let corOcup = '#6b7280', ocupTxt = '⏳';
               if (ocup > 0) {
-                if (ocup >= metaO * 1.1) { corOcup = '#10b981'; ocupTxt = `🟢 ${ocup}%`; }
-                else if (ocup >= metaO) { corOcup = '#3b82f6'; ocupTxt = `🔵 ${ocup}%`; }
-                else { corOcup = '#f59e0b'; ocupTxt = `🟡 ${ocup}%`; }
+                corOcup = corStatus(ocup, metaO);
+                ocupTxt = `${ocup}%`;
               }
-              ocupHtml = `<td style="padding: 8px 6px; text-align: center; color: ${corOcup}; font-family: monospace; font-weight: bold; font-size: 12px;">${ocupTxt}</td>`;
+              ocupHtml = `<td style="padding: 10px 8px; text-align: center; color: ${corOcup}; font-family: monospace; font-weight: bold; font-size: 13px;">${ocupTxt}</td>`;
             }
-
-            // TRIMESTRE GERAL - usa a líquida do trim como referência
-            const corTrim = corLiq;
-            const trimTxt = liq > 0 ? `${liq}` : '-';
 
             return `
               <tr style="background: ${bg}; border-bottom: 1px solid #2a2a2a;">
-                <td style="padding: 8px 6px; color: white; font-weight: bold; font-family: monospace; font-size: 12px;">${l.idGroot}</td>
-                <td style="padding: 8px 6px; text-align: center; color: ${corLiq}; font-family: monospace; font-weight: bold; font-size: 13px;">${liq || '-'}</td>
-                <td style="padding: 8px 6px; text-align: center; color: ${corLiq}; font-weight: bold; font-size: 11px;">${emojiLiq} ${txtLiq}</td>
+                <td style="padding: 10px 8px; color: white; font-weight: bold; font-family: monospace; font-size: 13px; text-align: center;">${l.idGroot}</td>
+                <td style="padding: 10px 8px; text-align: center; color: ${corLiq}; font-family: monospace; font-weight: bold; font-size: 14px;">${liq || '-'}</td>
                 ${imaHtml}
                 ${ocupHtml}
-                <td style="padding: 8px 6px; text-align: center; background: rgba(16, 185, 129, 0.08); color: ${corTrim}; font-family: monospace; font-weight: 900; font-size: 13px;">${trimTxt}</td>
+                <td style="padding: 10px 8px; text-align: center; background: rgba(16, 185, 129, 0.08); color: ${corLiq}; font-family: monospace; font-weight: 900; font-size: 14px;">${liq || '-'}</td>
               </tr>
             `;
           }).join('')}
@@ -576,12 +590,10 @@ export default function CalibracaoPage() {
       </table>
 
       <!-- LEGENDA -->
-      <div style="margin-top: 12px; padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; font-size: 10px;">
-        <span style="color: #10b981;">🟢 Supera</span>
-        <span style="color: #3b82f6;">🔵 Na meta</span>
-        <span style="color: #f59e0b;">🟡 Atenção</span>
-        <span style="color: #ef4444;">🔴 Abaixo</span>
-        <span style="color: #6b7280;">⏳ Sem dados</span>
+      <div style="margin-top: 14px; padding: 10px 16px; background: #1a1a1a; border-radius: 8px; display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; font-size: 11px; font-weight: bold;">
+        <span style="color: #10b981;">🟢 NA META</span>
+        <span style="color: #ef4444;">🔴 ABAIXO</span>
+        <span style="color: #6b7280;">⏳ AGUARDANDO DADOS</span>
       </div>
 
       <!-- RODAPÉ -->
@@ -719,9 +731,9 @@ export default function CalibracaoPage() {
                       <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400">
                         <th className="py-3 px-3" rowSpan={2}>Colab.</th>
                         {mesesComDados.map((m) => (
-                          <th key={m} colSpan={2} className="py-3 px-2 text-center border-l border-[#2a2a2a]">{NOMES_MESES[m]}</th>
+                          <th key={m} colSpan={proc === 'Checkin' ? 1 : 2} className="py-3 px-2 text-center border-l border-[#2a2a2a]">{NOMES_MESES[m]}</th>
                         ))}
-                        <th colSpan={2} className="py-3 px-2 text-center bg-[#0a0a0a] border-l border-[#2a2a2a]">Trim.</th>
+                        <th colSpan={proc === 'Checkin' ? 1 : 2} className="py-3 px-2 text-center bg-[#0a0a0a] border-l border-[#2a2a2a]">Trim.</th>
                         <th className="py-3 px-3 text-center" rowSpan={2}>IMA</th>
                         <th className="py-3 px-2 text-center" rowSpan={2}>QUE</th>
                         <th className="py-3 px-2 text-center" rowSpan={2}>COMO</th>
@@ -731,11 +743,11 @@ export default function CalibracaoPage() {
                         {mesesComDados.map((m) => (
                           <>
                             <th key={`${m}-l`} className="py-1 text-center border-l border-[#2a2a2a]">Líq</th>
-                            <th key={`${m}-o`} className="py-1 text-center">Oc%</th>
+                            {proc !== 'Checkin' && <th key={`${m}-o`} className="py-1 text-center">Oc%</th>}
                           </>
                         ))}
                         <th className="py-1 text-center bg-[#0a0a0a] border-l border-[#2a2a2a]">Líq</th>
-                        <th className="py-1 text-center bg-[#0a0a0a]">Oc%</th>
+                        {proc !== 'Checkin' && <th className="py-1 text-center bg-[#0a0a0a]">Oc%</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -748,11 +760,15 @@ export default function CalibracaoPage() {
                           {mesesComDados.map((m) => (
                             <>
                               <td key={`${l.idGroot}-${m}-l`} className="py-2 px-2 text-center text-gray-300 font-mono text-xs border-l border-[#2a2a2a]">{l.medMes[m]?.liq || '-'}</td>
-                              <td key={`${l.idGroot}-${m}-o`} className="py-2 px-2 text-center text-gray-300 font-mono text-xs">{l.medMes[m]?.ocup ? l.medMes[m].ocup + '%' : '-'}</td>
+                              {proc !== 'Checkin' && (
+                                <td key={`${l.idGroot}-${m}-o`} className="py-2 px-2 text-center text-gray-300 font-mono text-xs">{l.medMes[m]?.ocup ? l.medMes[m].ocup + '%' : '-'}</td>
+                              )}
                             </>
                           ))}
                           <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono border-l border-[#2a2a2a]">{l.liqTrim || '-'}</td>
-                          <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono">{l.ocupTrim ? l.ocupTrim + '%' : '-'}</td>
+                          {proc !== 'Checkin' && (
+                            <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono">{l.ocupTrim ? l.ocupTrim + '%' : '-'}</td>
+                          )}
 
                           <td className="py-2 px-3 text-center">
                             <div className="px-1 py-0.5">
