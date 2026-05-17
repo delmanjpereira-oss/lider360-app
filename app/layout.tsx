@@ -5,6 +5,7 @@ import Topbar from './components/Topbar';
 import Toaster from './components/Toaster';
 import ConfirmModal from './components/ConfirmModal';
 import { MascoteApollo } from './components/MascoteApollo';
+import { SpaceBackground } from './components/SpaceBackground';
 
 export const metadata: Metadata = {
   title: 'LIDER 360',
@@ -23,8 +24,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR">
-      <body className="bg-[#0a0a0a] text-white min-h-screen">
-        <div className="flex">
+      <body className="bg-[#0a0a0a] text-white min-h-screen relative overflow-x-hidden">
+        {/* 🌌 Fundo espacial fixo */}
+        <SpaceBackground />
+
+        {/* Conteúdo do app */}
+        <div className="flex relative z-10">
           <Sidebar />
           <div className="flex-1 flex flex-col min-h-screen">
             <Topbar />
