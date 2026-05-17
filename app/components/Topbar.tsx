@@ -35,57 +35,54 @@ export default function Topbar() {
           }}
           title="Mercado Livre"
         >
-          {/* Handshake icon oficial MELI - 2 mãos amarelas apertando */}
+          {/* Símbolo oficial MELI - 2 mãos estilizadas apertando */}
           <svg
-            viewBox="0 0 80 50"
-            width="48"
-            height="30"
+            viewBox="0 0 100 60"
+            width="44"
+            height="28"
             xmlns="http://www.w3.org/2000/svg"
           >
-            {/* Mão esquerda - aponta pra direita */}
+            {/* Mão esquerda - forma de C invertido */}
             <path
-              d="M 5 30
-                 C 5 18, 18 12, 28 14
-                 L 38 16
-                 C 42 17, 44 20, 42 24
-                 L 38 32
-                 C 36 36, 32 38, 26 38
-                 L 14 38
-                 C 8 38, 4 35, 5 30 Z"
+              d="M 10 30
+                 C 10 18, 22 12, 35 14
+                 L 50 18
+                 C 52 19, 52 22, 50 23
+                 L 45 25
+                 L 50 27
+                 C 52 28, 52 31, 50 32
+                 L 45 34
+                 L 50 36
+                 C 52 37, 52 40, 50 41
+                 L 35 45
+                 C 22 47, 10 42, 10 30 Z"
               fill="#FFE600"
-              stroke="#1a1a1a"
-              strokeWidth="1.5"
+              stroke="#000"
+              strokeWidth="2"
               strokeLinejoin="round"
-            />
-            
-            {/* Dedos da mão esquerda (linhas) */}
-            <path d="M 18 22 L 26 22" stroke="#1a1a1a" strokeWidth="1" strokeLinecap="round" />
-            <path d="M 18 26 L 26 26" stroke="#1a1a1a" strokeWidth="1" strokeLinecap="round" />
-            <path d="M 18 30 L 26 30" stroke="#1a1a1a" strokeWidth="1" strokeLinecap="round" />
-
-            {/* Mão direita - aponta pra esquerda */}
-            <path
-              d="M 75 30
-                 C 75 18, 62 12, 52 14
-                 L 42 16
-                 C 38 17, 36 20, 38 24
-                 L 42 32
-                 C 44 36, 48 38, 54 38
-                 L 66 38
-                 C 72 38, 76 35, 75 30 Z"
-              fill="#FFE600"
-              stroke="#1a1a1a"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
+              strokeLinecap="round"
             />
 
-            {/* Dedos da mão direita (linhas) */}
-            <path d="M 62 22 L 54 22" stroke="#1a1a1a" strokeWidth="1" strokeLinecap="round" />
-            <path d="M 62 26 L 54 26" stroke="#1a1a1a" strokeWidth="1" strokeLinecap="round" />
-            <path d="M 62 30 L 54 30" stroke="#1a1a1a" strokeWidth="1" strokeLinecap="round" />
-
-            {/* Ponto de aperto (centro) - faz parecer que as mãos se encontram */}
-            <ellipse cx="40" cy="26" rx="3" ry="6" fill="#1a1a1a" opacity="0.15" />
+            {/* Mão direita - forma de C normal */}
+            <path
+              d="M 90 30
+                 C 90 18, 78 12, 65 14
+                 L 50 18
+                 C 48 19, 48 22, 50 23
+                 L 55 25
+                 L 50 27
+                 C 48 28, 48 31, 50 32
+                 L 55 34
+                 L 50 36
+                 C 48 37, 48 40, 50 41
+                 L 65 45
+                 C 78 47, 90 42, 90 30 Z"
+              fill="#FFE600"
+              stroke="#000"
+              strokeWidth="2"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
           </svg>
         </div>
 
