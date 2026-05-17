@@ -136,10 +136,18 @@ export default function MeuTimePage() {
 
           <Link
             href="/meu-time/dpmo"
-            title="Upload DPMO"
+            title="Upload DPMO (Qualidade)"
             className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-purple-500/20 to-purple-600/10 hover:from-purple-500/40 hover:to-purple-600/30 text-purple-300 rounded-xl transition-all text-2xl border border-purple-500/30 hover:border-purple-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-purple-500/20 active:translate-y-0"
           >
             📊
+          </Link>
+
+          <Link
+            href="/meu-time/ocupacao"
+            title="Upload Ocupação P2M (Totefullness)"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 hover:from-emerald-500/40 hover:to-emerald-600/30 text-emerald-300 rounded-xl transition-all text-2xl border border-emerald-500/30 hover:border-emerald-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20 active:translate-y-0"
+          >
+            📦
           </Link>
 
           <Link
