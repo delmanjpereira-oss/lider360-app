@@ -8,6 +8,17 @@ import { AstronautAvatar } from './AstronautAvatar';
 type Humor = 'happy' | 'party' | 'surprised' | 'sad';
 type Mensagem = { titulo: string; texto: string };
 
+// Mensagens fallback (caso API não responda)
+const MENSAGENS_FALLBACK: Mensagem[] = [
+  { titulo: '👋 Olá, líder!', texto: 'Bem-vindo de volta ao LIDER 360. Bora cuidar do time!' },
+  { titulo: '💪 Dica do dia', texto: 'Feedback constante = time alinhado. Já conversou com seus colabs hoje?' },
+  { titulo: '🎯 Foco no que importa', texto: 'Calibração trimestral é essencial. Mantém seu IMA controlado!' },
+  { titulo: '📊 Não esquece', texto: 'Sobe os CSVs do dia pra eu poder te ajudar melhor!' },
+  { titulo: '🚀 Boa operação!', texto: 'Que seu dia seja produtivo. Time alinhado é time campeão!' },
+  { titulo: '🌟 Lembrete', texto: 'Confere o boletim diário pra mandar pro time. Eles gostam de saber os números!' },
+  { titulo: '💡 Sabia que...', texto: 'Você pode dar feedback diretamente nas páginas de detalhe do colaborador!' },
+];
+
 // Configurações de timing
 const INTERVALO_ENTRE_MSGS = 35000; // 35s entre uma mensagem e outra
 const DURACAO_MSG = 9000; // 9s que a mensagem fica visível
@@ -28,15 +39,23 @@ export function MascoteApollo() {
     async function buscarStatus() {
       try {
         const res = await fetch('/api/mascote-status');
+        if (!res.ok) {
+          console.error('[Mascote] API retornou erro:', res.status);
+          throw new Error('API erro ' + res.status);
+        }
         const data = await res.json();
+        console.log('[Mascote] Dados recebidos:', data);
         setHumor(data.humor || 'happy');
-        setMensagens(data.mensagens || []);
+        if (data.mensagens && data.mensagens.length > 0) {
+          setMensagens(data.mensagens);
+        } else {
+          // Sem mensagens da API, usa fallback rico
+          setMensagens(MENSAGENS_FALLBACK);
+        }
       } catch (e) {
-        console.error('Erro buscando mascote:', e);
-        // Fallback se a API falhar
-        setMensagens([
-          { titulo: '👋 Olá!', texto: 'Bem-vindo ao LIDER 360!' },
-        ]);
+        console.error('[Mascote] Erro buscando API:', e);
+        // Fallback com várias mensagens variadas
+        setMensagens(MENSAGENS_FALLBACK);
       } finally {
         setMontou(true);
       }
