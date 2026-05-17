@@ -250,11 +250,15 @@ export default function CalibracaoPage() {
         ima = manualIma.valor_ima;
         imaOrigem = 'manual';
       } else if (c.processo === 'Checkin' || c.processo === 'P2M') {
-        // Filtra DPMOs do trimestre — match por id_groot OU por nome (caso ainda não vinculado)
+        // Mapeia processo do cadastro → processo do DPMO (Checkin → CK)
+        const processoDpmo = c.processo === 'Checkin' ? 'CK' : 'P2M';
+
+        // Filtra DPMOs do trimestre — só do processo certo
         const nomeNorm = normalizarNome(c.nome);
         const dpmosDoTrim = dpmoAgregado.filter((d) => {
           if (d.ano !== anoNum || d.trimestre !== quarterSel) return false;
           if (d.dpmo <= 0) return false;
+          if (d.processo !== processoDpmo) return false; // 🎯 filtra processo
           if (d.id_groot === c.id_groot) return true;
           if (!d.id_groot && normalizarNome(d.representante) === nomeNorm) return true;
           return false;
