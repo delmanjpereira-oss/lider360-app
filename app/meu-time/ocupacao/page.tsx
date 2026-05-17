@@ -8,8 +8,6 @@ import { supabase } from '../../../lib/supabase';
 type Colaborador = {
   id_groot: string;
   nome: string;
-  user_id_meli: string | null;
-  nome_sistema: string | null;
 };
 
 type LinhaCSV = Record<string, string>;
@@ -70,7 +68,7 @@ export default function UploadOcupacaoPage() {
   async function carregarColaboradores() {
     const { data } = await supabase
       .from('colaboradores')
-      .select('id_groot, nome, user_id_meli, nome_sistema')
+      .select('id_groot, nome')
       .eq('status', 'Ativo');
     if (data) setColaboradores(data);
   }
@@ -79,16 +77,10 @@ export default function UploadOcupacaoPage() {
     carregarColaboradores();
   });
 
-  function vincular(userId: string, rep: string): { idGroot: string | null; nomeOficial: string | null } {
-    // 1. Tenta por user_id_meli
-    const porUserId = colaboradores.find((c) => c.user_id_meli === userId);
-    if (porUserId) return { idGroot: porUserId.id_groot, nomeOficial: porUserId.nome };
-
-    // 2. Tenta por nome_sistema (caiqbsilva, karneves, etc)
-    const norm = (s: string) => String(s || '').toLowerCase().trim();
-    const porSistema = colaboradores.find((c) => c.nome_sistema && norm(c.nome_sistema) === norm(rep));
-    if (porSistema) return { idGroot: porSistema.id_groot, nomeOficial: porSistema.nome };
-
+  function vincular(userId: string): { idGroot: string | null; nomeOficial: string | null } {
+    // 🎯 USER_ID do CSV = id_groot do colaborador (chave universal MELI)
+    const colab = colaboradores.find((c) => c.id_groot === userId);
+    if (colab) return { idGroot: colab.id_groot, nomeOficial: colab.nome };
     return { idGroot: null, nomeOficial: null };
   }
 
@@ -117,7 +109,7 @@ export default function UploadOcupacaoPage() {
           const ocupacaoPct = parsePercent(l['Ocupação (%)']);
 
           const { semana, ano, mes, trimestre } = getSemanaIso(dataStr);
-          const { idGroot, nomeOficial } = vincular(userId, rep);
+          const { idGroot, nomeOficial } = vincular(userId);
 
           novos.push({
             userId,
@@ -243,7 +235,7 @@ export default function UploadOcupacaoPage() {
 
           {naoVinculados > 0 && (
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm text-yellow-300">
-              ⚠️ <strong>{naoVinculados} registros não foram vinculados.</strong> Cadastre o <code>user_id_meli</code> ou <code>nome_sistema</code> desses colaboradores em MEU TIME.
+              ⚠️ <strong>{naoVinculados} registros não foram vinculados.</strong> O <code>USER_ID</code> do CSV precisa estar cadastrado como <code>id_groot</code> em MEU TIME.
             </div>
           )}
 
