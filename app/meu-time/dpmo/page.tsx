@@ -155,6 +155,7 @@ export default function DpmoPage() {
   const [linhas, setLinhas] = useState<LinhaCSV[]>([]);
   const [formato, setFormato] = useState<FormatoCSV>('desconhecido');
   const [headers, setHeaders] = useState<string[]>([]);
+  const [processoSelecionado, setProcessoSelecionado] = useState<'CK' | 'P2M' | null>(null);
 
   const [eventosDetalhados, setEventosDetalhados] = useState<EventoDetalhado[]>([]);
   const [linhasAgregadas, setLinhasAgregadas] = useState<LinhaAgregada[]>([]);
@@ -230,8 +231,12 @@ export default function DpmoPage() {
     setErro(null);
     setSucesso(null);
 
+    // 🎯 Filtra colaboradores SÓ do processo selecionado
+    const processoAlvo = processoSelecionado === 'CK' ? 'Checkin' : 'P2M';
+    const colabsDoProcesso = colaboradores.filter((c) => c.processo === processoAlvo);
+
     const mapaCadastro: Record<string, ColaboradorMap> = {};
-    colaboradores.forEach((c) => {
+    colabsDoProcesso.forEach((c) => {
       mapaCadastro[normalizarNome(c.nome)] = c;
     });
 
@@ -464,6 +469,7 @@ export default function DpmoPage() {
       ano: e.ano,
       mes: e.mes,
       trimestre: e.trimestre,
+      processo: processoSelecionado, // 🎯 Salva o processo escolhido
       arquivo_origem: arquivo!.name,
     }));
 
@@ -493,7 +499,7 @@ export default function DpmoPage() {
       chave_unica: e.chaveUnica,
       representante: e.representante,
       id_groot: e.idGroot,
-      processo: e.processo,
+      processo: processoSelecionado, // 🎯 Sobrescreve com o processo escolhido pelo líder
       semana: e.semana,
       ano: e.ano,
       mes: e.mes,
@@ -696,14 +702,50 @@ export default function DpmoPage() {
         )}
       </div>
 
-      {/* Botão Processar */}
+      {/* Seletor de PROCESSO antes de processar */}
       {linhas.length > 0 && totalLinhas === 0 && formato !== 'desconhecido' && (
-        <button
-          onClick={processar}
-          className="w-full bg-gradient-to-br from-purple-500 to-purple-600 text-white font-bold py-4 rounded-xl hover:from-purple-400 hover:to-purple-500 transition-all text-lg shadow-lg shadow-purple-500/30"
-        >
-          📊 Processar CSV
-        </button>
+        <>
+          <div className="bg-yellow-500/5 border-2 border-yellow-500/30 rounded-2xl p-5">
+            <h3 className="text-base font-bold text-yellow-400 mb-3 flex items-center gap-2">
+              ⚠️ 1º — ESCOLHA O PROCESSO DESSE CSV
+            </h3>
+            <p className="text-xs text-gray-400 mb-3">
+              Defina pra qual processo são esses dados. Os IMAs serão vinculados <strong>somente</strong> aos colaboradores desse processo.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setProcessoSelecionado('CK')}
+                className={`px-4 py-3 rounded-xl font-bold text-sm transition-all border-2 ${
+                  processoSelecionado === 'CK'
+                    ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-lg shadow-cyan-500/20'
+                    : 'bg-[#0a0a0a] border-[#2a2a2a] text-gray-400 hover:border-cyan-500/50 hover:text-cyan-400'
+                }`}
+              >
+                📦 CHECKIN
+                {processoSelecionado === 'CK' && <span className="block text-xs mt-1">✓ Selecionado</span>}
+              </button>
+              <button
+                onClick={() => setProcessoSelecionado('P2M')}
+                className={`px-4 py-3 rounded-xl font-bold text-sm transition-all border-2 ${
+                  processoSelecionado === 'P2M'
+                    ? 'bg-orange-500/20 border-orange-400 text-orange-300 shadow-lg shadow-orange-500/20'
+                    : 'bg-[#0a0a0a] border-[#2a2a2a] text-gray-400 hover:border-orange-500/50 hover:text-orange-400'
+                }`}
+              >
+                🚚 P2M
+                {processoSelecionado === 'P2M' && <span className="block text-xs mt-1">✓ Selecionado</span>}
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={processar}
+            disabled={!processoSelecionado}
+            className="w-full bg-gradient-to-br from-purple-500 to-purple-600 text-white font-bold py-4 rounded-xl hover:from-purple-400 hover:to-purple-500 transition-all text-lg shadow-lg shadow-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {!processoSelecionado ? '⚠️ Selecione o processo primeiro' : '📊 2º — Processar CSV'}
+          </button>
+        </>
       )}
 
       {/* PREVIEW */}
@@ -858,14 +900,16 @@ export default function DpmoPage() {
 
           <button
             onClick={confirmarEnvio}
-            disabled={salvando}
-            className="w-full bg-gradient-to-br from-green-500 to-green-600 text-white font-bold py-4 rounded-xl hover:from-green-400 hover:to-green-500 transition-all text-lg shadow-lg shadow-green-500/30 disabled:opacity-50"
+            disabled={salvando || !processoSelecionado}
+            className="w-full bg-gradient-to-br from-green-500 to-green-600 text-white font-bold py-4 rounded-xl hover:from-green-400 hover:to-green-500 transition-all text-lg shadow-lg shadow-green-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {salvando
               ? '💾 Salvando...'
-              : `✅ Confirmar envio (${totalLinhas} ${
+              : !processoSelecionado
+              ? '⚠️ Selecione o processo primeiro'
+              : `✅ 3º — Confirmar envio (${totalLinhas} ${
                   formato === 'detalhado' ? 'eventos' : 'linhas'
-                })`}
+                }) — ${processoSelecionado}`}
           </button>
         </>
       )}
