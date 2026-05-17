@@ -29,6 +29,7 @@ type DpmoEvento = {
   ano: number;
   mes: number;
   trimestre: string;
+  processo: string;  // 'CK' ou 'P2M'
 };
 
 type DpmoAgregado = {
@@ -140,7 +141,7 @@ export default function CalibracaoPage() {
       const [colabResp, histResp, dpmoResp, dpmoAggResp, ocupResp, fbResp, confResp] = await Promise.all([
         supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
         supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
-        supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre'),
+        supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre, processo'),
         supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo'),
         supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre'),
         supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
@@ -264,10 +265,12 @@ export default function CalibracaoPage() {
 
       if (c.processo === 'Checkin' || c.processo === 'P2M') {
         const nomeNorm = normalizarNome(c.nome);
+        const procDpmo = c.processo === 'Checkin' ? 'CK' : 'P2M';
 
-        // 1. Pega eventos do trimestre desse colaborador
+        // 1. Pega eventos do trimestre desse colaborador (filtra POR PROCESSO PRINCIPAL)
         const eventosTrim = dpmoEventos.filter((d) => {
           if (d.ano !== anoNum || d.trimestre !== quarterSel) return false;
+          if (d.processo !== procDpmo) return false; // 🎯 Só dados do processo principal
           if (d.id_groot === c.id_groot) return true;
           if (!d.id_groot && normalizarNome(d.representante) === nomeNorm) return true;
           return false;
@@ -467,10 +470,24 @@ export default function CalibracaoPage() {
     const dataMaxFormatada = dataMax ? new Date(dataMax + 'T12:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR');
 
     const anoAtual = new Date().getFullYear();
-    const mesesTrim = mesesComDados; // Já vem filtrado: só os meses com dados
+    const mesesTrim = mesesComDados;
+
+    // 🎯 FILTRO: só inclui colaboradores que TEM PELO MENOS 1 DADO no trimestre
+    //    (líquida > 0 OU IMA > 0 OU ocupação > 0)
+    const linhasComDados = linhas.filter((l) => {
+      const temLiq = l.liqTrim > 0;
+      const temIma = l.ima > 0;
+      const temOcup = l.ocupTrim > 0;
+      return temLiq || temIma || temOcup;
+    });
+
+    if (linhasComDados.length === 0) {
+      window.showToast('error', `Nenhum colaborador de ${processo} tem dados no trimestre`);
+      return;
+    }
 
     // 🎯 Ordena por LÍQUIDA do trimestre, do maior pro menor
-    const linhasOrdenadas = [...linhas].sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0));
+    const linhasOrdenadas = [...linhasComDados].sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0));
 
     // Definição de colunas de qualidade
     const temIma = processo === 'Checkin' || processo === 'P2M';
@@ -502,7 +519,7 @@ export default function CalibracaoPage() {
           ${procEmoji} CALIBRAÇÃO ${processo.toUpperCase()} — TRIMESTRE ${quarterSel}
         </h1>
         <p style="color: #aaa; font-size: 12px; margin: 6px 0 0 0;">
-          📅 Dados puxados até ${dataMaxFormatada} · ${linhas.length} colaboradores
+          📅 Dados puxados até ${dataMaxFormatada} · ${linhasOrdenadas.length} colaboradores
         </p>
       </div>
 
@@ -555,39 +572,36 @@ export default function CalibracaoPage() {
             const metaL = processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
             const corTrim = corStatus(liqTrim, metaL);
 
-            // Células dos meses
+            // Células dos meses (sem dados = 0)
             const mesesCells = mesesTrim.map((m) => {
               const liqMes = l.medMes[m]?.liq || 0;
               const corMes = corStatus(liqMes, metaL);
               return `
                 <td style="padding: 10px 6px; text-align: center; color: ${corMes}; font-family: monospace; font-weight: bold; font-size: 13px;">
-                  ${liqMes || '-'}
+                  ${liqMes}
                 </td>
               `;
             }).join('');
 
-            // IMA
+            // IMA — Sem dados = 0 (verde, sem erro é bom!)
             let imaHtml = '';
             if (temIma) {
               const ima = l.ima || 0;
               const metaI = processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
-              let corIma = '#6b7280', imaTxt = '⏳';
-              if (l.imaOrigem === 'aguardando') {
-                corIma = '#6b7280';
-                imaTxt = '⏳';
-              } else if (ima > 0) {
+              let corIma = '#10b981', imaTxt = '0';
+              if (ima > 0) {
                 corIma = corStatus(ima, metaI, true);
                 imaTxt = ima.toLocaleString('pt-BR');
               }
               imaHtml = `<td style="padding: 10px 8px; text-align: center; color: ${corIma}; font-family: monospace; font-weight: bold; font-size: 13px;">${imaTxt}</td>`;
             }
 
-            // OCUPAÇÃO (só P2M)
+            // OCUPAÇÃO (só P2M) — Sem dados = "0%"
             let ocupHtml = '';
             if (temOcup) {
               const ocup = l.ocupTrim || 0;
               const metaO = metaOcup.p2m;
-              let corOcup = '#6b7280', ocupTxt = '⏳';
+              let corOcup = '#ef4444', ocupTxt = '0%';
               if (ocup > 0) {
                 corOcup = corStatus(ocup, metaO);
                 ocupTxt = `${ocup}%`;
@@ -601,7 +615,7 @@ export default function CalibracaoPage() {
                 ${mesesCells}
                 ${imaHtml}
                 ${ocupHtml}
-                <td style="padding: 10px 8px; text-align: center; background: rgba(16, 185, 129, 0.08); color: ${corTrim}; font-family: monospace; font-weight: 900; font-size: 14px;">${liqTrim || '-'}</td>
+                <td style="padding: 10px 8px; text-align: center; background: rgba(16, 185, 129, 0.08); color: ${corTrim}; font-family: monospace; font-weight: 900; font-size: 14px;">${liqTrim}</td>
               </tr>
             `;
           }).join('')}
@@ -612,7 +626,6 @@ export default function CalibracaoPage() {
       <div style="margin-top: 14px; padding: 10px 16px; background: #1a1a1a; border-radius: 8px; display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; font-size: 11px; font-weight: bold;">
         <span style="color: #10b981;">🟢 NA META</span>
         <span style="color: #ef4444;">🔴 ABAIXO</span>
-        <span style="color: #6b7280;">⏳ AGUARDANDO DADOS</span>
       </div>
 
       <!-- RODAPÉ -->
