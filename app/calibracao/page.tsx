@@ -31,6 +31,16 @@ type DpmoEvento = {
   trimestre: string;
 };
 
+type DpmoAgregado = {
+  id_groot: string | null;
+  representante: string;
+  processo: string;
+  semana: number;
+  ano: number;
+  trimestre: string;
+  dpmo: number;
+};
+
 type FeedbackTrim = {
   id_groot: string;
   classificacao: string;
@@ -102,6 +112,7 @@ export default function CalibracaoPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
   const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
+  const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
   const [feedbacks, setFeedbacks] = useState<FeedbackTrim[]>([]);
   const [imaManual, setImaManual] = useState<ImaManual[]>([]);
   const [comoManual, setComoManual] = useState<ComoManual[]>([]);
@@ -120,10 +131,11 @@ export default function CalibracaoPage() {
   async function carregar() {
     setLoading(true);
     try {
-      const [colabResp, histResp, dpmoResp, fbResp, imaResp, comoResp, confResp] = await Promise.all([
+      const [colabResp, histResp, dpmoResp, dpmoAggResp, fbResp, imaResp, comoResp, confResp] = await Promise.all([
         supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
         supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
         supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre'),
+        supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo'),
         supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
         supabase.from('ima_manual').select('*'),
         supabase.from('como_manual').select('*'),
@@ -133,6 +145,7 @@ export default function CalibracaoPage() {
       if (colabResp.data) setColaboradores(colabResp.data);
       if (histResp.data) setHistorico(histResp.data);
       if (dpmoResp.data) setDpmoEventos(dpmoResp.data as DpmoEvento[]);
+      if (dpmoAggResp.data) setDpmoAgregado(dpmoAggResp.data as DpmoAgregado[]);
       if (fbResp.data) setFeedbacks(fbResp.data as FeedbackTrim[]);
       if (imaResp.data) setImaManual(imaResp.data);
       if (comoResp.data) setComoManual(comoResp.data);
