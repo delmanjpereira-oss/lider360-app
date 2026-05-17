@@ -511,7 +511,7 @@ export default function CalibracaoPage() {
         <thead>
           <!-- Linha de SEÇÕES -->
           <tr>
-            <th rowspan="2" style="padding: 12px 14px; text-align: center; background: #1a1a1a; color: #FFD700; font-size: 11px; font-weight: 900; border-bottom: 2px solid #FFD700; vertical-align: middle; min-width: 110px; white-space: nowrap;">
+            <th rowspan="2" style="padding: 14px 16px; text-align: center; background: #1a1a1a; color: #FFD700; font-size: 13px; font-weight: 900; border-bottom: 2px solid #FFD700; vertical-align: middle; min-width: 140px; letter-spacing: 0.5px;">
               ID COLABORADOR
             </th>
             <th colspan="${mesesTrim.length}" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #FFD700, #d4a017); color: #000; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #FFD700;">
@@ -522,7 +522,7 @@ export default function CalibracaoPage() {
                 🎯 QUALIDADE
               </th>
             ` : ''}
-            <th rowspan="2" style="padding: 12px 14px; text-align: center; background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 900; font-size: 12px; letter-spacing: 1px; border: 1px solid #10b981; vertical-align: middle; min-width: 110px; white-space: nowrap;">
+            <th rowspan="2" style="padding: 14px 16px; text-align: center; background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 900; font-size: 13px; letter-spacing: 0.5px; border: 1px solid #10b981; vertical-align: middle; min-width: 140px;">
               🏆 TRIMESTRE
             </th>
           </tr>
