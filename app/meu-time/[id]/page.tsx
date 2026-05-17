@@ -46,6 +46,17 @@ type DpmoEvento = {
   trimestre: string;
 };
 
+type DpmoAgregado = {
+  id: number;
+  representante: string;
+  id_groot: string | null;
+  processo: string;
+  semana: number;
+  ano: number;
+  trimestre: string;
+  dpmo: number;
+};
+
 type FeedbackBreve = {
   feedback_id: string;
   tipo: string;
@@ -150,6 +161,7 @@ export default function DetalheColaboradorPage() {
   const [colaborador, setColaborador] = useState<Colaborador | null>(null);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
   const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
+  const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
   const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>([]);
   const [metaIma, setMetaIma] = useState(1567);
   const [loading, setLoading] = useState(true);
@@ -171,6 +183,7 @@ export default function DetalheColaboradorPage() {
           if (data) {
             buscarHistorico(data.id_groot);
             buscarDpmoEventos(data.id_groot, data.nome, data.processo);
+            buscarDpmoAgregado(data.id_groot, data.nome, data.processo);
             buscarFeedbacks(data.id_groot);
             buscarMetaIma(data.processo);
           }
@@ -240,6 +253,44 @@ export default function DetalheColaboradorPage() {
     }
   }
 
+  async function buscarDpmoAgregado(idGroot: string, nome: string, processoColaborador: string | null) {
+    try {
+      if (processoColaborador !== 'Checkin' && processoColaborador !== 'P2M') {
+        setDpmoAgregado([]);
+        return;
+      }
+      // Mapeia processo
+      const procDpmo = processoColaborador === 'Checkin' ? 'CK' : 'P2M';
+
+      const { data: porId } = await supabase
+        .from('dpmo_agregado')
+        .select('*')
+        .eq('id_groot', idGroot)
+        .eq('processo', procDpmo)
+        .order('ano', { ascending: false })
+        .order('semana', { ascending: false });
+
+      const { data: porNome } = await supabase
+        .from('dpmo_agregado')
+        .select('*')
+        .ilike('representante', nome)
+        .eq('processo', procDpmo)
+        .is('id_groot', null);
+
+      const todos: DpmoAgregado[] = [];
+      const idsVistos = new Set<number>();
+      [...(porId || []), ...(porNome || [])].forEach((e) => {
+        if (!idsVistos.has(e.id)) {
+          idsVistos.add(e.id);
+          todos.push(e as DpmoAgregado);
+        }
+      });
+      setDpmoAgregado(todos);
+    } catch (e) {
+      console.error('Erro buscando DPMO agregado:', e);
+    }
+  }
+
   async function buscarFeedbacks(idGroot: string) {
     const { data } = await supabase
       .from('feedbacks')
@@ -267,12 +318,13 @@ export default function DetalheColaboradorPage() {
     }
   }
 
-  // 🎯 CÁLCULO CORRETO — Usa unidades ATÉ a data máxima do inventário (geral)
-  // Ex: Se último inventário foi 15/05, considera unidades só até 15/05 mesmo se tiver mais
+  // 🎯 ESTRATÉGIA HÍBRIDA — Melhor dos 2 mundos:
+  // Por semana: usa DPMO AGREGADO (já calculado pelo Looker) ✅ 100%
+  // Total Geral: cruza DETALHADO (defeitos) com PRODUTIVIDADE (unidades) ✅ 100%
   function calcularDpmoPorSemana(): DpmoSemana[] {
     const resultado: Record<string, DpmoSemana> = {};
 
-    // 1. Acha a data MAIS RECENTE do inventário (geral)
+    // Acha data máxima do inventário (pra filtrar produtividade)
     let dataMaximaInventario = '';
     dpmoEventos.forEach((e) => {
       if (e.checkin_data > dataMaximaInventario) {
@@ -280,13 +332,26 @@ export default function DetalheColaboradorPage() {
       }
     });
 
-    // 2. Lista SEMANAS que têm pelo menos 1 evento de inventário
-    const semanasComInventario = new Set<string>();
-    dpmoEventos.forEach((e) => {
-      semanasComInventario.add(`${e.ano}-S${e.semana}`);
+    // 1. Pega DPMO POR SEMANA do AGREGADO (oficial Looker)
+    dpmoAgregado.forEach((d) => {
+      const chave = `${d.ano}-S${d.semana}`;
+      if (!resultado[chave]) {
+        resultado[chave] = {
+          ano: d.ano,
+          semana: d.semana,
+          defeitos: 0,
+          unidades: 0,
+          dpmo: d.dpmo, // 🎯 Direto do Looker
+          diasAuditados: [],
+          statusCalculo: 'completo',
+        };
+      } else {
+        resultado[chave].dpmo = d.dpmo;
+        resultado[chave].statusCalculo = 'completo';
+      }
     });
 
-    // 3. Acumula DEFEITOS por semana (do dpmo_eventos)
+    // 2. Cruza com DETALHADO pra mostrar defeitos/unidades (informativo)
     dpmoEventos.forEach((e) => {
       const chave = `${e.ano}-S${e.semana}`;
       if (!resultado[chave]) {
@@ -306,59 +371,13 @@ export default function DetalheColaboradorPage() {
       }
     });
 
-    // 4. Acumula UNIDADES — só dos dias da semana que estão ATÉ a data máxima do inventário
+    // 3. Soma unidades (pra mostrar — usadas só no Total Geral)
     historico.forEach((h) => {
-      // 🎯 Ignora dias depois da última auditoria
       if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return;
-
       const { ano, semana } = getSemanaIso(h.data_referencia);
       const chave = `${ano}-S${semana}`;
-
-      // Só inclui SE a semana tem inventário
-      if (!semanasComInventario.has(chave)) return;
-
-      if (!resultado[chave]) {
-        resultado[chave] = {
-          ano,
-          semana,
-          defeitos: 0,
-          unidades: 0,
-          dpmo: 0,
-          diasAuditados: [],
-          statusCalculo: 'falta_inventario',
-        };
-      }
-      resultado[chave].unidades += h.unidades || 0;
-    });
-
-    // 5. Adiciona semanas com produtividade mas SEM inventário
-    historico.forEach((h) => {
-      const { ano, semana } = getSemanaIso(h.data_referencia);
-      const chave = `${ano}-S${semana}`;
-      if (!resultado[chave]) {
-        resultado[chave] = {
-          ano,
-          semana,
-          defeitos: 0,
-          unidades: h.unidades || 0,
-          dpmo: 0,
-          diasAuditados: [],
-          statusCalculo: 'falta_inventario',
-        };
-      }
-    });
-
-    // 6. Calcula DPMO onde tem OS 2
-    Object.values(resultado).forEach((s) => {
-      const temInventario = dpmoEventos.some((e) => e.ano === s.ano && e.semana === s.semana);
-      
-      if (temInventario && s.unidades > 0) {
-        s.dpmo = Math.round((s.defeitos / s.unidades) * 1_000_000);
-        s.statusCalculo = 'completo';
-      } else if (temInventario && s.unidades === 0) {
-        s.statusCalculo = 'falta_produtividade';
-      } else if (!temInventario) {
-        s.statusCalculo = 'falta_inventario';
+      if (resultado[chave]) {
+        resultado[chave].unidades += h.unidades || 0;
       }
     });
 
@@ -372,12 +391,30 @@ export default function DetalheColaboradorPage() {
   const semanasCompletas = dpmoPorSemana.filter((s) => s.statusCalculo === 'completo');
   const semanasFaltando = dpmoPorSemana.filter((s) => s.statusCalculo !== 'completo');
 
-  // 🎯 DPMO TOTAL — ponderado, só com semanas completas
+  // 🎯 DPMO TOTAL GERAL — cruza DETALHADO (defeitos) + PRODUTIVIDADE (unidades)
+  // Soma todos os defeitos e divide pelas unidades das semanas auditadas até data máx
   const dpmoTotal = (() => {
-    if (semanasCompletas.length === 0) return null;
-    const totalDef = semanasCompletas.reduce((s, x) => s + x.defeitos, 0);
-    const totalUnid = semanasCompletas.reduce((s, x) => s + x.unidades, 0);
-    if (totalUnid === 0) return null;
+    let dataMax = '';
+    dpmoEventos.forEach((e) => {
+      if (e.checkin_data > dataMax) dataMax = e.checkin_data;
+    });
+    if (!dataMax) return null;
+
+    const semanasComInventario = new Set<string>();
+    dpmoEventos.forEach((e) => {
+      semanasComInventario.add(`${e.ano}-S${e.semana}`);
+    });
+
+    const totalDef = dpmoEventos.reduce((s, e) => s + (e.qtd_dif || 0), 0);
+    const totalUnid = historico
+      .filter((h) => h.data_referencia <= dataMax)
+      .filter((h) => {
+        const { ano, semana } = getSemanaIso(h.data_referencia);
+        return semanasComInventario.has(`${ano}-S${semana}`);
+      })
+      .reduce((s, h) => s + (h.unidades || 0), 0);
+
+    if (totalUnid === 0 || totalDef === 0) return null;
     return {
       defeitos: totalDef,
       unidades: totalUnid,
