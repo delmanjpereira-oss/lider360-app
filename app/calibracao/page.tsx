@@ -453,166 +453,140 @@ export default function CalibracaoPage() {
 
     const procEmoji = processo === 'Checkin' ? '📦' : processo === 'P2M' ? '🚚' : '📋';
     const corProc = processo === 'Checkin' ? '#22d3ee' : processo === 'P2M' ? '#f97316' : '#10b981';
-    const metaL = processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
-    const metaI = processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
-    const metaO = processo === 'Checkin' ? metaOcup.checkin : metaOcup.p2m;
 
-    // 🎯 Helper: avalia status (semáforo)
-    function statusProd(valor: number, meta: number) {
-      if (valor === 0) return { cor: '#6b7280', emoji: '⏳', txt: 'Sem dados' };
-      if (valor >= meta * 1.05) return { cor: '#10b981', emoji: '🟢', txt: 'Supera' };
-      if (valor >= meta) return { cor: '#3b82f6', emoji: '🔵', txt: 'Na meta' };
-      return { cor: '#ef4444', emoji: '🔴', txt: 'Abaixo' };
-    }
-
-    function statusIma(valor: number, meta: number) {
-      if (valor === 0) return { cor: '#6b7280', emoji: '⏳', txt: 'Sem dados' };
-      if (valor <= meta * 0.7) return { cor: '#10b981', emoji: '🟢', txt: 'Excelente' };
-      if (valor <= meta) return { cor: '#3b82f6', emoji: '🔵', txt: 'Na meta' };
-      return { cor: '#ef4444', emoji: '🔴', txt: 'Atenção' };
-    }
-
-    function statusOcup(valor: number, meta: number) {
-      if (valor === 0) return { cor: '#6b7280', emoji: '⏳', txt: 'Sem dados' };
-      if (valor >= meta * 1.1) return { cor: '#10b981', emoji: '🟢', txt: 'Supera' };
-      if (valor >= meta) return { cor: '#3b82f6', emoji: '🔵', txt: 'Na meta' };
-      return { cor: '#f59e0b', emoji: '🟡', txt: 'Abaixo' };
-    }
+    // 🎯 Acha a DATA MÁXIMA dos dados (até quando os dados foram puxados)
+    let dataMax = '';
+    historico.forEach((h) => {
+      if (h.data_referencia > dataMax) dataMax = h.data_referencia;
+    });
+    const dataMaxFormatada = dataMax ? new Date(dataMax + 'T12:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR');
 
     const mesAtualNome = new Date().toLocaleDateString('pt-BR', { month: 'long' }).toUpperCase();
-    const ultimoMes = mesesComDados[mesesComDados.length - 1] || 0;
+    const anoAtual = new Date().getFullYear();
+
+    // Quantidade de colunas de qualidade depende do processo
+    const temIma = processo === 'Checkin' || processo === 'P2M';
+    const temOcup = processo === 'P2M';
+    const colsQualidade = (temIma ? 1 : 0) + (temOcup ? 1 : 0);
 
     const div = document.createElement('div');
     div.style.cssText = `
       position: fixed; top: -9999px; left: -9999px;
-      width: 900px; padding: 30px; background: #0a0a0a; color: white;
+      width: 760px; padding: 24px; background: #0a0a0a; color: white;
       font-family: -apple-system, system-ui, sans-serif;
     `;
 
-    // 🎯 Gera HTML — Cards visuais com semáforo
-    const cardsHtml = linhas.map((l) => {
-      // Pega valores do ÚLTIMO MÊS disponível
-      const liqMes = l.medMes[ultimoMes]?.liq || 0;
-      const sProd = statusProd(liqMes, metaL);
-      const sTrim = statusProd(l.liqTrim, metaL);
-
-      // 🎯 Qualidade: P2M tem 2 indicadores (IMA + Ocupação), Checkin só IMA, Sorting nada
-      let qualidadeHtml = '';
-      if (processo === 'P2M') {
-        const ocupMes = l.medMes[ultimoMes]?.ocup || 0;
-        const sIma = statusIma(l.ima, metaI);
-        const sOcup = statusOcup(ocupMes, metaO);
-        qualidadeHtml = `
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
-            <div style="background: #0a0a0a; border: 1px solid ${sIma.cor}40; border-left: 4px solid ${sIma.cor}; border-radius: 8px; padding: 10px;">
-              <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: bold;">IMA (Defeitos)</div>
-              <div style="font-size: 22px; font-weight: 900; color: ${sIma.cor}; font-family: monospace; margin-top: 2px;">
-                ${l.imaOrigem === 'aguardando' ? '⏳' : l.ima.toLocaleString('pt-BR')}
-              </div>
-              <div style="font-size: 11px; color: ${sIma.cor}; font-weight: bold;">${sIma.emoji} ${sIma.txt}</div>
-            </div>
-            <div style="background: #0a0a0a; border: 1px solid ${sOcup.cor}40; border-left: 4px solid ${sOcup.cor}; border-radius: 8px; padding: 10px;">
-              <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: bold;">Ocupação Totes</div>
-              <div style="font-size: 22px; font-weight: 900; color: ${sOcup.cor}; font-family: monospace; margin-top: 2px;">${ocupMes || 0}%</div>
-              <div style="font-size: 11px; color: ${sOcup.cor}; font-weight: bold;">${sOcup.emoji} ${sOcup.txt}</div>
-            </div>
-          </div>
-        `;
-      } else if (processo === 'Checkin') {
-        const sIma = statusIma(l.ima, metaI);
-        qualidadeHtml = `
-          <div style="margin-top: 8px;">
-            <div style="background: #0a0a0a; border: 1px solid ${sIma.cor}40; border-left: 4px solid ${sIma.cor}; border-radius: 8px; padding: 10px;">
-              <div style="font-size: 10px; color: #888; text-transform: uppercase; font-weight: bold;">IMA (Defeitos por milhão)</div>
-              <div style="font-size: 22px; font-weight: 900; color: ${sIma.cor}; font-family: monospace; margin-top: 2px;">
-                ${l.imaOrigem === 'aguardando' ? '⏳ aguardando' : l.ima.toLocaleString('pt-BR')}
-              </div>
-              <div style="font-size: 11px; color: ${sIma.cor}; font-weight: bold;">${sIma.emoji} ${sIma.txt}</div>
-            </div>
-          </div>
-        `;
-      }
-
-      return `
-        <div style="background: linear-gradient(135deg, #1a1a1a, #0f0f0f); border: 2px solid #2a2a2a; border-radius: 16px; padding: 16px; margin-bottom: 12px;">
-          <!-- Header do card -->
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #2a2a2a;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, ${corProc}, ${corProc}aa); display: flex; align-items: center; justify-content: center; font-size: 18px;">
-                ${procEmoji}
-              </div>
-              <div>
-                <div style="font-size: 11px; color: #888; text-transform: uppercase; font-weight: bold;">ID Colaborador</div>
-                <div style="font-size: 18px; font-weight: 900; color: white; font-family: monospace;">${l.idGroot}</div>
-              </div>
-            </div>
-            <div style="text-align: right;">
-              <div style="font-size: 10px; color: #888; text-transform: uppercase;">Trimestre</div>
-              <div style="font-size: 14px; font-weight: 900; color: ${sTrim.cor}; font-family: monospace;">
-                ${l.liqTrim || '-'} ${l.liqTrim ? 'pç/h' : ''}
-              </div>
-              <div style="font-size: 10px; color: ${sTrim.cor}; font-weight: bold;">${sTrim.emoji} ${sTrim.txt}</div>
-            </div>
-          </div>
-
-          <!-- PRODUTIVIDADE -->
-          <div>
-            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">
-              <span style="font-size: 11px; color: #FFD700; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">📈 Produtividade — ${NOMES_MESES[ultimoMes]}</span>
-            </div>
-            <div style="background: #0a0a0a; border: 1px solid ${sProd.cor}40; border-left: 4px solid ${sProd.cor}; border-radius: 8px; padding: 12px;">
-              <div style="display: flex; align-items: baseline; justify-content: space-between;">
-                <div>
-                  <span style="font-size: 32px; font-weight: 900; color: ${sProd.cor}; font-family: monospace;">${liqMes || '-'}</span>
-                  <span style="font-size: 14px; color: #888; margin-left: 4px;">pç/h</span>
-                </div>
-                <div style="text-align: right;">
-                  <div style="font-size: 10px; color: #888;">Meta: ${metaL} pç/h</div>
-                  <div style="font-size: 13px; color: ${sProd.cor}; font-weight: bold;">${sProd.emoji} ${sProd.txt}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- QUALIDADE (se tiver) -->
-          ${qualidadeHtml ? `
-            <div style="margin-top: 12px;">
-              <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">
-                <span style="font-size: 11px; color: #FFD700; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">🎯 Qualidade — ${NOMES_MESES[ultimoMes]}</span>
-              </div>
-              ${qualidadeHtml}
-            </div>
-          ` : ''}
-        </div>
-      `;
-    }).join('');
-
     div.innerHTML = `
-      <!-- HEADER PRINCIPAL -->
-      <div style="text-align: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 3px solid #FFD700;">
-        <h1 style="color: #FFD700; font-size: 32px; font-weight: 900; margin: 0; letter-spacing: 1px;">
-          ${procEmoji} RESULTADOS ${processo.toUpperCase()}
+      <!-- HEADER -->
+      <div style="text-align: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 3px solid #FFD700;">
+        <h1 style="color: #FFD700; font-size: 22px; font-weight: 900; margin: 0; letter-spacing: 1px;">
+          ${procEmoji} RESULTADOS ${processo.toUpperCase()} — ${mesAtualNome} ${anoAtual}
         </h1>
-        <p style="color: #888; font-size: 14px; margin: 8px 0 0 0;">
-          📅 ${mesAtualNome} 2026 · ${linhas.length} colaboradores · Trimestre ${quarterSel}
+        <p style="color: #aaa; font-size: 12px; margin: 6px 0 0 0;">
+          📅 Dados puxados até ${dataMaxFormatada} · ${linhas.length} colaboradores · Trimestre ${quarterSel}
         </p>
       </div>
 
+      <!-- TABELA -->
+      <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <!-- Linha de cabeçalhos de SEÇÃO -->
+        <thead>
+          <tr>
+            <th rowspan="2" style="padding: 8px 6px; text-align: left; border-bottom: 2px solid #FFD700; background: #1a1a1a; color: #FFD700; font-size: 11px;">ID</th>
+            <th colspan="2" style="padding: 8px 6px; text-align: center; background: linear-gradient(135deg, #FFD700, #d4a017); color: #000; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #FFD700;">📈 PRODUTIVIDADE</th>
+            ${colsQualidade > 0 ? `
+              <th colspan="${colsQualidade}" style="padding: 8px 6px; text-align: center; background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #a855f7;">🎯 QUALIDADE</th>
+            ` : ''}
+            <th rowspan="2" style="padding: 8px 6px; text-align: center; background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #10b981;">🏆 TRIM</th>
+          </tr>
+          <!-- Linha de sub-cabeçalhos -->
+          <tr style="background: #1a1a1a;">
+            <th style="padding: 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #FFD700; font-size: 10px; font-weight: bold;">Líq (pç/h)</th>
+            <th style="padding: 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #FFD700; font-size: 10px; font-weight: bold;">Status</th>
+            ${temIma ? `
+              <th style="padding: 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">IMA</th>
+            ` : ''}
+            ${temOcup ? `
+              <th style="padding: 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">Ocupação</th>
+            ` : ''}
+          </tr>
+        </thead>
+        <tbody>
+          ${linhas.map((l, idx) => {
+            const isPar = idx % 2 === 0;
+            const bg = isPar ? '#141414' : '#0f0f0f';
+
+            // PRODUTIVIDADE - Líquida do trimestre
+            const liq = l.liqTrim || 0;
+            const metaL = processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
+            let corLiq = '#6b7280', emojiLiq = '⏳', txtLiq = '-';
+            if (liq > 0) {
+              if (liq >= metaL * 1.05) { corLiq = '#10b981'; emojiLiq = '🟢'; txtLiq = 'Supera'; }
+              else if (liq >= metaL) { corLiq = '#3b82f6'; emojiLiq = '🔵'; txtLiq = 'Na meta'; }
+              else { corLiq = '#ef4444'; emojiLiq = '🔴'; txtLiq = 'Abaixo'; }
+            }
+
+            // IMA
+            let imaHtml = '';
+            if (temIma) {
+              const ima = l.ima || 0;
+              const metaI = processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
+              let corIma = '#6b7280', imaTxt = '⏳';
+              if (l.imaOrigem === 'aguardando') {
+                corIma = '#3b82f6';
+                imaTxt = '⏳ aguarda';
+              } else if (ima > 0) {
+                if (ima <= metaI * 0.7) { corIma = '#10b981'; imaTxt = `🟢 ${ima.toLocaleString('pt-BR')}`; }
+                else if (ima <= metaI) { corIma = '#3b82f6'; imaTxt = `🔵 ${ima.toLocaleString('pt-BR')}`; }
+                else { corIma = '#ef4444'; imaTxt = `🔴 ${ima.toLocaleString('pt-BR')}`; }
+              }
+              imaHtml = `<td style="padding: 8px 6px; text-align: center; color: ${corIma}; font-family: monospace; font-weight: bold; font-size: 12px;">${imaTxt}</td>`;
+            }
+
+            // OCUPAÇÃO (só P2M)
+            let ocupHtml = '';
+            if (temOcup) {
+              const ocup = l.ocupTrim || 0;
+              const metaO = metaOcup.p2m;
+              let corOcup = '#6b7280', ocupTxt = '⏳';
+              if (ocup > 0) {
+                if (ocup >= metaO * 1.1) { corOcup = '#10b981'; ocupTxt = `🟢 ${ocup}%`; }
+                else if (ocup >= metaO) { corOcup = '#3b82f6'; ocupTxt = `🔵 ${ocup}%`; }
+                else { corOcup = '#f59e0b'; ocupTxt = `🟡 ${ocup}%`; }
+              }
+              ocupHtml = `<td style="padding: 8px 6px; text-align: center; color: ${corOcup}; font-family: monospace; font-weight: bold; font-size: 12px;">${ocupTxt}</td>`;
+            }
+
+            // TRIMESTRE GERAL - usa a líquida do trim como referência
+            const corTrim = corLiq;
+            const trimTxt = liq > 0 ? `${liq}` : '-';
+
+            return `
+              <tr style="background: ${bg}; border-bottom: 1px solid #2a2a2a;">
+                <td style="padding: 8px 6px; color: white; font-weight: bold; font-family: monospace; font-size: 12px;">${l.idGroot}</td>
+                <td style="padding: 8px 6px; text-align: center; color: ${corLiq}; font-family: monospace; font-weight: bold; font-size: 13px;">${liq || '-'}</td>
+                <td style="padding: 8px 6px; text-align: center; color: ${corLiq}; font-weight: bold; font-size: 11px;">${emojiLiq} ${txtLiq}</td>
+                ${imaHtml}
+                ${ocupHtml}
+                <td style="padding: 8px 6px; text-align: center; background: rgba(16, 185, 129, 0.08); color: ${corTrim}; font-family: monospace; font-weight: 900; font-size: 13px;">${trimTxt}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+
       <!-- LEGENDA -->
-      <div style="background: #1a1a1a; border-radius: 12px; padding: 12px 16px; margin-bottom: 20px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; font-size: 12px;">
-        <span style="color: #10b981;">🟢 Supera meta</span>
+      <div style="margin-top: 12px; padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; font-size: 10px;">
+        <span style="color: #10b981;">🟢 Supera</span>
         <span style="color: #3b82f6;">🔵 Na meta</span>
         <span style="color: #f59e0b;">🟡 Atenção</span>
         <span style="color: #ef4444;">🔴 Abaixo</span>
         <span style="color: #6b7280;">⏳ Sem dados</span>
       </div>
 
-      <!-- CARDS -->
-      ${cardsHtml}
-
       <!-- RODAPÉ -->
-      <div style="margin-top: 16px; padding: 12px; background: #1a1a1a; border-radius: 8px; font-size: 11px; color: #888; text-align: center;">
-        📊 LIDER 360 · Gerado em ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · Para feedback individual, consulte seu líder
+      <div style="margin-top: 8px; padding: 6px; font-size: 9px; color: #666; text-align: center;">
+        📊 LIDER 360 · Gerado em ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
       </div>
     `;
 
@@ -627,7 +601,7 @@ export default function CalibracaoPage() {
       });
 
       const link = document.createElement('a');
-      link.download = `Resultados_${processo}_${mesAtualNome}_${new Date().getFullYear()}.png`;
+      link.download = `Resultados_${processo}_${mesAtualNome}_${anoAtual}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
 
