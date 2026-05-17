@@ -74,6 +74,11 @@ export default function BoletimPage() {
   const [metas, setMetas] = useState<Metas>(METAS_PADRAO);
   const [dataRef, setDataRef] = useState(new Date().toLocaleDateString('pt-BR'));
   const [montou, setMontou] = useState(false);
+  
+  // 🎯 Realizado editável manualmente (null = usa cálculo automático)
+  const [netRealizadoManual, setNetRealizadoManual] = useState<number | null>(null);
+  const [pecasRealizadoManual, setPecasRealizadoManual] = useState<number | null>(null);
+  
   const boletimRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -132,11 +137,14 @@ export default function BoletimPage() {
   const totalVolP2M = dados.p2m.reduce((s, l) => s + l.qtd, 0);
 
   const totalColabs = dados.checkin.length + dados.p2m.length;
-  const netRealizado = totalColabs > 0
+  const netCalculado = totalColabs > 0
     ? Math.round((totalLiqCheckin + totalLiqP2M) / totalColabs)
     : 0;
 
-  const totalPecasRealizado = totalVolP2M;
+  // 🎯 Realizado FINAL: usa manual se setado, senão usa calculado
+  const netRealizado = netRealizadoManual !== null ? netRealizadoManual : netCalculado;
+  const pecasCalculado = totalVolP2M;
+  const totalPecasRealizado = pecasRealizadoManual !== null ? pecasRealizadoManual : pecasCalculado;
 
   const difNet = netRealizado - metas.netCT;
   const difPecas = totalPecasRealizado - metas.totalPecas;
@@ -443,19 +451,46 @@ export default function BoletimPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
           <div className="bg-gradient-to-br from-yellow-500/20 to-yellow-600/10 border-2 border-yellow-500/40 rounded-xl p-4">
-            <div className="text-center text-xs font-bold text-yellow-300 uppercase tracking-widest mb-3">
-              ⚡ NET do Time
+            <div className="flex items-center justify-center gap-2 mb-3">
+              <span className="text-xs font-bold text-yellow-300 uppercase tracking-widest">
+                ⚡ NET do Time
+              </span>
+              {netRealizadoManual !== null && (
+                <button
+                  onClick={() => setNetRealizadoManual(null)}
+                  className="text-[10px] bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 px-2 py-0.5 rounded-full font-bold transition-colors"
+                  title="Voltar ao cálculo automático"
+                >
+                  🔄 Auto
+                </button>
+              )}
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div className="text-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">Meta</div>
-                <div className="text-2xl font-black text-yellow-300 font-mono">{metas.netCT}</div>
+                <input
+                  type="number"
+                  value={metas.netCT}
+                  onChange={(e) => salvarMetas({ ...metas, netCT: Number(e.target.value) })}
+                  className="w-full bg-transparent text-2xl font-black text-yellow-300 font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded"
+                />
               </div>
               <div className="text-center border-x border-yellow-500/20">
-                <div className="text-xs text-gray-400 uppercase font-bold mb-1">Realizado</div>
-                <div className={`text-2xl font-black font-mono ${netRealizado >= metas.netCT ? 'text-green-400' : 'text-red-400'}`}>
-                  {netRealizado || '-'}
+                <div className="text-xs text-gray-400 uppercase font-bold mb-1">
+                  Realizado {netRealizadoManual !== null && <span className="text-yellow-400">✏️</span>}
                 </div>
+                <input
+                  type="number"
+                  value={netRealizado || ''}
+                  placeholder="-"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setNetRealizadoManual(v === '' ? null : Number(v));
+                  }}
+                  className={`w-full bg-transparent text-2xl font-black font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded ${
+                    netRealizado >= metas.netCT && netRealizado > 0 ? 'text-green-400' : netRealizado > 0 ? 'text-red-400' : 'text-gray-500'
+                  }`}
+                />
               </div>
               <div className="text-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">Diferença</div>
@@ -468,21 +503,46 @@ export default function BoletimPage() {
           </div>
 
           <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 border-2 border-purple-500/40 rounded-xl p-4">
-            <div className="text-center text-xs font-bold text-purple-300 uppercase tracking-widest mb-3">
-              📦 Total de Peças (P2M)
+            <div className="flex items-center justify-center gap-2 mb-3">
+              <span className="text-xs font-bold text-purple-300 uppercase tracking-widest">
+                📦 Total de Peças (P2M)
+              </span>
+              {pecasRealizadoManual !== null && (
+                <button
+                  onClick={() => setPecasRealizadoManual(null)}
+                  className="text-[10px] bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 px-2 py-0.5 rounded-full font-bold transition-colors"
+                  title="Voltar ao cálculo automático"
+                >
+                  🔄 Auto
+                </button>
+              )}
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div className="text-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">Meta</div>
-                <div className="text-2xl font-black text-purple-300 font-mono">
-                  {metas.totalPecas > 0 ? metas.totalPecas.toLocaleString('pt-BR') : '-'}
-                </div>
+                <input
+                  type="number"
+                  value={metas.totalPecas}
+                  onChange={(e) => salvarMetas({ ...metas, totalPecas: Number(e.target.value) })}
+                  className="w-full bg-transparent text-2xl font-black text-purple-300 font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded"
+                />
               </div>
               <div className="text-center border-x border-purple-500/20">
-                <div className="text-xs text-gray-400 uppercase font-bold mb-1">Realizado</div>
-                <div className={`text-2xl font-black font-mono ${totalPecasRealizado >= metas.totalPecas && metas.totalPecas > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {totalPecasRealizado > 0 ? totalPecasRealizado.toLocaleString('pt-BR') : '-'}
+                <div className="text-xs text-gray-400 uppercase font-bold mb-1">
+                  Realizado {pecasRealizadoManual !== null && <span className="text-purple-400">✏️</span>}
                 </div>
+                <input
+                  type="number"
+                  value={totalPecasRealizado || ''}
+                  placeholder="-"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setPecasRealizadoManual(v === '' ? null : Number(v));
+                  }}
+                  className={`w-full bg-transparent text-2xl font-black font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded ${
+                    totalPecasRealizado >= metas.totalPecas && metas.totalPecas > 0 && totalPecasRealizado > 0 ? 'text-green-400' : totalPecasRealizado > 0 ? 'text-red-400' : 'text-gray-500'
+                  }`}
+                />
               </div>
               <div className="text-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">Diferença</div>
