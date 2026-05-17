@@ -40,62 +40,130 @@ function extrairTemposDoTexto(texto: string): Partial<Tempos> {
   const t = texto.toLowerCase().replace(/\s+/g, ' ');
   const result: Partial<Tempos> = {};
 
-  // Tenta achar padrão "XX h YY min" ou "XX min"
-  function acharTempo(palavrasChave: string[]): TempoUnico | null {
+  // 🎯 DETECTA O PADRÃO DO TEXTO
+  // Padrão A: "Ociosidade total 43h 34min Tempo efetivo 125h 42min..."  (label valor label valor)
+  // Padrão B: "Ociosidade total Tempo efetivo Tempo não sistêmico Tempo não disponível 43h 34min..." (labels juntos, valores juntos)
+
+  // Acha posição de TODOS os rótulos
+  const rotulosLista: { pos: number; tipo: keyof Tempos }[] = [];
+  const buscarRotulos = [
+    { tipo: 'ociosidade' as const, termos: ['ociosidade total', 'ociosidade'] },
+    { tipo: 'efetivo' as const, termos: ['tempo efetivo'] },
+    { tipo: 'naoSistemico' as const, termos: ['não sistêmico', 'nao sistemico', 'não medido'] },
+    { tipo: 'naoDisponivel' as const, termos: ['não disponível', 'nao disponivel'] },
+  ];
+
+  for (const item of buscarRotulos) {
+    for (const termo of item.termos) {
+      const idx = t.indexOf(termo);
+      if (idx !== -1) {
+        rotulosLista.push({ pos: idx, tipo: item.tipo });
+        break;
+      }
+    }
+  }
+
+  rotulosLista.sort((a, b) => a.pos - b.pos);
+
+  // Acha posição do PRIMEIRO número que parece tempo
+  const primeiroMatch = t.match(/(\d+)\s*h\w*\s*(\d+)\s*min|(\d+)\s*min/);
+  const posPrimeiroTempo = primeiroMatch ? primeiroMatch.index || 0 : -1;
+
+  // Se TODOS os rótulos vêm ANTES do primeiro tempo → modo "ORDENADO" (Padrão B)
+  const ultimoRotuloPos = rotulosLista.length > 0 ? rotulosLista[rotulosLista.length - 1].pos : 0;
+  const modoOrdenado = rotulosLista.length >= 3 && posPrimeiroTempo > ultimoRotuloPos + 10;
+
+  // 🎯 ESTRATÉGIA 1: PROXIMIDADE (Padrão A — label próximo do valor)
+  function acharTempoProximo(palavrasChave: string[]): TempoUnico | null {
     for (const chave of palavrasChave) {
-      // Procura: "ociosidade ... 72 h 39 min" ou "ociosidade ... 58 min"
-      // Regex tolerante a ruído entre a palavra-chave e o número
       const idx = t.indexOf(chave);
       if (idx === -1) continue;
-
-      // Olha os próximos 80 chars após a palavra-chave
-      const trecho = t.substring(idx, idx + 80);
-
-      // Padrão 1: "72 h 39 min" ou "72h39min" ou "72 hr 39 m"
+      const trecho = t.substring(idx, idx + 60);
       const m1 = trecho.match(/(\d+)\s*h\w*\s*(\d+)\s*m/);
-      if (m1) {
-        return { h: parseInt(m1[1]), m: parseInt(m1[2]) };
-      }
-
-      // Padrão 2: só "58 min" (sem hora)
+      if (m1) return { h: parseInt(m1[1]), m: parseInt(m1[2]) };
       const m2 = trecho.match(/(\d+)\s*min/);
-      if (m2) {
-        return { h: 0, m: parseInt(m2[1]) };
-      }
-
-      // Padrão 3: só "5 h" (sem minutos)
+      if (m2) return { h: 0, m: parseInt(m2[1]) };
       const m3 = trecho.match(/(\d+)\s*h\b/);
-      if (m3) {
-        return { h: parseInt(m3[1]), m: 0 };
-      }
+      if (m3) return { h: parseInt(m3[1]), m: 0 };
     }
     return null;
   }
 
-  const ociosidade = acharTempo(['ociosidade total', 'ociosidade']);
-  if (ociosidade) result.ociosidade = ociosidade;
+  if (!modoOrdenado) {
+    const ociosidade = acharTempoProximo(['ociosidade total', 'ociosidade']);
+    if (ociosidade) result.ociosidade = ociosidade;
+    const efetivo = acharTempoProximo(['tempo efetivo', 'efetivo']);
+    if (efetivo) result.efetivo = efetivo;
+    const naoSistemico = acharTempoProximo([
+      'não sistêmico', 'nao sistemico', 'não sistémico', 'não medido', 'sistêmico', 'sistemico',
+    ]);
+    if (naoSistemico) result.naoSistemico = naoSistemico;
+    const naoDisponivel = acharTempoProximo([
+      'não disponível', 'nao disponivel', 'não disponivel', 'disponível', 'disponivel',
+    ]);
+    if (naoDisponivel) result.naoDisponivel = naoDisponivel;
+  }
 
-  const efetivo = acharTempo(['tempo efetivo', 'efetivo']);
-  if (efetivo) result.efetivo = efetivo;
+  // 🎯 ESTRATÉGIA 2: ORDENADA (Padrão B — labels juntos, valores juntos)
+  const camposVazios: (keyof Tempos)[] = [];
+  if (!result.ociosidade) camposVazios.push('ociosidade');
+  if (!result.efetivo) camposVazios.push('efetivo');
+  if (!result.naoSistemico) camposVazios.push('naoSistemico');
+  if (!result.naoDisponivel) camposVazios.push('naoDisponivel');
 
-  const naoSistemico = acharTempo([
-    'não sistêmico',
-    'nao sistemico',
-    'não sistémico',
-    'não medido',
-    'sistêmico',
-    'sistemico',
-  ]);
-  if (naoSistemico) result.naoSistemico = naoSistemico;
+  if (camposVazios.length > 0) {
+    // Pega TODOS os tempos no texto
+    const todosOsTempos: { pos: number; tempo: TempoUnico }[] = [];
 
-  const naoDisponivel = acharTempo([
-    'não disponível',
-    'nao disponivel',
-    'não disponivel',
-    'disponível',
-    'disponivel',
-  ]);
-  if (naoDisponivel) result.naoDisponivel = naoDisponivel;
+    const regexHorMin = /(\d+)\s*h\w*\s*(\d+)\s*min/g;
+    const matchesHM: { pos: number; fim: number; tempo: TempoUnico }[] = [];
+    let mhm;
+    while ((mhm = regexHorMin.exec(t)) !== null) {
+      matchesHM.push({
+        pos: mhm.index,
+        fim: mhm.index + mhm[0].length,
+        tempo: { h: parseInt(mhm[1]), m: parseInt(mhm[2]) },
+      });
+      todosOsTempos.push({
+        pos: mhm.index,
+        tempo: { h: parseInt(mhm[1]), m: parseInt(mhm[2]) },
+      });
+    }
+
+    const regexSoMin = /(\d+)\s*min/g;
+    let mm;
+    while ((mm = regexSoMin.exec(t)) !== null) {
+      // Verifica se está DENTRO de um "h X min" já capturado
+      const fimMatch = mm.index + mm[0].length;
+      const dentroDeHM = matchesHM.some(
+        (h) => mm!.index >= h.pos && fimMatch <= h.fim
+      );
+      if (!dentroDeHM) {
+        todosOsTempos.push({
+          pos: mm.index,
+          tempo: { h: 0, m: parseInt(mm[1]) },
+        });
+      }
+    }
+
+    todosOsTempos.sort((a, b) => a.pos - b.pos);
+
+    // Mapeia rótulos com tempos pela ordem
+    if (rotulosLista.length === todosOsTempos.length) {
+      rotulosLista.forEach((r, idx) => {
+        if (!result[r.tipo] && todosOsTempos[idx]) {
+          result[r.tipo] = todosOsTempos[idx].tempo;
+        }
+      });
+    } else if (rotulosLista.length > 0 && todosOsTempos.length > 0) {
+      const minLen = Math.min(rotulosLista.length, todosOsTempos.length);
+      for (let i = 0; i < minLen; i++) {
+        if (!result[rotulosLista[i].tipo]) {
+          result[rotulosLista[i].tipo] = todosOsTempos[i].tempo;
+        }
+      }
+    }
+  }
 
   return result;
 }
