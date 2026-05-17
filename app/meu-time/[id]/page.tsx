@@ -267,17 +267,26 @@ export default function DetalheColaboradorPage() {
     }
   }
 
-  // 🎯 CÁLCULO INTELIGENTE — Só soma unidades das DATAS que tem inventário!
+  // 🎯 CÁLCULO CORRETO — Usa unidades ATÉ a data máxima do inventário (geral)
+  // Ex: Se último inventário foi 15/05, considera unidades só até 15/05 mesmo se tiver mais
   function calcularDpmoPorSemana(): DpmoSemana[] {
     const resultado: Record<string, DpmoSemana> = {};
 
-    // 1. Lista DATAS distintas onde tem inventário
-    const datasComInventario = new Set<string>();
+    // 1. Acha a data MAIS RECENTE do inventário (geral)
+    let dataMaximaInventario = '';
     dpmoEventos.forEach((e) => {
-      datasComInventario.add(e.checkin_data); // YYYY-MM-DD
+      if (e.checkin_data > dataMaximaInventario) {
+        dataMaximaInventario = e.checkin_data;
+      }
     });
 
-    // 2. Acumula DEFEITOS por semana (do dpmo_eventos)
+    // 2. Lista SEMANAS que têm pelo menos 1 evento de inventário
+    const semanasComInventario = new Set<string>();
+    dpmoEventos.forEach((e) => {
+      semanasComInventario.add(`${e.ano}-S${e.semana}`);
+    });
+
+    // 3. Acumula DEFEITOS por semana (do dpmo_eventos)
     dpmoEventos.forEach((e) => {
       const chave = `${e.ano}-S${e.semana}`;
       if (!resultado[chave]) {
@@ -297,13 +306,17 @@ export default function DetalheColaboradorPage() {
       }
     });
 
-    // 3. Acumula UNIDADES APENAS dos dias QUE TEM INVENTÁRIO
+    // 4. Acumula UNIDADES — só dos dias da semana que estão ATÉ a data máxima do inventário
     historico.forEach((h) => {
-      // 🎯 SÓ INCLUI se essa data foi auditada (tem inventário)
-      if (!datasComInventario.has(h.data_referencia)) return;
+      // 🎯 Ignora dias depois da última auditoria
+      if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return;
 
       const { ano, semana } = getSemanaIso(h.data_referencia);
       const chave = `${ano}-S${semana}`;
+
+      // Só inclui SE a semana tem inventário
+      if (!semanasComInventario.has(chave)) return;
+
       if (!resultado[chave]) {
         resultado[chave] = {
           ano,
@@ -318,7 +331,7 @@ export default function DetalheColaboradorPage() {
       resultado[chave].unidades += h.unidades || 0;
     });
 
-    // 4. Verifica também semanas com produtividade mas sem inventário
+    // 5. Adiciona semanas com produtividade mas SEM inventário
     historico.forEach((h) => {
       const { ano, semana } = getSemanaIso(h.data_referencia);
       const chave = `${ano}-S${semana}`;
@@ -335,7 +348,7 @@ export default function DetalheColaboradorPage() {
       }
     });
 
-    // 5. Calcula DPMO onde tem OS 2 (defeitos + unidades das datas auditadas)
+    // 6. Calcula DPMO onde tem OS 2
     Object.values(resultado).forEach((s) => {
       const temInventario = dpmoEventos.some((e) => e.ano === s.ano && e.semana === s.semana);
       
@@ -589,8 +602,8 @@ export default function DetalheColaboradorPage() {
               )}
 
               <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300">
-                💡 <strong>Cálculo inteligente:</strong> Soma só as unidades dos DIAS AUDITADOS (que têm inventário).
-                Se a produtividade está mais adiantada que o inventário, ignora os dias sem auditoria. Garante que bate 100% com Looker!
+                💡 <strong>Cálculo igual Looker:</strong> Soma unidades das semanas auditadas <strong>até a última data de inventário</strong>. 
+                Se você tem produtividade até dia 16 mas inventário até dia 15, ignora o dia 16 (não foi auditado). Igual Looker faz.
               </div>
             </>
           )}
