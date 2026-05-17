@@ -41,15 +41,24 @@ type DpmoAgregado = {
   dpmo: number;
 };
 
+type OcupacaoP2MTipo = {
+  id_groot: string | null;
+  user_id: string;
+  data_referencia: string;
+  nome_rep: string;
+  qtd_totes: number;
+  ocupacao_pct: number;
+  mes: number;
+  ano: number;
+  trimestre: string;
+};
+
 type FeedbackTrim = {
   id_groot: string;
   classificacao: string;
   data_referencia: string | null;
   registrado_em: string;
 };
-
-type ImaManual = { id_groot: string; quarter_ref: string; valor_ima: number };
-type ComoManual = { id_groot: string; quarter_ref: string; nota_como: string };
 
 type LinhaCalib = {
   id: number;
@@ -113,9 +122,8 @@ export default function CalibracaoPage() {
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
   const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
   const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
+  const [ocupacaoP2M, setOcupacaoP2M] = useState<OcupacaoP2MTipo[]>([]);
   const [feedbacks, setFeedbacks] = useState<FeedbackTrim[]>([]);
-  const [imaManual, setImaManual] = useState<ImaManual[]>([]);
-  const [comoManual, setComoManual] = useState<ComoManual[]>([]);
   const [metaIma, setMetaIma] = useState({ checkin: 1567, p2m: 1567 });
   const [metaOcup, setMetaOcup] = useState({ checkin: 75, p2m: 80 });
   const [metaLiq, setMetaLiq] = useState({ checkin: 296, p2m: 329 });
@@ -129,11 +137,12 @@ export default function CalibracaoPage() {
   async function carregar() {
     setLoading(true);
     try {
-      const [colabResp, histResp, dpmoResp, dpmoAggResp, fbResp, confResp] = await Promise.all([
+      const [colabResp, histResp, dpmoResp, dpmoAggResp, ocupResp, fbResp, confResp] = await Promise.all([
         supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
         supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
         supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre'),
         supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo'),
+        supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre'),
         supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
         supabase.from('config').select('chave, valor'),
       ]);
@@ -142,6 +151,7 @@ export default function CalibracaoPage() {
       if (histResp.data) setHistorico(histResp.data);
       if (dpmoResp.data) setDpmoEventos(dpmoResp.data as DpmoEvento[]);
       if (dpmoAggResp.data) setDpmoAgregado(dpmoAggResp.data as DpmoAgregado[]);
+      if (ocupResp.data) setOcupacaoP2M(ocupResp.data as OcupacaoP2MTipo[]);
       if (fbResp.data) setFeedbacks(fbResp.data as FeedbackTrim[]);
       if (confResp.data) {
         const map: Record<string, number> = {};
@@ -204,11 +214,24 @@ export default function CalibracaoPage() {
         const { mes } = getTrimestreDeData(h.data_referencia);
         if (!mediasPorMes[mes]) mediasPorMes[mes] = { liq: [], ocup: [] };
         if (h.prod_liquida > 0) mediasPorMes[mes].liq.push(h.prod_liquida);
-        if (h.utilizacao) {
+        // ⚠️ Utilização SÓ pra Checkin (vem do CSV de produtividade)
+        if (c.processo === 'Checkin' && h.utilizacao) {
           const num = parseFloat(h.utilizacao.replace('%', '').replace(',', '.'));
           if (!isNaN(num) && num > 0) mediasPorMes[mes].ocup.push(num);
         }
       });
+
+      // 🎯 Pra P2M, ocupação vem da tabela ocupacao_p2m (CSV Totefullness)
+      if (c.processo === 'P2M') {
+        const ocupColab = ocupacaoP2M.filter((o) => {
+          if (o.ano !== anoNum || o.trimestre !== quarterSel) return false;
+          return o.id_groot === c.id_groot;
+        });
+        ocupColab.forEach((o) => {
+          if (!mediasPorMes[o.mes]) mediasPorMes[o.mes] = { liq: [], ocup: [] };
+          if (o.ocupacao_pct > 0) mediasPorMes[o.mes].ocup.push(o.ocupacao_pct);
+        });
+      }
 
       const mediaMes = (mes: number, tipo: 'liq' | 'ocup') => {
         const arr = mediasPorMes[mes]?.[tipo] || [];
@@ -231,18 +254,14 @@ export default function CalibracaoPage() {
 
       // 🎯 CÁLCULO IMA INTELIGENTE — Só usa UNIDADES dos dias auditados
       const quarterKey = `${anoNum}-${quarterSel}`;
-      const manualIma = imaManual.find((m) => m.id_groot === c.id_groot && m.quarter_ref === quarterKey);
 
       let ima = 0;
       let imaDefeitos = 0;
       let imaUnidades = 0;
       let imaDiasAuditados = 0;
-      let imaOrigem: 'auto' | 'manual' | 'vazio' | 'aguardando' = 'vazio';
+      let imaOrigem: 'auto' | 'vazio' | 'aguardando' = 'vazio';
 
-      if (manualIma) {
-        ima = manualIma.valor_ima;
-        imaOrigem = 'manual';
-      } else if (c.processo === 'Checkin' || c.processo === 'P2M') {
+      if (c.processo === 'Checkin' || c.processo === 'P2M') {
         const nomeNorm = normalizarNome(c.nome);
 
         // 1. Pega eventos do trimestre desse colaborador
@@ -322,31 +341,25 @@ export default function CalibracaoPage() {
         else que = 'Alinhado';
       }
 
-      const manualComo = comoManual.find((m) => m.id_groot === c.id_groot && m.quarter_ref === quarterKey);
       let como = 'Sem feedbacks';
-      let comoOrigem: 'auto' | 'manual' = 'auto';
+      const comoOrigem: 'auto' = 'auto';
 
-      if (manualComo) {
-        como = manualComo.nota_como;
-        comoOrigem = 'manual';
-      } else {
-        const fbsTrim = feedbacks.filter((f) => {
-          if (f.id_groot !== c.id_groot) return false;
-          const dataRef = f.data_referencia || f.registrado_em;
-          const data = new Date(dataRef);
-          const mes = data.getMonth() + 1;
-          const ano = data.getFullYear();
-          return ano === anoNum && mesesPossiveis.includes(mes);
-        });
+      const fbsTrim = feedbacks.filter((f) => {
+        if (f.id_groot !== c.id_groot) return false;
+        const dataRef = f.data_referencia || f.registrado_em;
+        const data = new Date(dataRef);
+        const mes = data.getMonth() + 1;
+        const ano = data.getFullYear();
+        return ano === anoNum && mesesPossiveis.includes(mes);
+      });
 
-        if (fbsTrim.length > 0) {
-          const supera = fbsTrim.filter((f) => f.classificacao === 'Supera').length;
-          const alinhado = fbsTrim.filter((f) => f.classificacao === 'Alinhado').length;
-          const abaixo = fbsTrim.filter((f) => f.classificacao === 'Abaixo').length;
-          if (abaixo > supera + alinhado) como = 'Abaixo';
-          else if (supera >= alinhado && supera >= abaixo) como = 'Supera';
-          else como = 'Alinhado';
-        }
+      if (fbsTrim.length > 0) {
+        const supera = fbsTrim.filter((f) => f.classificacao === 'Supera').length;
+        const alinhado = fbsTrim.filter((f) => f.classificacao === 'Alinhado').length;
+        const abaixo = fbsTrim.filter((f) => f.classificacao === 'Abaixo').length;
+        if (abaixo > supera + alinhado) como = 'Abaixo';
+        else if (supera >= alinhado && supera >= abaixo) como = 'Supera';
+        else como = 'Alinhado';
       }
 
       let aptidao = 'Sem dados';
@@ -375,18 +388,158 @@ export default function CalibracaoPage() {
         aptidao,
       };
     });
-  }, [colaboradores, historico, dpmoEventos, feedbacks, imaManual, comoManual, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
+  }, [colaboradores, historico, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
 
   const porProcesso = {
-    Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin'),
-    P2M: linhasCalibracao.filter((l) => l.processo === 'P2M'),
-    Sorting: linhasCalibracao.filter((l) => l.processo === 'Sorting'),
+    Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+    P2M: linhasCalibracao.filter((l) => l.processo === 'P2M').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+    Sorting: linhasCalibracao.filter((l) => l.processo === 'Sorting').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
   };
 
   const totalAptos = linhasCalibracao.filter((l) => l.aptidao === 'APTO').length;
   const totalObs = linhasCalibracao.filter((l) => l.aptidao === 'EM OBSERVAÇÃO').length;
   const totalNaoAptos = linhasCalibracao.filter((l) => l.aptidao === 'NÃO APTO').length;
   const totalAguardando = linhasCalibracao.filter((l) => l.imaOrigem === 'aguardando').length;
+
+  // 🎯 EXPORTAR CSV (planilha) — versão completa pra líder
+  function exportarCSV(processo: 'Checkin' | 'P2M' | 'Sorting') {
+    const linhas = porProcesso[processo];
+    if (linhas.length === 0) return;
+
+    const headers: string[] = ['ID', 'Nome', 'Processo'];
+    mesesComDados.forEach((m) => {
+      headers.push(`${NOMES_MESES[m]}_Liq`, `${NOMES_MESES[m]}_Ocup`);
+    });
+    headers.push('Trim_Liq', 'Trim_Ocup', 'IMA', 'QUE', 'COMO', 'APTIDAO');
+
+    const rows = linhas.map((l) => {
+      const row: (string | number)[] = [l.idGroot, l.nome, l.processo];
+      mesesComDados.forEach((m) => {
+        row.push(l.medMes[m]?.liq || '-');
+        row.push(l.medMes[m]?.ocup ? `${l.medMes[m].ocup}%` : '-');
+      });
+      row.push(l.liqTrim || '-');
+      row.push(l.ocupTrim ? `${l.ocupTrim}%` : '-');
+      row.push(l.imaOrigem === 'aguardando' ? 'aguardando' : (l.ima || '-'));
+      row.push(l.que);
+      row.push(l.como);
+      row.push(l.aptidao);
+      return row;
+    });
+
+    // BOM pra abrir certo no Excel
+    const bom = '\uFEFF';
+    const csv = bom + [headers, ...rows]
+      .map((r) => r.map((v) => {
+        const s = String(v);
+        return s.includes(';') || s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+      }).join(';'))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Calibracao_${processo}_${trimestreSelecionado}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    window.showToast('success', `📥 ${processo} exportado!`);
+  }
+
+  // 🎯 GERAR PRINT PÚBLICO — só ID + indicadores, SEM nome, QUE e COMO
+  async function gerarPrintPublico(processo: 'Checkin' | 'P2M' | 'Sorting') {
+    const linhas = porProcesso[processo];
+    if (linhas.length === 0) return;
+
+    // Cria uma div temporária estilizada
+    const div = document.createElement('div');
+    div.style.cssText = `
+      position: fixed; top: -9999px; left: -9999px;
+      width: 900px; padding: 30px; background: #0a0a0a; color: white;
+      font-family: -apple-system, system-ui, sans-serif; font-size: 14px;
+    `;
+
+    const procEmoji = processo === 'Checkin' ? '📦' : processo === 'P2M' ? '🚚' : '📋';
+    const corMeta = processo === 'Checkin' ? 'cyan' : processo === 'P2M' ? 'orange' : 'emerald';
+
+    div.innerHTML = `
+      <div style="text-align: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #FFD700;">
+        <h1 style="color: #FFD700; font-size: 28px; font-weight: 900; margin: 0;">
+          ${procEmoji} CALIBRAÇÃO ${processo.toUpperCase()}
+        </h1>
+        <p style="color: #888; font-size: 14px; margin: 8px 0 0 0;">
+          ${trimestreSelecionado} • ${linhas.length} colaboradores • Resultados do mês
+        </p>
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <thead>
+          <tr style="background: #1a1a1a; color: #FFD700; font-weight: bold;">
+            <th style="padding: 10px 8px; text-align: left; border-bottom: 2px solid #FFD700;">ID</th>
+            ${mesesComDados.map((m) => `
+              <th colspan="2" style="padding: 10px 8px; text-align: center; border-bottom: 2px solid #FFD700;">${NOMES_MESES[m]}</th>
+            `).join('')}
+            <th colspan="2" style="padding: 10px 8px; text-align: center; border-bottom: 2px solid #FFD700; background: #2a2a2a;">Trim.</th>
+            <th style="padding: 10px 8px; text-align: center; border-bottom: 2px solid #FFD700;">IMA</th>
+          </tr>
+          <tr style="color: #888; font-size: 11px;">
+            <th></th>
+            ${mesesComDados.map(() => `
+              <th style="padding: 4px;">Líq</th>
+              <th style="padding: 4px;">Oc%</th>
+            `).join('')}
+            <th style="padding: 4px; background: #2a2a2a;">Líq</th>
+            <th style="padding: 4px; background: #2a2a2a;">Oc%</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${linhas.map((l) => `
+            <tr style="border-bottom: 1px solid #2a2a2a;">
+              <td style="padding: 8px; font-family: monospace; color: white; font-weight: bold;">${l.idGroot}</td>
+              ${mesesComDados.map((m) => `
+                <td style="padding: 8px; text-align: center; color: #ddd; font-family: monospace;">${l.medMes[m]?.liq || '-'}</td>
+                <td style="padding: 8px; text-align: center; color: #ddd; font-family: monospace;">${l.medMes[m]?.ocup ? l.medMes[m].ocup + '%' : '-'}</td>
+              `).join('')}
+              <td style="padding: 8px; text-align: center; background: #1a1a1a; color: white; font-weight: bold; font-family: monospace;">${l.liqTrim || '-'}</td>
+              <td style="padding: 8px; text-align: center; background: #1a1a1a; color: white; font-weight: bold; font-family: monospace;">${l.ocupTrim ? l.ocupTrim + '%' : '-'}</td>
+              <td style="padding: 8px; text-align: center; color: ${l.imaOrigem === 'auto' ? '#fff' : '#3b82f6'}; font-family: monospace; font-weight: bold;">
+                ${l.imaOrigem === 'aguardando' ? '⏳' : (l.ima || '-')}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <div style="margin-top: 15px; padding: 10px; background: #1a1a1a; border-radius: 8px; font-size: 11px; color: #888; text-align: center;">
+        📊 LIDER 360 · ${new Date().toLocaleDateString('pt-BR')} · Resultados individuais — Consulte seu líder para feedback
+      </div>
+    `;
+
+    document.body.appendChild(div);
+
+    try {
+      // Importa html2canvas dinamicamente (já tá no projeto pelo Boletim)
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(div, {
+        backgroundColor: '#0a0a0a',
+        scale: 2,
+        useCORS: true,
+      });
+
+      const link = document.createElement('a');
+      link.download = `Calibracao_${processo}_${trimestreSelecionado}_PUBLICO.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+
+      window.showToast('success', `📸 Print ${processo} gerado!`);
+    } catch (e) {
+      console.error(e);
+      window.showToast('error', 'Erro ao gerar print');
+    } finally {
+      document.body.removeChild(div);
+    }
+  }
 
   if (loading) {
     return (
@@ -465,11 +618,27 @@ export default function CalibracaoPage() {
 
             return (
               <div key={proc} className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl overflow-hidden">
-                <div className="bg-[#0a0a0a] px-6 py-3 border-b border-[#2a2a2a]">
+                <div className="bg-[#0a0a0a] px-6 py-3 border-b border-[#2a2a2a] flex items-center justify-between flex-wrap gap-3">
                   <h2 className="text-lg font-bold text-[#FFD700]">
                     {proc === 'Checkin' ? '📦' : proc === 'P2M' ? '🚚' : '📋'} {proc}{' '}
                     <span className="text-sm font-normal text-gray-400">({linhas.length} colaboradores)</span>
                   </h2>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => exportarCSV(proc)}
+                      title="Baixar planilha Excel (completa)"
+                      className="bg-green-500/10 hover:bg-green-500/20 text-green-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-green-500/30 transition-all flex items-center gap-1.5"
+                    >
+                      📥 Excel
+                    </button>
+                    <button
+                      onClick={() => gerarPrintPublico(proc)}
+                      title="Gerar print público (sem nome/QUE/COMO)"
+                      className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-blue-500/30 transition-all flex items-center gap-1.5"
+                    >
+                      📸 Print público
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
