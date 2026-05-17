@@ -120,3 +120,27 @@ textarea:focus {
 .soft-pulse {
   animation: softPulse 2s ease-in-out infinite;
 }
+
+/* ====================================================== */
+/* 🚀 ANIMAÇÕES DO MASCOTE APOLLO                          */
+/* ====================================================== */
+
+@keyframes mascot-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes party-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-8px) rotate(-3deg); }
+  50% { transform: translateY(-14px) rotate(0deg); }
+  75% { transform: translateY(-8px) rotate(3deg); }
+}
+
+.animate-mascot-float {
+  animation: mascot-float 4.8s ease-in-out infinite;
+}
+
+.animate-party-float {
+  animation: party-float 1.8s ease-in-out infinite;
+}
