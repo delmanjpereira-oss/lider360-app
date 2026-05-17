@@ -103,17 +103,59 @@ export default function BoletimPage() {
       complete: (result) => {
         const linhas: LinhaColab[] = [];
 
+        // Debug: mostra os headers que vieram
+        if (result.data.length > 0) {
+          console.log('📋 CSV Headers detectados:', Object.keys(result.data[0] as object));
+        }
+
         (result.data as Record<string, string>[]).forEach((row) => {
-          const id = pegarCol(row, ['User_Id', 'Id_Groot', 'id_groot', 'USER_ID', 'CHECKIN_USER']);
+          // 🎯 Aliases SUPER amplos pra ID
+          const id = pegarCol(row, [
+            'User_Id', 'user_id', 'USER_ID', 'User Id',
+            'Id_Groot', 'id_groot', 'ID_GROOT', 'Id Groot',
+            'CHECKIN_USER', 'Checkin_User', 'checkin_user',
+            'Usuário', 'Usuario', 'usuario',
+            'ID', 'Id',
+            'Lid', 'lid',
+            'Operador', 'operador',
+          ]);
           if (!id) return;
 
           if (tipo === 'ocupacao') {
-            const ocupTxt = pegarCol(row, ['Ocupação (%)', 'Ocupação', 'ocupacao_pct', 'OCUPAÇÃO (%)']);
+            // CSV Totefullness
+            const ocupTxt = pegarCol(row, [
+              'Ocupação (%)', 'Ocupação', 'Ocupacao', 'ocupacao',
+              'ocupacao_pct', 'OCUPAÇÃO (%)', 'OCUPACAO',
+              'Occupation', 'occupation',
+            ]);
             const ocup = parseNum(ocupTxt);
-            linhas.push({ id, liquida: 0, qtd: 0, ocupacao: ocup });
+            if (ocup > 0) linhas.push({ id, liquida: 0, qtd: 0, ocupacao: ocup });
           } else {
-            const liqTxt = pegarCol(row, ['Líquida', 'Liquida', 'Liq', 'PROD_LIQUIDA']);
-            const volTxt = pegarCol(row, ['Volume processado', 'Volume', 'Unidades', 'Quantidade', 'Volume_processado']);
+            // 🎯 Aliases SUPER amplos pra Líquida
+            const liqTxt = pegarCol(row, [
+              'Líquida', 'Liquida', 'LIQUIDA',
+              'Líq', 'Liq', 'LIQ',
+              'PROD_LIQUIDA', 'prod_liquida',
+              'Produtividade Líquida', 'Produtividade liquida',
+              'Produtividade', 'produtividade',
+              'Net', 'NET',
+              'Pç/h', 'pc/h', 'pç/h',
+              'Peças/h', 'Peças por hora',
+            ]);
+
+            // 🎯 Aliases SUPER amplos pra Volume
+            const volTxt = pegarCol(row, [
+              'Volume processado', 'volume_processado', 'Volume Processado',
+              'Volume', 'volume', 'VOLUME',
+              'Unidades', 'unidades', 'UNIDADES',
+              'Quantidade', 'quantidade', 'QUANTIDADE',
+              'Qtd', 'qtd', 'QTD',
+              'Qtd de Peças', 'Qtd Peças',
+              'Total', 'total',
+              'Peças', 'pecas', 'PECAS',
+              'CHECKIN', 'checkin',
+            ]);
+
             const liquida = parseNum(liqTxt);
             const qtd = parseNum(volTxt);
 
@@ -122,6 +164,11 @@ export default function BoletimPage() {
             }
           }
         });
+
+        if (linhas.length === 0) {
+          alert(`❌ Nenhum dado encontrado no CSV!\n\nHeaders detectados:\n${Object.keys(result.data[0] || {}).join(', ')}\n\nVerifique no console (F12) os headers.`);
+          return;
+        }
 
         setDados((prev) => ({ ...prev, [tipo]: linhas }));
       },
@@ -569,46 +616,50 @@ export default function BoletimPage() {
         </div>
 
         {linhasUnificadas.length > 0 ? (
-          <div className="bg-[#0a0a0a]/60 rounded-xl border border-[#2a2a2a] overflow-hidden">
-            <div className="bg-gradient-to-r from-[#1a1a1a] to-[#0a0a0a] p-3 border-b border-[#2a2a2a]">
-              <h3 className="text-sm font-black text-[#FFD700] flex items-center gap-2">
-                👥 Resultados Individuais
-                <span className="text-xs font-normal text-gray-400">
-                  · Ordenado por Líquida · {linhasUnificadas.length} colaboradores
-                </span>
-              </h3>
-            </div>
-
+          <div className="bg-white rounded-xl overflow-hidden border-2 border-[#FFD700]/30">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-[#1a1a1a]/50 border-b border-[#2a2a2a]">
-                  <th className="py-2 px-3 text-left text-xs text-gray-400 uppercase font-bold">ID</th>
-                  <th className="py-2 px-3 text-center text-xs text-gray-400 uppercase font-bold">Proc.</th>
-                  <th className="py-2 px-3 text-center text-xs text-gray-400 uppercase font-bold">Líq</th>
-                  <th className="py-2 px-3 text-center text-xs text-gray-400 uppercase font-bold">Vol</th>
-                  <th className="py-2 px-3 text-center text-xs text-gray-400 uppercase font-bold">Ocup</th>
+                <tr className="bg-[#FFD700]">
+                  <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">ID</th>
+                  <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Líquida</th>
+                  <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Qtd de Peças</th>
+                  <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Falta</th>
+                  {linhasUnificadas.some((l) => l.ocupacao > 0) && (
+                    <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Ocupação</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
-                {linhasUnificadas.map((l, idx) => (
-                  <tr key={l.id} className={`border-b border-[#2a2a2a]/40 ${idx % 2 === 0 ? 'bg-[#0f0f0f]/30' : 'bg-[#0a0a0a]/30'}`}>
-                    <td className="py-2 px-3 text-white font-mono font-bold text-sm">{l.id}</td>
-                    <td className="py-2 px-3 text-center">
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${l.processo === 'CK' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-orange-500/20 text-orange-300'}`}>
-                        {l.processo}
-                      </span>
-                    </td>
-                    <td className={`py-2 px-3 text-center font-mono font-bold ${corCelula(l.liquida, l.metaLiq)}`}>
-                      {l.liquida > 0 ? l.liquida : '-'}
-                    </td>
-                    <td className={`py-2 px-3 text-center font-mono font-bold ${corCelula(l.qtd, l.metaVol)}`}>
-                      {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
-                    </td>
-                    <td className={`py-2 px-3 text-center font-mono font-bold ${corCelula(l.ocupacao, metas.ocupMeta)}`}>
-                      {l.ocupacao > 0 ? `${l.ocupacao.toFixed(1)}%` : '-'}
-                    </td>
-                  </tr>
-                ))}
+                {linhasUnificadas.map((l) => {
+                  // Cor verde claro se atinge meta, vermelho claro se não
+                  const corLiq = l.liquida === 0 ? 'bg-gray-100 text-gray-500' : l.liquida >= l.metaLiq ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+                  const corVol = l.qtd === 0 ? 'bg-gray-100 text-gray-500' : l.qtd >= l.metaVol ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+                  const corOcup = l.ocupacao === 0 ? 'bg-gray-100 text-gray-500' : l.ocupacao >= metas.ocupMeta ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+                  
+                  // Falta = quanto falta pra meta de volume (P2M é o que conta)
+                  const falta = Math.max(0, l.metaVol - l.qtd);
+                  const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+
+                  return (
+                    <tr key={l.id} className="border-b border-gray-300">
+                      <td className="py-2 px-4 text-center text-gray-800 font-bold text-sm">{l.id}</td>
+                      <td className={`py-2 px-4 text-center font-bold text-sm ${corLiq}`}>
+                        {l.liquida > 0 ? l.liquida : '-'}
+                      </td>
+                      <td className={`py-2 px-4 text-center font-bold text-sm ${corVol}`}>
+                        {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
+                      </td>
+                      <td className={`py-2 px-4 text-center font-bold text-sm ${corFalta}`}>
+                        {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
+                      </td>
+                      {linhasUnificadas.some((x) => x.ocupacao > 0) && (
+                        <td className={`py-2 px-4 text-center font-bold text-sm ${corOcup}`}>
+                          {l.ocupacao > 0 ? `${l.ocupacao.toFixed(0)}%` : '-'}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
