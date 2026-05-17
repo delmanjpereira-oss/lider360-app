@@ -7,12 +7,13 @@ type LinhaColab = {
   id: string;
   liquida: number;
   qtd: number;
+  ocupacao: number;
 };
 
 type DadosBoletim = {
   checkin: LinhaColab[];
   p2m: LinhaColab[];
-  sorter: LinhaColab[];
+  ocupacao: LinhaColab[];
 };
 
 type Metas = {
@@ -20,22 +21,23 @@ type Metas = {
   checkinVol: number;
   p2mLiq: number;
   p2mVol: number;
-  sorterUtil: number;
+  ocupMeta: number;
   netCT: number;
+  totalPecas: number;
 };
 
-const METAS_KEY = 'lider360_boletim_metas_v2';
+const METAS_KEY = 'lider360_boletim_metas_v3';
 
 const METAS_PADRAO: Metas = {
   checkinLiq: 296,
   checkinVol: 2100,
   p2mLiq: 329,
   p2mVol: 2400,
-  sorterUtil: 85,
+  ocupMeta: 80,
   netCT: 135,
+  totalPecas: 0,
 };
 
-// Normaliza header de CSV pra busca flexível
 function norm(s: string): string {
   return String(s || '')
     .toLowerCase()
@@ -44,929 +46,524 @@ function norm(s: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
-// Pega o valor de uma coluna usando MUITOS aliases
 function pegarCol(row: Record<string, string>, aliases: string[]): string {
   const keys = Object.keys(row);
   for (const alias of aliases) {
-    const aliasN = norm(alias);
-    const k = keys.find((kk) => norm(kk) === aliasN);
-    if (k && row[k] != null && String(row[k]).trim() !== '') return String(row[k]);
+    const aliasNorm = norm(alias);
+    for (const k of keys) {
+      if (norm(k) === aliasNorm) return row[k] || '';
+    }
   }
   return '';
 }
 
-function parseNum(s: string): number {
-  if (!s) return 0;
-  const limpo = String(s).replace(/\./g, '').replace(',', '.').replace('%', '').trim();
-  const n = parseFloat(limpo);
+function parseNum(v: string): number {
+  if (!v) return 0;
+  const s = String(v).replace(/\./g, '').replace(',', '.').replace('%', '').trim();
+  const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
-}
-
-function parseCsvBoletim(linhas: Record<string, string>[]): LinhaColab[] {
-  const result: LinhaColab[] = [];
-  linhas.forEach((row) => {
-    const id = pegarCol(row, ['id', 'id_groot', 'id groot', 'groot']);
-    if (!id) return;
-    const liquida = parseNum(
-      pegarCol(row, [
-        'prod_liquida_sist',
-        'prod liquida sist',
-        'prod_liquida',
-        'prod liquida',
-        'liquida',
-        'produtividade liquida',
-      ])
-    );
-    const qtd = parseNum(
-      pegarCol(row, [
-        'unidades',
-        'qtd',
-        'qtd de pecas',
-        'qtd de peças',
-        'quantidade',
-        'volume',
-        'pecas',
-        'peças',
-      ])
-    );
-    if (qtd <= 0 && liquida <= 0) return;
-    result.push({ id: String(id).trim(), liquida: Math.round(liquida), qtd: Math.round(qtd) });
-  });
-  // Ordena por volume desc
-  result.sort((a, b) => b.qtd - a.qtd);
-  return result;
 }
 
 export default function BoletimPage() {
   const [dados, setDados] = useState<DadosBoletim>({
     checkin: [],
     p2m: [],
-    sorter: [],
+    ocupacao: [],
   });
+
   const [metas, setMetas] = useState<Metas>(METAS_PADRAO);
-  const [netRealizado, setNetRealizado] = useState<number | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
-  const [gerandoImagem, setGerandoImagem] = useState(false);
-  const [mensagem, setMensagem] = useState<string | null>(null);
+  const [dataRef, setDataRef] = useState(new Date().toLocaleDateString('pt-BR'));
+  const [montou, setMontou] = useState(false);
+  const boletimRef = useRef<HTMLDivElement>(null);
 
-  const areaRef = useRef<HTMLDivElement>(null);
-
-  // Carrega metas do localStorage
   useEffect(() => {
     try {
-      const salvo = localStorage.getItem(METAS_KEY);
-      if (salvo) {
-        const parsed = JSON.parse(salvo);
-        setMetas({ ...METAS_PADRAO, ...parsed });
-      }
+      const salvas = localStorage.getItem(METAS_KEY);
+      if (salvas) setMetas({ ...METAS_PADRAO, ...JSON.parse(salvas) });
     } catch {}
+    setMontou(true);
   }, []);
 
-  // Salva metas ao mudar
-  function atualizarMeta<K extends keyof Metas>(chave: K, valor: number) {
-    const novas = { ...metas, [chave]: valor };
+  function salvarMetas(novas: Metas) {
     setMetas(novas);
     try {
       localStorage.setItem(METAS_KEY, JSON.stringify(novas));
     } catch {}
   }
 
-  function uploadSetor(setor: keyof DadosBoletim, file: File) {
-    setErro(null);
-    Papa.parse<Record<string, string>>(file, {
+  function processarCSV(arquivo: File, tipo: 'checkin' | 'p2m' | 'ocupacao') {
+    Papa.parse(arquivo, {
       header: true,
       skipEmptyLines: true,
       complete: (result) => {
-        if (result.errors.length > 0) {
-          setErro('Erro ao ler CSV: ' + result.errors[0].message);
-          return;
-        }
-        const parsed = parseCsvBoletim(result.data);
-        if (parsed.length === 0) {
-          setErro(`CSV de ${setor.toUpperCase()} sem dados válidos`);
-          return;
-        }
-        setDados((prev) => ({ ...prev, [setor]: parsed }));
-        setMensagem(`✓ CSV de ${setor.toUpperCase()} carregado (${parsed.length} linhas)`);
-        setTimeout(() => setMensagem(null), 3000);
+        const linhas: LinhaColab[] = [];
+
+        (result.data as Record<string, string>[]).forEach((row) => {
+          const id = pegarCol(row, ['User_Id', 'Id_Groot', 'id_groot', 'USER_ID', 'CHECKIN_USER']);
+          if (!id) return;
+
+          if (tipo === 'ocupacao') {
+            const ocupTxt = pegarCol(row, ['Ocupação (%)', 'Ocupação', 'ocupacao_pct', 'OCUPAÇÃO (%)']);
+            const ocup = parseNum(ocupTxt);
+            linhas.push({ id, liquida: 0, qtd: 0, ocupacao: ocup });
+          } else {
+            const liqTxt = pegarCol(row, ['Líquida', 'Liquida', 'Liq', 'PROD_LIQUIDA']);
+            const volTxt = pegarCol(row, ['Volume processado', 'Volume', 'Unidades', 'Quantidade', 'Volume_processado']);
+            const liquida = parseNum(liqTxt);
+            const qtd = parseNum(volTxt);
+
+            if (liquida > 0 || qtd > 0) {
+              linhas.push({ id, liquida, qtd, ocupacao: 0 });
+            }
+          }
+        });
+
+        setDados((prev) => ({ ...prev, [tipo]: linhas }));
       },
     });
   }
 
-  function limparTudo() {
-    if (!window.confirm('Limpar todos os dados do boletim? (metas mantidas)')) return;
-    setDados({ checkin: [], p2m: [], sorter: [] });
-    setNetRealizado(null);
-    setErro(null);
+  function limpar() {
+    setDados({ checkin: [], p2m: [], ocupacao: [] });
   }
 
-  async function salvarPng() {
-    if (!areaRef.current) return;
-    setGerandoImagem(true);
+  const totalLiqCheckin = dados.checkin.reduce((s, l) => s + l.liquida, 0);
+  const totalLiqP2M = dados.p2m.reduce((s, l) => s + l.liquida, 0);
+  const totalVolP2M = dados.p2m.reduce((s, l) => s + l.qtd, 0);
+
+  const totalColabs = dados.checkin.length + dados.p2m.length;
+  const netRealizado = totalColabs > 0
+    ? Math.round((totalLiqCheckin + totalLiqP2M) / totalColabs)
+    : 0;
+
+  const totalPecasRealizado = totalVolP2M;
+
+  const difNet = netRealizado - metas.netCT;
+  const difPecas = totalPecasRealizado - metas.totalPecas;
+
+  type LinhaUnificada = {
+    id: string;
+    processo: 'CK' | 'P2M' | '?';
+    liquida: number;
+    qtd: number;
+    ocupacao: number;
+    metaLiq: number;
+    metaVol: number;
+  };
+
+  const linhasUnificadas: LinhaUnificada[] = (() => {
+    const mapa: Record<string, LinhaUnificada> = {};
+
+    dados.checkin.forEach((l) => {
+      mapa[l.id] = {
+        id: l.id,
+        processo: 'CK',
+        liquida: l.liquida,
+        qtd: l.qtd,
+        ocupacao: 0,
+        metaLiq: metas.checkinLiq,
+        metaVol: metas.checkinVol,
+      };
+    });
+
+    dados.p2m.forEach((l) => {
+      mapa[l.id] = {
+        id: l.id,
+        processo: 'P2M',
+        liquida: l.liquida,
+        qtd: l.qtd,
+        ocupacao: 0,
+        metaLiq: metas.p2mLiq,
+        metaVol: metas.p2mVol,
+      };
+    });
+
+    dados.ocupacao.forEach((o) => {
+      if (mapa[o.id]) {
+        mapa[o.id].ocupacao = o.ocupacao;
+      } else {
+        mapa[o.id] = {
+          id: o.id,
+          processo: 'P2M',
+          liquida: 0,
+          qtd: 0,
+          ocupacao: o.ocupacao,
+          metaLiq: metas.p2mLiq,
+          metaVol: metas.p2mVol,
+        };
+      }
+    });
+
+    return Object.values(mapa).sort((a, b) => b.liquida - a.liquida);
+  })();
+
+  function corCelula(valor: number, meta: number): string {
+    if (valor === 0) return 'text-gray-500';
+    return valor >= meta ? 'text-green-400' : 'text-red-400';
+  }
+
+  async function salvarPNG() {
+    if (!boletimRef.current) return;
     try {
       const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(areaRef.current, {
+      const canvas = await html2canvas(boletimRef.current, {
+        backgroundColor: '#0a0a0a',
         scale: 2,
-        backgroundColor: '#ffffff',
-        logging: false,
+        useCORS: true,
       });
       const link = document.createElement('a');
-      const agora = new Date();
-      const tag =
-        agora.getFullYear().toString() +
-        (agora.getMonth() + 1).toString().padStart(2, '0') +
-        agora.getDate().toString().padStart(2, '0') +
-        '-' +
-        agora.getHours().toString().padStart(2, '0') +
-        agora.getMinutes().toString().padStart(2, '0');
-      link.download = `boletim-producao-${tag}.png`;
+      link.download = `Boletim_${dataRef.replace(/\//g, '-')}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
-      setMensagem('✓ PNG baixado!');
-      setTimeout(() => setMensagem(null), 3000);
     } catch (e) {
-      setErro('Erro ao gerar PNG: ' + (e instanceof Error ? e.message : 'desconhecido'));
-    } finally {
-      setGerandoImagem(false);
+      console.error(e);
     }
   }
 
   async function copiarImagem() {
-    if (!areaRef.current) return;
-    setGerandoImagem(true);
+    if (!boletimRef.current) return;
     try {
       const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(areaRef.current, {
+      const canvas = await html2canvas(boletimRef.current, {
+        backgroundColor: '#0a0a0a',
         scale: 2,
-        backgroundColor: '#ffffff',
-        logging: false,
+        useCORS: true,
       });
       canvas.toBlob(async (blob) => {
-        if (!blob) {
-          setErro('Erro ao gerar imagem');
-          return;
-        }
+        if (!blob) return;
         try {
           await navigator.clipboard.write([
             new ClipboardItem({ 'image/png': blob }),
           ]);
-          setMensagem('✓ Imagem copiada! Cola no WhatsApp (Ctrl+V)');
-          setTimeout(() => setMensagem(null), 4000);
-        } catch (err) {
-          setErro(
-            'Erro ao copiar: navegador pode não permitir. Use "Salvar PNG" e arrasta no WhatsApp.'
-          );
+          alert('✅ Imagem copiada! Cola no WhatsApp (Ctrl+V)');
+        } catch {
+          alert('❌ Não foi possível copiar. Use "Salvar PNG"');
         }
-      }, 'image/png');
+      });
     } catch (e) {
-      setErro('Erro: ' + (e instanceof Error ? e.message : 'desconhecido'));
-    } finally {
-      setGerandoImagem(false);
+      console.error(e);
     }
   }
 
-  // ━━━━ CÁLCULOS ━━━━
-  const totalPecasP2M = dados.p2m.reduce((s, l) => s + l.qtd, 0);
-  const diferencaNet =
-    netRealizado !== null ? netRealizado - metas.netCT : null;
-  const diferencaPecas = totalPecasP2M - metas.p2mVol * dados.p2m.length;
-  const metaTotalPecas = metas.p2mVol * dados.p2m.length;
-
-  const hoje = new Date();
-  const dataFormatada = hoje.toLocaleDateString('pt-BR');
+  if (!montou) return null;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-4xl font-black mb-2">
-          📈 Boletim de <span className="text-[#FFD700]">Produção</span>
-        </h1>
-        <p className="text-gray-400">
-          Gere o boletim diário pra mandar pro time. Sem nomes — só ID, líquida e
-          qtd de peças.
-        </p>
+    <div className="p-6 space-y-6 min-h-screen bg-[#0a0a0a]">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-2xl font-black text-[#FFD700]">📊 Boletim Diário</h1>
+        <input
+          type="text"
+          value={dataRef}
+          onChange={(e) => setDataRef(e.target.value)}
+          className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:border-[#FFD700] focus:outline-none"
+        />
       </div>
 
-      {/* Mensagens */}
-      {mensagem && (
-        <div className="bg-green-500/20 border border-green-500/40 text-green-300 rounded-lg p-3 text-sm font-bold">
-          {mensagem}
-        </div>
-      )}
-      {erro && (
-        <div className="bg-red-500/20 border border-red-500/40 text-red-300 rounded-lg p-3 text-sm">
-          {erro}
-        </div>
-      )}
-
-      {/* 3 cards de upload */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* CHECK-IN */}
-        <div
-          className={`rounded-2xl p-4 border-2 ${
-            dados.checkin.length > 0
-              ? 'bg-green-500/10 border-green-500/40'
-              : 'bg-[#1a1a1a] border-[#2a2a2a]'
-          }`}
-        >
+        <div className="bg-gradient-to-br from-cyan-500/10 to-cyan-600/5 border border-cyan-500/30 rounded-2xl p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <div
-                className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                  dados.checkin.length > 0 ? 'bg-green-500' : 'bg-[#2a2a2a]'
-                }`}
-              >
-                <span className="text-xl">📦</span>
-              </div>
+              <span className="text-2xl">📦</span>
               <div>
-                <p className="text-xs text-gray-400 uppercase font-bold">
-                  Check-in
-                </p>
-                <p className="text-white text-sm font-bold">
-                  {dados.checkin.length > 0
-                    ? `${dados.checkin.length} colaboradores ✓`
-                    : 'Aguardando CSV'}
-                </p>
+                <div className="text-sm text-cyan-300 font-bold">CHECK-IN</div>
+                <div className="text-xs text-gray-400">
+                  {dados.checkin.length > 0 ? `${dados.checkin.length} colaboradores` : 'Aguardando CSV'}
+                </div>
               </div>
             </div>
-            <label className="cursor-pointer bg-[#FFD700] hover:bg-yellow-300 text-black w-10 h-10 rounded-lg flex items-center justify-center transition-colors">
-              <span className="text-xl">📤</span>
+            <label className="cursor-pointer bg-[#FFD700] hover:bg-yellow-400 text-black px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors text-xs font-bold">
+              <span>📂</span> CSV
               <input
                 type="file"
                 accept=".csv"
                 className="hidden"
                 onChange={(e) => {
-                  if (e.target.files?.[0]) uploadSetor('checkin', e.target.files[0]);
-                  e.target.value = '';
+                  const f = e.target.files?.[0];
+                  if (f) processarCSV(f, 'checkin');
                 }}
               />
             </label>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <label className="block">
-              <span className="text-gray-400">Líq:</span>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-400">Meta Líq</label>
               <input
                 type="number"
                 value={metas.checkinLiq}
-                onChange={(e) =>
-                  atualizarMeta('checkinLiq', parseInt(e.target.value) || 0)
-                }
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-mono text-sm mt-1"
+                onChange={(e) => salvarMetas({ ...metas, checkinLiq: Number(e.target.value) })}
+                className="w-full bg-[#0a0a0a] border border-cyan-500/30 rounded px-2 py-1 text-white font-mono text-sm focus:border-cyan-400"
               />
-            </label>
-            <label className="block">
-              <span className="text-gray-400">Vol:</span>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400">Meta Vol</label>
               <input
                 type="number"
                 value={metas.checkinVol}
-                onChange={(e) =>
-                  atualizarMeta('checkinVol', parseInt(e.target.value) || 0)
-                }
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-mono text-sm mt-1"
+                onChange={(e) => salvarMetas({ ...metas, checkinVol: Number(e.target.value) })}
+                className="w-full bg-[#0a0a0a] border border-cyan-500/30 rounded px-2 py-1 text-white font-mono text-sm focus:border-cyan-400"
               />
-            </label>
+            </div>
           </div>
         </div>
 
-        {/* P2M */}
-        <div
-          className={`rounded-2xl p-4 border-2 ${
-            dados.p2m.length > 0
-              ? 'bg-green-500/10 border-green-500/40'
-              : 'bg-[#1a1a1a] border-[#2a2a2a]'
-          }`}
-        >
+        {/* P2M (com Ocupação junto) */}
+        <div className="bg-gradient-to-br from-orange-500/10 to-orange-600/5 border border-orange-500/30 rounded-2xl p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <div
-                className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                  dados.p2m.length > 0 ? 'bg-green-500' : 'bg-[#2a2a2a]'
-                }`}
-              >
-                <span className="text-xl">🚚</span>
-              </div>
+              <span className="text-2xl">🚚</span>
               <div>
-                <p className="text-xs text-gray-400 uppercase font-bold">P2M</p>
-                <p className="text-white text-sm font-bold">
-                  {dados.p2m.length > 0
-                    ? `${dados.p2m.length} colaboradores ✓`
-                    : 'Aguardando CSV'}
-                </p>
+                <div className="text-sm text-orange-300 font-bold">P2M</div>
+                <div className="text-xs text-gray-400">
+                  {dados.p2m.length > 0 ? `${dados.p2m.length} colab.` : 'Aguardando CSV'}
+                  {dados.ocupacao.length > 0 && ` · ${dados.ocupacao.length} ocup.`}
+                </div>
               </div>
             </div>
-            <label className="cursor-pointer bg-[#FFD700] hover:bg-yellow-300 text-black w-10 h-10 rounded-lg flex items-center justify-center transition-colors">
-              <span className="text-xl">📤</span>
-              <input
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files?.[0]) uploadSetor('p2m', e.target.files[0]);
-                  e.target.value = '';
-                }}
-              />
-            </label>
+            <div className="flex gap-2">
+              <label className="cursor-pointer bg-[#FFD700] hover:bg-yellow-400 text-black px-2 py-2 rounded-lg flex items-center gap-1 transition-colors text-xs font-bold" title="Upload Produtividade P2M">
+                <span>📂</span> Prod.
+                <input
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) processarCSV(f, 'p2m');
+                  }}
+                />
+              </label>
+              <label className="cursor-pointer bg-emerald-500 hover:bg-emerald-400 text-black px-2 py-2 rounded-lg flex items-center gap-1 transition-colors text-xs font-bold" title="Upload Ocupação (Totefullness)">
+                <span>📈</span> Ocup.
+                <input
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) processarCSV(f, 'ocupacao');
+                  }}
+                />
+              </label>
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <label className="block">
-              <span className="text-gray-400">Líq:</span>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-xs text-gray-400">Meta Líq</label>
               <input
                 type="number"
                 value={metas.p2mLiq}
-                onChange={(e) =>
-                  atualizarMeta('p2mLiq', parseInt(e.target.value) || 0)
-                }
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-mono text-sm mt-1"
+                onChange={(e) => salvarMetas({ ...metas, p2mLiq: Number(e.target.value) })}
+                className="w-full bg-[#0a0a0a] border border-orange-500/30 rounded px-2 py-1 text-white font-mono text-sm focus:border-orange-400"
               />
-            </label>
-            <label className="block">
-              <span className="text-gray-400">Vol:</span>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400">Meta Vol</label>
               <input
                 type="number"
                 value={metas.p2mVol}
-                onChange={(e) =>
-                  atualizarMeta('p2mVol', parseInt(e.target.value) || 0)
-                }
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-mono text-sm mt-1"
+                onChange={(e) => salvarMetas({ ...metas, p2mVol: Number(e.target.value) })}
+                className="w-full bg-[#0a0a0a] border border-orange-500/30 rounded px-2 py-1 text-white font-mono text-sm focus:border-orange-400"
               />
-            </label>
-          </div>
-        </div>
-
-        {/* SORTER */}
-        <div
-          className={`rounded-2xl p-4 border-2 ${
-            dados.sorter.length > 0
-              ? 'bg-green-500/10 border-green-500/40'
-              : 'bg-[#1a1a1a] border-[#2a2a2a]'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <div
-                className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                  dados.sorter.length > 0 ? 'bg-green-500' : 'bg-[#2a2a2a]'
-                }`}
-              >
-                <span className="text-xl">📋</span>
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 uppercase font-bold">
-                  Sorter
-                </p>
-                <p className="text-white text-sm font-bold">
-                  {dados.sorter.length > 0
-                    ? `${dados.sorter.length} colaboradores ✓`
-                    : 'Aguardando CSV'}
-                </p>
-              </div>
             </div>
-            <label className="cursor-pointer bg-[#FFD700] hover:bg-yellow-300 text-black w-10 h-10 rounded-lg flex items-center justify-center transition-colors">
-              <span className="text-xl">📤</span>
-              <input
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files?.[0]) uploadSetor('sorter', e.target.files[0]);
-                  e.target.value = '';
-                }}
-              />
-            </label>
-          </div>
-          <div className="text-xs">
-            <label className="block">
-              <span className="text-gray-400">Util %:</span>
+            <div>
+              <label className="text-xs text-emerald-400">Meta Ocup%</label>
               <input
                 type="number"
-                value={metas.sorterUtil}
-                onChange={(e) =>
-                  atualizarMeta('sorterUtil', parseInt(e.target.value) || 0)
-                }
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-mono text-sm mt-1"
+                value={metas.ocupMeta}
+                onChange={(e) => salvarMetas({ ...metas, ocupMeta: Number(e.target.value) })}
+                className="w-full bg-[#0a0a0a] border border-emerald-500/30 rounded px-2 py-1 text-white font-mono text-sm focus:border-emerald-400"
               />
-            </label>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Banner NET + Total Peças */}
-      <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-2xl p-4 flex flex-col md:flex-row items-center gap-4 flex-wrap">
-        <div className="flex items-center gap-3 flex-1 min-w-[280px]">
-          <span className="text-2xl">⚡</span>
-          <span className="text-white font-bold text-sm">NET do Time —</span>
-          <span className="text-gray-400 text-sm">Meta:</span>
-          <input
-            type="number"
-            value={metas.netCT}
-            onChange={(e) =>
-              atualizarMeta('netCT', parseInt(e.target.value) || 0)
-            }
-            className="w-20 bg-[#1a1a1a] border-2 border-[#FFD700] rounded px-2 py-1 text-[#FFD700] font-bold font-mono text-center"
-          />
-          <span className="text-white text-sm">und/h</span>
-        </div>
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex items-center gap-3 bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-3">
+            <span className="text-2xl">⚡</span>
+            <div className="flex-1">
+              <div className="text-xs text-yellow-300 font-bold">NET DO TIME — Meta</div>
+              <input
+                type="number"
+                value={metas.netCT}
+                onChange={(e) => salvarMetas({ ...metas, netCT: Number(e.target.value) })}
+                className="w-full bg-[#0a0a0a] border border-yellow-500/30 rounded px-2 py-1 text-white font-mono text-base font-bold focus:border-yellow-400 mt-1"
+              />
+            </div>
+            <span className="text-xs text-gray-400">und/h</span>
+          </div>
 
-        <div className="flex items-center gap-3 flex-1 min-w-[280px]">
-          <span className="text-2xl">📦</span>
-          <span className="text-white font-bold text-sm">Total de Peças —</span>
-          <span className="text-gray-400 text-sm">Meta:</span>
-          <input
-            type="number"
-            value={metaTotalPecas}
-            readOnly
-            className="w-24 bg-[#1a1a1a] border-2 border-[#FFD700] rounded px-2 py-1 text-[#FFD700] font-bold font-mono text-center"
-          />
-          <span className="text-white text-sm">peças</span>
+          <div className="flex items-center gap-3 bg-purple-500/5 border border-purple-500/20 rounded-lg p-3">
+            <span className="text-2xl">📦</span>
+            <div className="flex-1">
+              <div className="text-xs text-purple-300 font-bold">TOTAL DE PEÇAS — Meta</div>
+              <input
+                type="number"
+                value={metas.totalPecas}
+                onChange={(e) => salvarMetas({ ...metas, totalPecas: Number(e.target.value) })}
+                className="w-full bg-[#0a0a0a] border border-purple-500/30 rounded px-2 py-1 text-white font-mono text-base font-bold focus:border-purple-400 mt-1"
+              />
+            </div>
+            <span className="text-xs text-gray-400">peças</span>
+          </div>
         </div>
       </div>
 
-      {/* Botões de ação */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-2">
         <button
-          onClick={salvarPng}
-          disabled={gerandoImagem}
-          className="bg-[#FFD700] hover:bg-yellow-300 text-black font-bold px-5 py-3 rounded-xl flex items-center gap-2 transition-colors disabled:opacity-50"
+          onClick={salvarPNG}
+          disabled={linhasUnificadas.length === 0}
+          className="bg-[#FFD700] hover:bg-yellow-400 disabled:opacity-30 disabled:cursor-not-allowed text-black font-bold px-4 py-2 rounded-lg text-sm transition-colors"
         >
-          <span>🖼️</span> {gerandoImagem ? 'Gerando...' : 'Salvar PNG'}
+          🖼️ Salvar PNG
         </button>
         <button
           onClick={copiarImagem}
-          disabled={gerandoImagem}
-          className="bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white font-bold px-5 py-3 rounded-xl flex items-center gap-2 transition-colors border border-[#2a2a2a] disabled:opacity-50"
+          disabled={linhasUnificadas.length === 0}
+          className="bg-[#1a1a1a] hover:bg-[#2a2a2a] disabled:opacity-30 disabled:cursor-not-allowed border border-[#2a2a2a] text-white font-bold px-4 py-2 rounded-lg text-sm transition-colors"
         >
-          <span>📋</span> Copiar imagem
+          📋 Copiar imagem
         </button>
         <button
-          onClick={limparTudo}
-          className="bg-red-500/20 hover:bg-red-500/30 text-red-300 font-bold px-5 py-3 rounded-xl flex items-center gap-2 transition-colors border border-red-500/30"
+          onClick={limpar}
+          className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 font-bold px-4 py-2 rounded-lg text-sm transition-colors"
         >
-          <span>🔄</span> Limpar tudo
+          🗑️ Limpar tudo
         </button>
       </div>
 
-      {/* ÁREA QUE VIRA IMAGEM */}
-      <div
-        ref={areaRef}
-        style={{ backgroundColor: '#ffffff', color: '#1a1a1a' }}
-        className="rounded-2xl p-6 space-y-4"
-      >
-        {/* Título */}
-        <div
-          style={{
-            backgroundColor: '#1a1a1a',
-            color: '#ffffff',
-            padding: '12px',
-            borderRadius: '8px',
-            textAlign: 'center',
-          }}
-        >
-          <h2 style={{ fontSize: '20px', fontWeight: 800, margin: 0 }}>
-            Produção: {dataFormatada}
+      <div ref={boletimRef} className="bg-gradient-to-br from-[#0f0f1a] via-[#0a0a14] to-[#0f0a1a] rounded-2xl p-6 border-2 border-[#FFD700]/30 shadow-2xl">
+        <div className="bg-gradient-to-r from-[#FFD700] via-yellow-400 to-[#FFD700] p-3 rounded-xl mb-6 text-center">
+          <h2 className="text-2xl font-black text-black tracking-wider">
+            📊 BOLETIM DO DIA — {dataRef}
           </h2>
         </div>
 
-        {/* Banner NET / Realizado / Diferença */}
-        <div
-          style={{
-            backgroundColor: '#fff8e1',
-            border: '1px solid #ffe082',
-            borderRadius: '8px',
-            padding: '16px',
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
-            gap: '8px',
-            textAlign: 'center',
-          }}
-        >
-          <div>
-            <p
-              style={{
-                fontSize: '11px',
-                color: '#666',
-                fontWeight: 700,
-                margin: 0,
-              }}
-            >
-              META NET
-            </p>
-            <p
-              style={{
-                fontSize: '32px',
-                fontWeight: 900,
-                margin: '4px 0',
-                color: '#1a1a1a',
-              }}
-            >
-              {metas.netCT}
-            </p>
-            <p style={{ fontSize: '10px', color: '#666', margin: 0 }}>und/h</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+          <div className="bg-gradient-to-br from-yellow-500/20 to-yellow-600/10 border-2 border-yellow-500/40 rounded-xl p-4">
+            <div className="text-center text-xs font-bold text-yellow-300 uppercase tracking-widest mb-3">
+              ⚡ NET do Time
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="text-center">
+                <div className="text-xs text-gray-400 uppercase font-bold mb-1">Meta</div>
+                <div className="text-2xl font-black text-yellow-300 font-mono">{metas.netCT}</div>
+              </div>
+              <div className="text-center border-x border-yellow-500/20">
+                <div className="text-xs text-gray-400 uppercase font-bold mb-1">Realizado</div>
+                <div className={`text-2xl font-black font-mono ${netRealizado >= metas.netCT ? 'text-green-400' : 'text-red-400'}`}>
+                  {netRealizado || '-'}
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-gray-400 uppercase font-bold mb-1">Diferença</div>
+                <div className={`text-2xl font-black font-mono ${difNet >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {netRealizado > 0 ? (difNet >= 0 ? `+${difNet}` : difNet) : '-'}
+                </div>
+              </div>
+            </div>
+            <div className="text-center text-[10px] text-gray-500 mt-1">und/h</div>
           </div>
-          <div style={{ borderLeft: '1px solid #ffe082', borderRight: '1px solid #ffe082' }}>
-            <p
-              style={{
-                fontSize: '11px',
-                color: '#666',
-                fontWeight: 700,
-                margin: 0,
-              }}
-            >
-              REALIZADO
-            </p>
-            <input
-              type="number"
-              value={netRealizado ?? ''}
-              onChange={(e) => {
-                const v = e.target.value;
-                setNetRealizado(v === '' ? null : parseFloat(v));
-              }}
-              placeholder="—"
-              style={{
-                fontSize: '32px',
-                fontWeight: 900,
-                margin: '4px 0',
-                color: netRealizado === null
-                  ? '#999'
-                  : netRealizado >= metas.netCT
-                  ? '#15803d'
-                  : '#b91c1c',
-                background: 'transparent',
-                border: 'none',
-                textAlign: 'center',
-                borderBottom: '2px solid #1a1a1a',
-                width: '100%',
-                outline: 'none',
-              }}
-            />
-            <p style={{ fontSize: '10px', color: '#666', margin: 0 }}>und/h</p>
-          </div>
-          <div>
-            <p
-              style={{
-                fontSize: '11px',
-                color: '#666',
-                fontWeight: 700,
-                margin: 0,
-              }}
-            >
-              DIFERENÇA
-            </p>
-            <p
-              style={{
-                fontSize: '32px',
-                fontWeight: 900,
-                margin: '4px 0',
-                color: diferencaNet === null
-                  ? '#999'
-                  : diferencaNet >= 0
-                  ? '#15803d'
-                  : '#b91c1c',
-              }}
-            >
-              {diferencaNet === null
-                ? '—'
-                : (diferencaNet >= 0 ? '+' : '') + diferencaNet}
-            </p>
-            <p style={{ fontSize: '10px', color: '#666', margin: 0 }}>
-              {diferencaNet === null
-                ? ''
-                : diferencaNet >= 0
-                ? 'acima da meta'
-                : 'abaixo da meta'}
-            </p>
+
+          <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 border-2 border-purple-500/40 rounded-xl p-4">
+            <div className="text-center text-xs font-bold text-purple-300 uppercase tracking-widest mb-3">
+              📦 Total de Peças (P2M)
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="text-center">
+                <div className="text-xs text-gray-400 uppercase font-bold mb-1">Meta</div>
+                <div className="text-2xl font-black text-purple-300 font-mono">
+                  {metas.totalPecas > 0 ? metas.totalPecas.toLocaleString('pt-BR') : '-'}
+                </div>
+              </div>
+              <div className="text-center border-x border-purple-500/20">
+                <div className="text-xs text-gray-400 uppercase font-bold mb-1">Realizado</div>
+                <div className={`text-2xl font-black font-mono ${totalPecasRealizado >= metas.totalPecas && metas.totalPecas > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {totalPecasRealizado > 0 ? totalPecasRealizado.toLocaleString('pt-BR') : '-'}
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-gray-400 uppercase font-bold mb-1">Diferença</div>
+                <div className={`text-2xl font-black font-mono ${difPecas >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {totalPecasRealizado > 0 && metas.totalPecas > 0 ? (difPecas >= 0 ? `+${difPecas.toLocaleString('pt-BR')}` : difPecas.toLocaleString('pt-BR')) : '-'}
+                </div>
+              </div>
+            </div>
+            <div className="text-center text-[10px] text-gray-500 mt-1">peças P2M</div>
           </div>
         </div>
 
-        {/* Banner Total de Peças */}
-        <div
-          style={{
-            backgroundColor: '#e3f2fd',
-            border: '1px solid #90caf9',
-            borderRadius: '8px',
-            padding: '16px',
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
-            gap: '8px',
-            textAlign: 'center',
-          }}
-        >
-          <div>
-            <p
-              style={{
-                fontSize: '11px',
-                color: '#666',
-                fontWeight: 700,
-                margin: 0,
-              }}
-            >
-              META PEÇAS
-            </p>
-            <p
-              style={{
-                fontSize: '32px',
-                fontWeight: 900,
-                margin: '4px 0',
-                color: '#1a1a1a',
-              }}
-            >
-              {metaTotalPecas.toLocaleString('pt-BR')}
-            </p>
-            <p style={{ fontSize: '10px', color: '#666', margin: 0 }}>
-              peças (P2M)
-            </p>
-          </div>
-          <div
-            style={{
-              borderLeft: '1px solid #90caf9',
-              borderRight: '1px solid #90caf9',
-            }}
-          >
-            <p
-              style={{
-                fontSize: '11px',
-                color: '#666',
-                fontWeight: 700,
-                margin: 0,
-              }}
-            >
-              REALIZADO
-            </p>
-            <p
-              style={{
-                fontSize: '32px',
-                fontWeight: 900,
-                margin: '4px 0',
-                color:
-                  totalPecasP2M >= metaTotalPecas && metaTotalPecas > 0
-                    ? '#15803d'
-                    : '#b91c1c',
-              }}
-            >
-              {totalPecasP2M.toLocaleString('pt-BR')}
-            </p>
-            <p style={{ fontSize: '10px', color: '#666', margin: 0 }}>peças</p>
-          </div>
-          <div>
-            <p
-              style={{
-                fontSize: '11px',
-                color: '#666',
-                fontWeight: 700,
-                margin: 0,
-              }}
-            >
-              DIFERENÇA
-            </p>
-            <p
-              style={{
-                fontSize: '32px',
-                fontWeight: 900,
-                margin: '4px 0',
-                color: diferencaPecas >= 0 ? '#15803d' : '#b91c1c',
-              }}
-            >
-              {(diferencaPecas >= 0 ? '+' : '') +
-                diferencaPecas.toLocaleString('pt-BR')}
-            </p>
-            <p style={{ fontSize: '10px', color: '#666', margin: 0 }}>
-              {metaTotalPecas === 0
-                ? ''
-                : diferencaPecas >= 0
-                ? 'acima da meta'
-                : 'abaixo da meta'}
-            </p>
+        <div className="bg-[#0a0a0a]/50 rounded-xl p-3 mb-4 border border-[#2a2a2a]">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-center text-xs font-bold">
+            <div className="flex items-center justify-center gap-2 text-cyan-300">
+              <span>📦</span>
+              <span>CHECK-IN · Líq: {metas.checkinLiq} · Vol: {metas.checkinVol.toLocaleString('pt-BR')}</span>
+            </div>
+            <div className="flex items-center justify-center gap-2 text-orange-300">
+              <span>🚚</span>
+              <span>P2M · Líq: {metas.p2mLiq} · Vol: {metas.p2mVol.toLocaleString('pt-BR')}</span>
+            </div>
           </div>
         </div>
 
-        {/* Faixa cabeçalho das 3 colunas */}
-        <div
-          style={{
-            backgroundColor: '#1a1a1a',
-            color: '#FFD700',
-            padding: '8px',
-            borderRadius: '8px',
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
-            gap: '12px',
-            textAlign: 'center',
-            fontSize: '12px',
-            fontWeight: 800,
-          }}
-        >
-          <div>
-            CHECK-IN • LÍQ: {metas.checkinLiq} • VOL:{' '}
-            {metas.checkinVol.toLocaleString('pt-BR')}
-          </div>
-          <div>
-            P2M • LÍQ: {metas.p2mLiq} • VOL:{' '}
-            {metas.p2mVol.toLocaleString('pt-BR')}
-          </div>
-          <div style={{ color: '#fff' }}>SORTER • UTIL: {metas.sorterUtil}%</div>
-        </div>
+        {linhasUnificadas.length > 0 ? (
+          <div className="bg-[#0a0a0a]/60 rounded-xl border border-[#2a2a2a] overflow-hidden">
+            <div className="bg-gradient-to-r from-[#1a1a1a] to-[#0a0a0a] p-3 border-b border-[#2a2a2a]">
+              <h3 className="text-sm font-black text-[#FFD700] flex items-center gap-2">
+                👥 Resultados Individuais
+                <span className="text-xs font-normal text-gray-400">
+                  · Ordenado por Líquida · {linhasUnificadas.length} colaboradores
+                </span>
+              </h3>
+            </div>
 
-        {/* 3 tabelas lado a lado */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
-            gap: '12px',
-          }}
-        >
-          {/* CHECK-IN */}
-          <TabelaSetor
-            dados={dados.checkin}
-            metaLiq={metas.checkinLiq}
-            metaVol={metas.checkinVol}
-            placeholder="Suba o CSV de Check-in"
-          />
-          {/* P2M */}
-          <TabelaSetor
-            dados={dados.p2m}
-            metaLiq={metas.p2mLiq}
-            metaVol={metas.p2mVol}
-            placeholder="Suba o CSV de P2M"
-          />
-          {/* SORTER */}
-          <TabelaSetor
-            dados={dados.sorter}
-            metaLiq={0}
-            metaVol={0}
-            placeholder="Suba o CSV de Sorter"
-            isSorter
-          />
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-[#1a1a1a]/50 border-b border-[#2a2a2a]">
+                  <th className="py-2 px-3 text-left text-xs text-gray-400 uppercase font-bold">ID</th>
+                  <th className="py-2 px-3 text-center text-xs text-gray-400 uppercase font-bold">Proc.</th>
+                  <th className="py-2 px-3 text-center text-xs text-gray-400 uppercase font-bold">Líq</th>
+                  <th className="py-2 px-3 text-center text-xs text-gray-400 uppercase font-bold">Vol</th>
+                  <th className="py-2 px-3 text-center text-xs text-gray-400 uppercase font-bold">Ocup</th>
+                </tr>
+              </thead>
+              <tbody>
+                {linhasUnificadas.map((l, idx) => (
+                  <tr key={l.id} className={`border-b border-[#2a2a2a]/40 ${idx % 2 === 0 ? 'bg-[#0f0f0f]/30' : 'bg-[#0a0a0a]/30'}`}>
+                    <td className="py-2 px-3 text-white font-mono font-bold text-sm">{l.id}</td>
+                    <td className="py-2 px-3 text-center">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${l.processo === 'CK' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-orange-500/20 text-orange-300'}`}>
+                        {l.processo}
+                      </span>
+                    </td>
+                    <td className={`py-2 px-3 text-center font-mono font-bold ${corCelula(l.liquida, l.metaLiq)}`}>
+                      {l.liquida > 0 ? l.liquida : '-'}
+                    </td>
+                    <td className={`py-2 px-3 text-center font-mono font-bold ${corCelula(l.qtd, l.metaVol)}`}>
+                      {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
+                    </td>
+                    <td className={`py-2 px-3 text-center font-mono font-bold ${corCelula(l.ocupacao, metas.ocupMeta)}`}>
+                      {l.ocupacao > 0 ? `${l.ocupacao.toFixed(1)}%` : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-12 bg-[#0a0a0a]/30 rounded-xl border-2 border-dashed border-[#2a2a2a]">
+            <div className="text-5xl mb-3">📂</div>
+            <p className="text-gray-400 text-sm">Faça upload dos CSVs acima pra começar</p>
+            <p className="text-xs text-gray-500 mt-1">📦 Check-in · 🚚 P2M · 📈 Ocupação</p>
+          </div>
+        )}
+
+        <div className="text-center text-[10px] text-gray-600 mt-4">
+          📊 LIDER 360 · Boletim Diário · Gerado em {new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
         </div>
       </div>
-    </div>
-  );
-}
-
-// Componente da tabela de cada setor
-function TabelaSetor({
-  dados,
-  metaLiq,
-  metaVol,
-  placeholder,
-  isSorter = false,
-}: {
-  dados: LinhaColab[];
-  metaLiq: number;
-  metaVol: number;
-  placeholder: string;
-  isSorter?: boolean;
-}) {
-  if (dados.length === 0) {
-    return (
-      <div
-        style={{
-          backgroundColor: '#f5f5f5',
-          border: '1px dashed #ccc',
-          borderRadius: '8px',
-          padding: '24px 12px',
-          textAlign: 'center',
-          color: '#999',
-          fontSize: '12px',
-          minHeight: '120px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {placeholder}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        backgroundColor: '#fff',
-        border: '1px solid #e0e0e0',
-        borderRadius: '8px',
-        overflow: 'hidden',
-      }}
-    >
-      <table
-        style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          fontSize: '11px',
-        }}
-      >
-        <thead>
-          <tr style={{ backgroundColor: '#fff8e1' }}>
-            <th
-              style={{
-                padding: '6px 4px',
-                borderBottom: '1px solid #e0e0e0',
-                fontWeight: 700,
-                color: '#666',
-                textAlign: 'center',
-              }}
-            >
-              ID
-            </th>
-            <th
-              style={{
-                padding: '6px 4px',
-                borderBottom: '1px solid #e0e0e0',
-                fontWeight: 700,
-                color: '#666',
-                textAlign: 'center',
-              }}
-            >
-              LÍQUIDA
-            </th>
-            <th
-              style={{
-                padding: '6px 4px',
-                borderBottom: '1px solid #e0e0e0',
-                fontWeight: 700,
-                color: '#666',
-                textAlign: 'center',
-              }}
-            >
-              QTD DE PEÇAS
-            </th>
-            {!isSorter && (
-              <th
-                style={{
-                  padding: '6px 4px',
-                  borderBottom: '1px solid #e0e0e0',
-                  fontWeight: 700,
-                  color: '#666',
-                  textAlign: 'center',
-                }}
-              >
-                FALTA
-              </th>
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {dados.map((d, i) => {
-            const liqOk = metaLiq > 0 ? d.liquida >= metaLiq : true;
-            const volOk = metaVol > 0 ? d.qtd >= metaVol : true;
-            const falta = metaVol > 0 ? Math.max(0, metaVol - d.qtd) : 0;
-            const corLinha = isSorter
-              ? '#ffffff'
-              : liqOk && volOk
-              ? '#dcfce7'
-              : '#fecaca';
-
-            return (
-              <tr key={i} style={{ backgroundColor: corLinha }}>
-                <td
-                  style={{
-                    padding: '6px 4px',
-                    borderBottom: '1px solid #f0f0f0',
-                    textAlign: 'center',
-                    fontFamily: 'monospace',
-                  }}
-                >
-                  {d.id}
-                </td>
-                <td
-                  style={{
-                    padding: '6px 4px',
-                    borderBottom: '1px solid #f0f0f0',
-                    textAlign: 'center',
-                    fontWeight: 700,
-                    color: liqOk ? '#15803d' : '#b91c1c',
-                  }}
-                >
-                  {d.liquida}
-                </td>
-                <td
-                  style={{
-                    padding: '6px 4px',
-                    borderBottom: '1px solid #f0f0f0',
-                    textAlign: 'center',
-                    fontFamily: 'monospace',
-                    fontWeight: 700,
-                  }}
-                >
-                  {d.qtd.toLocaleString('pt-BR')}
-                </td>
-                {!isSorter && (
-                  <td
-                    style={{
-                      padding: '6px 4px',
-                      borderBottom: '1px solid #f0f0f0',
-                      textAlign: 'center',
-                      fontFamily: 'monospace',
-                      color: falta > 0 ? '#b91c1c' : '#15803d',
-                      fontWeight: 700,
-                    }}
-                  >
-                    {falta}
-                  </td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }
