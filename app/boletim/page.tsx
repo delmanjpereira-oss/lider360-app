@@ -409,7 +409,6 @@ export default function BoletimPage() {
                   }}
                 />
               </label>
-              </label>
             </div>
           </div>
           <div className="grid grid-cols-3 gap-2">
