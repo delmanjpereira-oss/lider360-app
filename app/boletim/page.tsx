@@ -131,20 +131,29 @@ export default function BoletimPage() {
             const ocup = parseNum(ocupTxt);
             if (ocup > 0) linhas.push({ id, liquida: 0, qtd: 0, ocupacao: ocup });
           } else {
-            // 🎯 Aliases SUPER amplos pra Líquida
+            // 🎯 Aliases batendo com o CSV real do MELI (mesmo do upload-page.tsx)
             const liqTxt = pegarCol(row, [
+              'prod_liquida_sist',
+              'prod liquida sist',
+              'prod liquida sistemico',
+              'Prod Liquida Sistemico',
+              'prod_liquida',
+              'liquida',
               'Líquida', 'Liquida', 'LIQUIDA',
-              'Líq', 'Liq', 'LIQ',
-              'PROD_LIQUIDA', 'prod_liquida',
+              'produtividade liquida',
               'Produtividade Líquida', 'Produtividade liquida',
+              'Líq', 'Liq', 'LIQ',
               'Produtividade', 'produtividade',
               'Net', 'NET',
               'Pç/h', 'pc/h', 'pç/h',
               'Peças/h', 'Peças por hora',
             ]);
 
-            // 🎯 Aliases SUPER amplos pra Volume
+            // 🎯 Aliases pra Volume / Quantidade
             const volTxt = pegarCol(row, [
+              'qt_processada',
+              'qt processada',
+              'quantidade processada',
               'Volume processado', 'volume_processado', 'Volume Processado',
               'Volume', 'volume', 'VOLUME',
               'Unidades', 'unidades', 'UNIDADES',
@@ -209,8 +218,10 @@ export default function BoletimPage() {
   const linhasUnificadas: LinhaUnificada[] = (() => {
     const mapa: Record<string, LinhaUnificada> = {};
 
+    // 🎯 Cada chave do mapa = ID + Processo (assim Check-in e P2M coexistem)
     dados.checkin.forEach((l) => {
-      mapa[l.id] = {
+      const chave = `${l.id}_CK`;
+      mapa[chave] = {
         id: l.id,
         processo: 'CK',
         liquida: l.liquida,
@@ -222,7 +233,8 @@ export default function BoletimPage() {
     });
 
     dados.p2m.forEach((l) => {
-      mapa[l.id] = {
+      const chave = `${l.id}_P2M`;
+      mapa[chave] = {
         id: l.id,
         processo: 'P2M',
         liquida: l.liquida,
@@ -233,11 +245,14 @@ export default function BoletimPage() {
       };
     });
 
+    // Ocupação só pra P2M
     dados.ocupacao.forEach((o) => {
-      if (mapa[o.id]) {
-        mapa[o.id].ocupacao = o.ocupacao;
+      const chaveP2M = `${o.id}_P2M`;
+      if (mapa[chaveP2M]) {
+        mapa[chaveP2M].ocupacao = o.ocupacao;
       } else {
-        mapa[o.id] = {
+        // Tem ocupação mas não tem produtividade P2M
+        mapa[chaveP2M] = {
           id: o.id,
           processo: 'P2M',
           liquida: 0,
@@ -616,52 +631,105 @@ export default function BoletimPage() {
         </div>
 
         {linhasUnificadas.length > 0 ? (
-          <div className="bg-white rounded-xl overflow-hidden border-2 border-[#FFD700]/30">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-[#FFD700]">
-                  <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">ID</th>
-                  <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Líquida</th>
-                  <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Qtd de Peças</th>
-                  <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Falta</th>
-                  {linhasUnificadas.some((l) => l.ocupacao > 0) && (
-                    <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Ocupação</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {linhasUnificadas.map((l) => {
-                  // Cor verde claro se atinge meta, vermelho claro se não
-                  const corLiq = l.liquida === 0 ? 'bg-gray-100 text-gray-500' : l.liquida >= l.metaLiq ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-                  const corVol = l.qtd === 0 ? 'bg-gray-100 text-gray-500' : l.qtd >= l.metaVol ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-                  const corOcup = l.ocupacao === 0 ? 'bg-gray-100 text-gray-500' : l.ocupacao >= metas.ocupMeta ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-                  
-                  // Falta = quanto falta pra meta de volume (P2M é o que conta)
-                  const falta = Math.max(0, l.metaVol - l.qtd);
-                  const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-
-                  return (
-                    <tr key={l.id} className="border-b border-gray-300">
-                      <td className="py-2 px-4 text-center text-gray-800 font-bold text-sm">{l.id}</td>
-                      <td className={`py-2 px-4 text-center font-bold text-sm ${corLiq}`}>
-                        {l.liquida > 0 ? l.liquida : '-'}
-                      </td>
-                      <td className={`py-2 px-4 text-center font-bold text-sm ${corVol}`}>
-                        {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
-                      </td>
-                      <td className={`py-2 px-4 text-center font-bold text-sm ${corFalta}`}>
-                        {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
-                      </td>
-                      {linhasUnificadas.some((x) => x.ocupacao > 0) && (
-                        <td className={`py-2 px-4 text-center font-bold text-sm ${corOcup}`}>
-                          {l.ocupacao > 0 ? `${l.ocupacao.toFixed(0)}%` : '-'}
-                        </td>
-                      )}
+          <div className="space-y-4">
+            {/* CHECK-IN TABLE */}
+            {linhasUnificadas.filter((l) => l.processo === 'CK').length > 0 && (
+              <div className="bg-white rounded-xl overflow-hidden border-2 border-cyan-500/40">
+                <div className="bg-cyan-500 px-4 py-2">
+                  <h3 className="text-black font-black text-sm uppercase flex items-center gap-2">
+                    📦 CHECK-IN
+                    <span className="text-xs font-normal opacity-80">
+                      · {linhasUnificadas.filter((l) => l.processo === 'CK').length} colaboradores · Meta Líq: {metas.checkinLiq} · Meta Vol: {metas.checkinVol.toLocaleString('pt-BR')}
+                    </span>
+                  </h3>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-[#FFD700]">
+                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">ID</th>
+                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Líquida</th>
+                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Qtd de Peças</th>
+                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Falta</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {linhasUnificadas.filter((l) => l.processo === 'CK').map((l) => {
+                      const corLiq = l.liquida === 0 ? 'bg-gray-100 text-gray-500' : l.liquida >= l.metaLiq ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+                      const corVol = l.qtd === 0 ? 'bg-gray-100 text-gray-500' : l.qtd >= l.metaVol ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+                      const falta = Math.max(0, l.metaVol - l.qtd);
+                      const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+
+                      return (
+                        <tr key={`ck-${l.id}`} className="border-b border-gray-300">
+                          <td className="py-2 px-4 text-center text-gray-800 font-bold text-sm">{l.id}</td>
+                          <td className={`py-2 px-4 text-center font-bold text-sm ${corLiq}`}>
+                            {l.liquida > 0 ? l.liquida : '-'}
+                          </td>
+                          <td className={`py-2 px-4 text-center font-bold text-sm ${corVol}`}>
+                            {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
+                          </td>
+                          <td className={`py-2 px-4 text-center font-bold text-sm ${corFalta}`}>
+                            {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* P2M TABLE */}
+            {linhasUnificadas.filter((l) => l.processo === 'P2M').length > 0 && (
+              <div className="bg-white rounded-xl overflow-hidden border-2 border-orange-500/40">
+                <div className="bg-orange-500 px-4 py-2">
+                  <h3 className="text-black font-black text-sm uppercase flex items-center gap-2">
+                    🚚 P2M
+                    <span className="text-xs font-normal opacity-80">
+                      · {linhasUnificadas.filter((l) => l.processo === 'P2M').length} colaboradores · Meta Líq: {metas.p2mLiq} · Meta Vol: {metas.p2mVol.toLocaleString('pt-BR')} · Meta Oc: {metas.ocupMeta}%
+                    </span>
+                  </h3>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-[#FFD700]">
+                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">ID</th>
+                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Líquida</th>
+                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Qtd de Peças</th>
+                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Falta</th>
+                      <th className="py-3 px-4 text-center text-black font-black uppercase text-xs">Ocupação</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linhasUnificadas.filter((l) => l.processo === 'P2M').map((l) => {
+                      const corLiq = l.liquida === 0 ? 'bg-gray-100 text-gray-500' : l.liquida >= l.metaLiq ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+                      const corVol = l.qtd === 0 ? 'bg-gray-100 text-gray-500' : l.qtd >= l.metaVol ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+                      const corOcup = l.ocupacao === 0 ? 'bg-gray-100 text-gray-500' : l.ocupacao >= metas.ocupMeta ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+                      const falta = Math.max(0, l.metaVol - l.qtd);
+                      const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+
+                      return (
+                        <tr key={`p2m-${l.id}`} className="border-b border-gray-300">
+                          <td className="py-2 px-4 text-center text-gray-800 font-bold text-sm">{l.id}</td>
+                          <td className={`py-2 px-4 text-center font-bold text-sm ${corLiq}`}>
+                            {l.liquida > 0 ? l.liquida : '-'}
+                          </td>
+                          <td className={`py-2 px-4 text-center font-bold text-sm ${corVol}`}>
+                            {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
+                          </td>
+                          <td className={`py-2 px-4 text-center font-bold text-sm ${corFalta}`}>
+                            {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
+                          </td>
+                          <td className={`py-2 px-4 text-center font-bold text-sm ${corOcup}`}>
+                            {l.ocupacao > 0 ? `${l.ocupacao.toFixed(0)}%` : '-'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-center py-12 bg-[#0a0a0a]/30 rounded-xl border-2 border-dashed border-[#2a2a2a]">
