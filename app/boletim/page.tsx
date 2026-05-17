@@ -525,31 +525,34 @@ export default function BoletimPage() {
             <div className="grid grid-cols-3 gap-2">
               <div className="text-center">
                 <div className="text-xs text-gray-400 uppercase font-bold" style={{ height: '18px', lineHeight: '18px' }}>Meta</div>
-                <input
-                  type="number"
-                  value={metas.netCT}
-                  onChange={(e) => salvarMetas({ ...metas, netCT: Number(e.target.value) })}
-                  className="w-full bg-transparent text-2xl font-black text-yellow-300 font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded"
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  onBlur={(e) => salvarMetas({ ...metas, netCT: Number(e.currentTarget.textContent) || 0 })}
+                  className="w-full bg-transparent text-2xl font-black text-yellow-300 font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded cursor-text"
                   style={{ height: '36px', lineHeight: '36px', padding: '0', display: 'block', margin: '0' }}
-                />
+                >
+                  {metas.netCT}
+                </div>
               </div>
               <div className="text-center border-x border-yellow-500/20">
                 <div className="text-xs text-gray-400 uppercase font-bold" style={{ height: '18px', lineHeight: '18px' }}>
                   Realizado <span className="text-yellow-400" data-html2canvas-ignore="true">{netRealizadoManual !== null ? '✏️' : ''}</span>
                 </div>
-                <input
-                  type="number"
-                  value={netRealizado || ''}
-                  placeholder="-"
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setNetRealizadoManual(v === '' ? null : Number(v));
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  onBlur={(e) => {
+                    const v = e.currentTarget.textContent?.trim() || '';
+                    setNetRealizadoManual(v === '' || v === '-' ? null : Number(v));
                   }}
-                  className={`w-full bg-transparent text-2xl font-black font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded ${
+                  className={`w-full bg-transparent text-2xl font-black font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded cursor-text ${
                     netRealizado >= metas.netCT && netRealizado > 0 ? 'text-green-400' : netRealizado > 0 ? 'text-red-400' : 'text-gray-500'
                   }`}
                   style={{ height: '36px', lineHeight: '36px', padding: '0', display: 'block', margin: '0' }}
-                />
+                >
+                  {netRealizado || '-'}
+                </div>
               </div>
               <div className="text-center">
                 <div className="text-xs text-gray-400 uppercase font-bold" style={{ height: '18px', lineHeight: '18px' }}>Diferença</div>
@@ -580,31 +583,34 @@ export default function BoletimPage() {
             <div className="grid grid-cols-3 gap-2">
               <div className="text-center">
                 <div className="text-xs text-gray-400 uppercase font-bold" style={{ height: '18px', lineHeight: '18px' }}>Meta</div>
-                <input
-                  type="number"
-                  value={metas.totalPecas}
-                  onChange={(e) => salvarMetas({ ...metas, totalPecas: Number(e.target.value) })}
-                  className="w-full bg-transparent text-2xl font-black text-purple-300 font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded"
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  onBlur={(e) => salvarMetas({ ...metas, totalPecas: Number(e.currentTarget.textContent) || 0 })}
+                  className="w-full bg-transparent text-2xl font-black text-purple-300 font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded cursor-text"
                   style={{ height: '36px', lineHeight: '36px', padding: '0', display: 'block', margin: '0' }}
-                />
+                >
+                  {metas.totalPecas}
+                </div>
               </div>
               <div className="text-center border-x border-purple-500/20">
                 <div className="text-xs text-gray-400 uppercase font-bold" style={{ height: '18px', lineHeight: '18px' }}>
                   Realizado <span className="text-purple-400" data-html2canvas-ignore="true">{pecasRealizadoManual !== null ? '✏️' : ''}</span>
                 </div>
-                <input
-                  type="number"
-                  value={totalPecasRealizado || ''}
-                  placeholder="-"
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setPecasRealizadoManual(v === '' ? null : Number(v));
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  onBlur={(e) => {
+                    const v = e.currentTarget.textContent?.trim() || '';
+                    setPecasRealizadoManual(v === '' || v === '-' ? null : Number(v.replace(/\./g, '')));
                   }}
-                  className={`w-full bg-transparent text-2xl font-black font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded ${
+                  className={`w-full bg-transparent text-2xl font-black font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded cursor-text ${
                     totalPecasRealizado >= metas.totalPecas && metas.totalPecas > 0 && totalPecasRealizado > 0 ? 'text-green-400' : totalPecasRealizado > 0 ? 'text-red-400' : 'text-gray-500'
                   }`}
                   style={{ height: '36px', lineHeight: '36px', padding: '0', display: 'block', margin: '0' }}
-                />
+                >
+                  {totalPecasRealizado > 0 ? totalPecasRealizado.toLocaleString('pt-BR') : '-'}
+                </div>
               </div>
               <div className="text-center">
                 <div className="text-xs text-gray-400 uppercase font-bold" style={{ height: '18px', lineHeight: '18px' }}>Diferença</div>
