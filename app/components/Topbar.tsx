@@ -26,64 +26,24 @@ export default function Topbar() {
     <header className="bg-gradient-to-r from-[#0a0a0a] via-[#0f0f0f] to-[#0a0a0a] border-b border-[#1a1a1a] px-6 py-3 flex items-center justify-between sticky top-0 z-30 backdrop-blur-md bg-opacity-90">
       {/* Lado esquerdo - Logos + saudação */}
       <div className="flex items-center gap-4">
-        {/* 🤝 Logo Mercado Livre */}
+        {/* 🤝 Logo Mercado Livre - oficial da web */}
         <div
-          className="flex items-center justify-center w-14 h-10 rounded-xl shadow-md"
+          className="flex items-center justify-center w-14 h-10 rounded-xl shadow-md overflow-hidden"
           style={{
             background: 'linear-gradient(135deg, #FFE600 0%, #FFD700 100%)',
             boxShadow: '0 4px 12px rgba(255, 215, 0, 0.3)',
           }}
           title="Mercado Livre"
         >
-          {/* Símbolo oficial MELI - 2 mãos estilizadas apertando */}
-          <svg
-            viewBox="0 0 100 60"
-            width="44"
-            height="28"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            {/* Mão esquerda - forma de C invertido */}
-            <path
-              d="M 10 30
-                 C 10 18, 22 12, 35 14
-                 L 50 18
-                 C 52 19, 52 22, 50 23
-                 L 45 25
-                 L 50 27
-                 C 52 28, 52 31, 50 32
-                 L 45 34
-                 L 50 36
-                 C 52 37, 52 40, 50 41
-                 L 35 45
-                 C 22 47, 10 42, 10 30 Z"
-              fill="#FFE600"
-              stroke="#000"
-              strokeWidth="2"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-
-            {/* Mão direita - forma de C normal */}
-            <path
-              d="M 90 30
-                 C 90 18, 78 12, 65 14
-                 L 50 18
-                 C 48 19, 48 22, 50 23
-                 L 55 25
-                 L 50 27
-                 C 48 28, 48 31, 50 32
-                 L 55 34
-                 L 50 36
-                 C 48 37, 48 40, 50 41
-                 L 65 45
-                 C 78 47, 90 42, 90 30 Z"
-              fill="#FFE600"
-              stroke="#000"
-              strokeWidth="2"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-          </svg>
+          <img
+            src="https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/6.10.2/mercadolibre/logo-pt.svg"
+            alt="Mercado Livre"
+            style={{
+              width: '40px',
+              height: 'auto',
+              objectFit: 'contain',
+            }}
+          />
         </div>
 
         {/* 🇧🇷 Bandeira do Brasil */}
