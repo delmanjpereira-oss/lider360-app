@@ -38,30 +38,54 @@ const METAS_PADRAO: Metas = {
   totalPecas: 0,
 };
 
-function norm(s: string): string {
-  return String(s || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]/g, '');
+// 🎯 EXATAMENTE igual o upload-page.tsx
+function parseNumber(value: string): number {
+  if (!value) return 0;
+  let s = String(value).trim().replace(/\s/g, '').replace('%', '');
+  if (!s) return 0;
+
+  const hasComma = s.indexOf(',') !== -1;
+  const hasDot = s.indexOf('.') !== -1;
+
+  if (hasComma && hasDot) {
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      s = s.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    s = s.replace(',', '.');
+  }
+
+  s = s.replace(/[^0-9.-]/g, '');
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
 }
 
-function pegarCol(row: Record<string, string>, aliases: string[]): string {
-  const keys = Object.keys(row);
+function normalizarChave(s: string): string {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
+}
+
+function pegarValor(linha: Record<string, string>, aliases: string[]): string {
+  const chaves = Object.keys(linha);
   for (const alias of aliases) {
-    const aliasNorm = norm(alias);
-    for (const k of keys) {
-      if (norm(k) === aliasNorm) return row[k] || '';
+    const aliasNorm = normalizarChave(alias);
+    for (const chave of chaves) {
+      if (normalizarChave(chave) === aliasNorm) {
+        return linha[chave] || '';
+      }
     }
   }
   return '';
 }
 
-function parseNum(v: string): number {
-  if (!v) return 0;
-  const s = String(v).replace(/\./g, '').replace(',', '.').replace('%', '').trim();
-  const n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
+function normalizarIdGroot(v: string): string {
+  return String(v || '').replace(/\D/g, '').trim();
 }
 
 export default function BoletimPage() {
@@ -103,73 +127,43 @@ export default function BoletimPage() {
       complete: (result) => {
         const linhas: LinhaColab[] = [];
 
-        // Debug: mostra os headers que vieram
         if (result.data.length > 0) {
           console.log('📋 CSV Headers detectados:', Object.keys(result.data[0] as object));
         }
 
         (result.data as Record<string, string>[]).forEach((row) => {
-          // 🎯 Aliases SUPER amplos pra ID
-          const id = pegarCol(row, [
-            'User_Id', 'user_id', 'USER_ID', 'User Id',
-            'Id_Groot', 'id_groot', 'ID_GROOT', 'Id Groot',
-            'CHECKIN_USER', 'Checkin_User', 'checkin_user',
-            'Usuário', 'Usuario', 'usuario',
-            'ID', 'Id',
-            'Lid', 'lid',
-            'Operador', 'operador',
-          ]);
-          if (!id) return;
-
           if (tipo === 'ocupacao') {
-            // CSV Totefullness
-            const ocupTxt = pegarCol(row, [
-              'Ocupação (%)', 'Ocupação', 'Ocupacao', 'ocupacao',
-              'ocupacao_pct', 'OCUPAÇÃO (%)', 'OCUPACAO',
-              'Occupation', 'occupation',
-            ]);
-            const ocup = parseNum(ocupTxt);
-            if (ocup > 0) linhas.push({ id, liquida: 0, qtd: 0, ocupacao: ocup });
+            // CSV Totefullness — formato diferente
+            const id = pegarValor(row, ['user_id', 'User_Id', 'USER_ID', 'id_groot', 'id', 'Id_Groot']);
+            const idLimpo = normalizarIdGroot(id);
+            if (!idLimpo) return;
+
+            const ocupTxt = pegarValor(row, ['ocupacao', 'ocupação', 'ocupacao_pct', 'ocupação (%)', 'occupation']);
+            const ocup = parseNumber(ocupTxt);
+            if (ocup > 0) linhas.push({ id: idLimpo, liquida: 0, qtd: 0, ocupacao: ocup });
           } else {
-            // 🎯 Aliases batendo com o CSV real do MELI (mesmo do upload-page.tsx)
-            const liqTxt = pegarCol(row, [
-              'prod_liquida_sist',
-              'prod liquida sist',
-              'prod liquida sistemico',
-              'Prod Liquida Sistemico',
-              'prod_liquida',
-              'liquida',
-              'Líquida', 'Liquida', 'LIQUIDA',
-              'produtividade liquida',
-              'Produtividade Líquida', 'Produtividade liquida',
-              'Líq', 'Liq', 'LIQ',
-              'Produtividade', 'produtividade',
-              'Net', 'NET',
-              'Pç/h', 'pc/h', 'pç/h',
-              'Peças/h', 'Peças por hora',
-            ]);
+            // 🎯 EXATAMENTE igual ao upload-page.tsx do "Meu Time"
+            const idGrootRaw = pegarValor(row, ['id_groot', 'id groot', 'groot', 'id']);
+            const idGroot = normalizarIdGroot(idGrootRaw);
+            if (!idGroot) return;
 
-            // 🎯 Aliases pra Volume / Quantidade
-            const volTxt = pegarCol(row, [
-              'qt_processada',
-              'qt processada',
-              'quantidade processada',
-              'Volume processado', 'volume_processado', 'Volume Processado',
-              'Volume', 'volume', 'VOLUME',
-              'Unidades', 'unidades', 'UNIDADES',
-              'Quantidade', 'quantidade', 'QUANTIDADE',
-              'Qtd', 'qtd', 'QTD',
-              'Qtd de Peças', 'Qtd Peças',
-              'Total', 'total',
-              'Peças', 'pecas', 'PECAS',
-              'CHECKIN', 'checkin',
-            ]);
+            const liquida = parseNumber(
+              pegarValor(row, [
+                'prod_liquida_sist',
+                'prod liquida sist',
+                'prod liquida sistemico',
+                'prod_liquida',
+                'liquida',
+                'produtividade liquida',
+              ])
+            );
 
-            const liquida = parseNum(liqTxt);
-            const qtd = parseNum(volTxt);
+            const qtd = parseNumber(
+              pegarValor(row, ['unidades', 'volume', 'quantidade'])
+            );
 
             if (liquida > 0 || qtd > 0) {
-              linhas.push({ id, liquida, qtd, ocupacao: 0 });
+              linhas.push({ id: idGroot, liquida, qtd, ocupacao: 0 });
             }
           }
         });
@@ -631,7 +625,7 @@ export default function BoletimPage() {
         </div>
 
         {linhasUnificadas.length > 0 ? (
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* CHECK-IN TABLE */}
             {linhasUnificadas.filter((l) => l.processo === 'CK').length > 0 && (
               <div className="bg-white rounded-xl overflow-hidden border-2 border-cyan-500/40">
