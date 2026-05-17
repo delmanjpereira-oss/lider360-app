@@ -34,16 +34,16 @@ type HistoricoLinha = {
   ima: number;
 };
 
-type DpmoAgregado = {
+type DpmoEvento = {
   id: number;
+  checkin_data: string;
   representante: string;
   id_groot: string | null;
-  processo: string;
+  qtd_dif: number;
   semana: number;
   ano: number;
   mes: number;
   trimestre: string;
-  dpmo: number;
 };
 
 type FeedbackBreve = {
@@ -52,6 +52,15 @@ type FeedbackBreve = {
   classificacao: string;
   observacao: string;
   registrado_em: string;
+};
+
+type DpmoSemana = {
+  ano: number;
+  semana: number;
+  defeitos: number;
+  unidades: number;
+  dpmo: number;
+  statusCalculo: 'completo' | 'falta_inventario' | 'falta_produtividade';
 };
 
 function iniciais(nome: string): string {
@@ -63,20 +72,12 @@ function iniciais(nome: string): string {
 function formatarData(data: string | null): string {
   if (!data) return 'Não informado';
   const d = new Date(data + 'T12:00:00');
-  return d.toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  });
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
 function formatarDataCurta(data: string): string {
   const d = new Date(data + 'T12:00:00');
-  return d.toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: '2-digit',
-  });
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
 function mesesEmpresa(dataAdmissao: string | null): string {
@@ -86,7 +87,6 @@ function mesesEmpresa(dataAdmissao: string | null): string {
   const meses = Math.floor((agora.getTime() - inicio.getTime()) / (1000 * 60 * 60 * 24 * 30));
   const anos = Math.floor(meses / 12);
   const mesesRestantes = meses % 12;
-
   if (anos === 0) return `${meses} ${meses === 1 ? 'mês' : 'meses'}`;
   if (mesesRestantes === 0) return `${anos} ${anos === 1 ? 'ano' : 'anos'}`;
   return `${anos} ${anos === 1 ? 'ano' : 'anos'} e ${mesesRestantes} meses`;
@@ -131,6 +131,17 @@ function iconeTipo(tipo: string): string {
   }
 }
 
+// Pega semana ISO de uma data string YYYY-MM-DD
+function getSemanaIso(dataStr: string): { semana: number; ano: number } {
+  const d = new Date(dataStr + 'T12:00:00');
+  const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const diaDaSemana = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - diaDaSemana);
+  const inicioAno = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const semana = Math.ceil((((utc.getTime() - inicioAno.getTime()) / 86400000) + 1) / 7);
+  return { semana, ano: utc.getUTCFullYear() };
+}
+
 export default function DetalheColaboradorPage() {
   const router = useRouter();
   const params = useParams();
@@ -138,7 +149,7 @@ export default function DetalheColaboradorPage() {
 
   const [colaborador, setColaborador] = useState<Colaborador | null>(null);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
-  const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
+  const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
   const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>([]);
   const [metaIma, setMetaIma] = useState(1567);
   const [loading, setLoading] = useState(true);
@@ -161,7 +172,7 @@ export default function DetalheColaboradorPage() {
           setColaborador(data);
           if (data) {
             buscarHistorico(data.id_groot);
-            buscarDpmoAgregado(data.id_groot, data.nome, data.processo);
+            buscarDpmoEventos(data.id_groot, data.nome, data.processo);
             buscarFeedbacks(data.id_groot);
             buscarMetaIma(data.processo);
           }
@@ -198,48 +209,38 @@ export default function DetalheColaboradorPage() {
     }
   }
 
-  async function buscarDpmoAgregado(idGroot: string, nome: string, processoColaborador: string | null) {
+  async function buscarDpmoEventos(idGroot: string, nome: string, processoColaborador: string | null) {
     try {
-      // Mapeia processo do cadastro pro processo do DPMO
-      // Checkin → CK, P2M → P2M, Sorting → não tem DPMO
-      const processoDpmo =
-        processoColaborador === 'Checkin' ? 'CK' :
-        processoColaborador === 'P2M' ? 'P2M' :
-        null;
-
-      if (!processoDpmo) {
-        setDpmoAgregado([]);
+      if (processoColaborador !== 'Checkin' && processoColaborador !== 'P2M') {
+        setDpmoEventos([]);
         return;
       }
 
-      // Busca por id_groot OU pelo nome (caso ainda não vinculado), filtrando pelo processo
+      // Busca eventos por id_groot OU por nome (caso não vinculado ainda)
       const { data: porId } = await supabase
-        .from('dpmo_agregado')
+        .from('dpmo_eventos')
         .select('*')
         .eq('id_groot', idGroot)
-        .eq('processo', processoDpmo)
-        .order('ano', { ascending: false })
-        .order('semana', { ascending: false });
+        .order('checkin_data', { ascending: false });
 
       const { data: porNome } = await supabase
-        .from('dpmo_agregado')
+        .from('dpmo_eventos')
         .select('*')
         .ilike('representante', nome)
-        .eq('processo', processoDpmo)
         .is('id_groot', null);
 
-      const todos: DpmoAgregado[] = [];
+      const todos: DpmoEvento[] = [];
       const idsVistos = new Set<number>();
       [...(porId || []), ...(porNome || [])].forEach((e) => {
         if (!idsVistos.has(e.id)) {
           idsVistos.add(e.id);
-          todos.push(e as DpmoAgregado);
+          todos.push(e as DpmoEvento);
         }
       });
 
-      setDpmoAgregado(todos);
+      setDpmoEventos(todos);
     } catch (e) {
-      console.error('Erro buscando DPMO:', e);
+      console.error('Erro buscando DPMO eventos:', e);
     }
   }
 
@@ -272,6 +273,83 @@ export default function DetalheColaboradorPage() {
     }
   }
 
+  // 🎯 CÁLCULO INTELIGENTE DE DPMO POR SEMANA
+  // Cruza dpmo_eventos (defeitos) com historico (unidades) — SÓ calcula se tem os 2
+  function calcularDpmoPorSemana(): DpmoSemana[] {
+    const resultado: Record<string, DpmoSemana> = {};
+
+    // 1. Acumula DEFEITOS por semana (do dpmo_eventos)
+    dpmoEventos.forEach((e) => {
+      const chave = `${e.ano}-S${e.semana}`;
+      if (!resultado[chave]) {
+        resultado[chave] = {
+          ano: e.ano,
+          semana: e.semana,
+          defeitos: 0,
+          unidades: 0,
+          dpmo: 0,
+          statusCalculo: 'falta_produtividade',
+        };
+      }
+      resultado[chave].defeitos += e.qtd_dif || 0;
+    });
+
+    // 2. Acumula UNIDADES por semana (do historico)
+    historico.forEach((h) => {
+      const { ano, semana } = getSemanaIso(h.data_referencia);
+      const chave = `${ano}-S${semana}`;
+      if (!resultado[chave]) {
+        resultado[chave] = {
+          ano,
+          semana,
+          defeitos: 0,
+          unidades: 0,
+          dpmo: 0,
+          statusCalculo: 'falta_inventario',
+        };
+      }
+      resultado[chave].unidades += h.unidades || 0;
+    });
+
+    // 3. Calcula DPMO onde tem OS 2 (defeitos + unidades > 0)
+    Object.values(resultado).forEach((s) => {
+      if (s.unidades > 0 && s.defeitos >= 0) {
+        // Tem produtividade
+        if (dpmoEventos.some((e) => e.ano === s.ano && e.semana === s.semana)) {
+          // Tem inventário também → calcula!
+          s.dpmo = Math.round((s.defeitos / s.unidades) * 1_000_000);
+          s.statusCalculo = 'completo';
+        } else {
+          s.statusCalculo = 'falta_inventario';
+        }
+      } else if (s.defeitos > 0 && s.unidades === 0) {
+        s.statusCalculo = 'falta_produtividade';
+      }
+    });
+
+    return Object.values(resultado).sort((a, b) => {
+      if (a.ano !== b.ano) return b.ano - a.ano;
+      return b.semana - a.semana;
+    });
+  }
+
+  const dpmoPorSemana = calcularDpmoPorSemana();
+  const semanasCompletas = dpmoPorSemana.filter((s) => s.statusCalculo === 'completo');
+  const semanasFaltando = dpmoPorSemana.filter((s) => s.statusCalculo !== 'completo');
+
+  // 🎯 DPMO TRIMESTRAL — ponderado (SUM defeitos / SUM unidades)
+  const dpmoTotal = (() => {
+    if (semanasCompletas.length === 0) return null;
+    const totalDef = semanasCompletas.reduce((s, x) => s + x.defeitos, 0);
+    const totalUnid = semanasCompletas.reduce((s, x) => s + x.unidades, 0);
+    if (totalUnid === 0) return null;
+    return {
+      defeitos: totalDef,
+      unidades: totalUnid,
+      dpmo: Math.round((totalDef / totalUnid) * 1_000_000),
+    };
+  })();
+
   const historicoFiltrado = (() => {
     if (filtroPeriodo === 'tudo') return historico;
     const dias = parseInt(filtroPeriodo);
@@ -287,7 +365,6 @@ export default function DetalheColaboradorPage() {
     const somaImp = validos.reduce((s, h) => s + h.impacto_net, 0);
     const melhorDia = validos.reduce((max, h) => (h.prod_liquida > max.prod_liquida ? h : max));
     const piorDia = validos.reduce((min, h) => (h.prod_liquida < min.prod_liquida ? h : min));
-
     return {
       totalDias: validos.length,
       mediaLiquida: Math.round(somaLiq / validos.length),
@@ -299,15 +376,6 @@ export default function DetalheColaboradorPage() {
       piorDia,
       ultimoStatus: historicoFiltrado[0]?.status_meta || 'Sem dados',
     };
-  })();
-
-  // 🎯 DPMO — usa dpmo_agregado (oficial do Looker)
-  const dpmoMedio = (() => {
-    if (dpmoAgregado.length === 0) return null;
-    const validos = dpmoAgregado.filter((d) => d.dpmo > 0);
-    if (validos.length === 0) return null;
-    const soma = validos.reduce((s, d) => s + d.dpmo, 0);
-    return Math.round(soma / validos.length);
   })();
 
   if (loading) {
@@ -409,88 +477,109 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      {/* 🎯 SEÇÃO DPMO — usa dpmo_agregado (oficial Looker) */}
-      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h2 className="text-lg font-bold text-purple-400 flex items-center gap-2">
-            📊 DPMO (Qualidade)
-          </h2>
-          <span className="text-xs text-gray-500">Fonte: Looker (Tabela Dinâmica)</span>
-        </div>
-
-        {dpmoAgregado.length === 0 ? (
-          <div className="text-center py-8 text-gray-400 text-sm">
-            <span className="text-4xl block mb-2">📭</span>
-            <p>Sem dados de DPMO ainda.</p>
-            <p className="text-xs text-gray-500 mt-1">
-              Sobe o CSV TABELA DINÂMICA em MEU TIME → 📊 Upload DPMO
-            </p>
+      {/* 🎯 SEÇÃO DPMO — Cálculo PONDERADO REAL (cruzando dpmo_eventos + historico) */}
+      {(colaborador.processo === 'Checkin' || colaborador.processo === 'P2M') && (
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-lg font-bold text-purple-400 flex items-center gap-2">
+              📊 DPMO (Qualidade)
+            </h2>
+            <span className="text-xs text-gray-500">Cálculo: (Σ Defeitos / Σ Unidades) × 1.000.000</span>
           </div>
-        ) : (
-          <>
-            {/* Total / Média */}
-            {dpmoMedio !== null && (
-              <div className={`rounded-lg p-4 border ${dpmoMedio > metaIma ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase font-bold mb-1">DPMO Médio</p>
-                    <p className={`text-4xl font-black font-mono ${dpmoMedio > metaIma ? 'text-red-400' : 'text-green-400'}`}>
-                      {dpmoMedio.toLocaleString('pt-BR')}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Média de {dpmoAgregado.length} semana(s) registrada(s)
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-gray-400">Meta IMA</p>
-                    <p className="text-2xl font-bold text-white">{metaIma}</p>
-                    <p className={`text-xs font-bold mt-1 ${dpmoMedio > metaIma ? 'text-red-400' : 'text-green-400'}`}>
-                      {dpmoMedio > metaIma ? '⚠️ acima da meta' : '✓ na meta'}
-                    </p>
+
+          {dpmoPorSemana.length === 0 ? (
+            <div className="text-center py-8 text-gray-400 text-sm">
+              <span className="text-4xl block mb-2">📭</span>
+              <p>Sem dados de DPMO ainda</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Precisa subir o CSV INVENTÁRIO DPMO em MEU TIME → 📊 Upload DPMO
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Total Geral */}
+              {dpmoTotal !== null ? (
+                <div className={`rounded-lg p-4 border ${dpmoTotal.dpmo > metaIma ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase font-bold mb-1">TOTAL GERAL</p>
+                      <p className={`text-4xl font-black font-mono ${dpmoTotal.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
+                        {dpmoTotal.dpmo.toLocaleString('pt-BR')}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {dpmoTotal.defeitos} defeitos / {dpmoTotal.unidades.toLocaleString('pt-BR')} unidades
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-400">Meta IMA</p>
+                      <p className="text-2xl font-bold text-white">{metaIma}</p>
+                      <p className={`text-xs font-bold mt-1 ${dpmoTotal.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
+                        {dpmoTotal.dpmo > metaIma ? '⚠️ acima da meta' : '✓ na meta'}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* Tabela por semana */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
-                    <th className="py-2 pr-2">Período</th>
-                    <th className="py-2 pr-2">Processo</th>
-                    <th className="py-2 pr-2 text-right">DPMO</th>
-                    <th className="py-2 pr-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dpmoAgregado.slice(0, 12).map((d) => (
-                    <tr key={d.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a]">
-                      <td className="py-2 pr-2 text-white">Semana {d.semana} / {d.ano}</td>
-                      <td className="py-2 pr-2">
-                        <span className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full font-bold">{d.processo}</span>
-                      </td>
-                      <td className={`py-2 pr-2 text-right font-mono font-bold ${d.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
-                        {d.dpmo.toLocaleString('pt-BR')}
-                      </td>
-                      <td className="py-2 pr-2">
-                        {d.dpmo > metaIma ? (
-                          <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-red-500/20 text-red-400">Acima</span>
-                        ) : (
-                          <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-green-500/20 text-green-400">Na meta</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {dpmoAgregado.length > 12 && (
-                <p className="text-xs text-gray-500 text-center mt-2">... e mais {dpmoAgregado.length - 12} semana(s)</p>
+              ) : (
+                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+                  <p className="text-yellow-300 text-sm">
+                    ⚠️ <strong>Faltam dados de DPMO.</strong> Tem produtividade mas falta o CSV INVENTÁRIO DPMO pra ver os defeitos. Sobe em MEU TIME → 📊 Upload DPMO.
+                  </p>
+                </div>
               )}
-            </div>
-          </>
-        )}
-      </div>
+
+              {/* Tabela por semana */}
+              {semanasCompletas.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
+                        <th className="py-2 pr-2">Período</th>
+                        <th className="py-2 pr-2 text-right">Defeitos</th>
+                        <th className="py-2 pr-2 text-right">Unidades</th>
+                        <th className="py-2 pr-2 text-right">DPMO</th>
+                        <th className="py-2 pr-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {semanasCompletas.slice(0, 12).map((s) => (
+                        <tr key={`${s.ano}-${s.semana}`} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a]">
+                          <td className="py-2 pr-2 text-white">Semana {s.semana} / {s.ano}</td>
+                          <td className="py-2 pr-2 text-right text-red-400 font-mono">{s.defeitos}</td>
+                          <td className="py-2 pr-2 text-right text-gray-300 font-mono">{s.unidades.toLocaleString('pt-BR')}</td>
+                          <td className={`py-2 pr-2 text-right font-mono font-bold ${s.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
+                            {s.dpmo.toLocaleString('pt-BR')}
+                          </td>
+                          <td className="py-2 pr-2">
+                            {s.dpmo > metaIma ? (
+                              <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-red-500/20 text-red-400">Acima</span>
+                            ) : (
+                              <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-green-500/20 text-green-400">Na meta</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Semanas faltando dados */}
+              {semanasFaltando.length > 0 && (
+                <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3">
+                  <p className="text-xs text-blue-300 font-bold mb-2">⏳ Semanas aguardando dados completos:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {semanasFaltando.map((s) => (
+                      <span key={`${s.ano}-${s.semana}`} className="text-xs bg-blue-500/10 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/30">
+                        S{s.semana}/{s.ano}: {s.statusCalculo === 'falta_inventario' ? 'falta inventário' : 'falta produtividade'}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Distribuição */}
       {!loadingHistorico && stats && (
@@ -604,7 +693,7 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
-      {/* Histórico de produção */}
+      {/* Histórico */}
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico de Produção</h2>
