@@ -1,0 +1,215 @@
+// app/api/mascote-status/route.ts
+import { NextResponse } from 'next/server';
+import { supabase } from '../../lib/supabase';
+
+type Humor = 'happy' | 'party' | 'surprised' | 'sad';
+type Mensagem = { titulo: string; texto: string };
+
+export async function GET() {
+  try {
+    const agora = new Date();
+    const mesAtual = agora.getMonth() + 1;
+    const anoAtual = agora.getFullYear();
+    const primeiroDia = `${anoAtual}-${String(mesAtual).padStart(2, '0')}-01`;
+
+    // Hoje no formato DD/MM (pra comparar aniversário)
+    const hojeMMDD = `${String(agora.getDate()).padStart(2, '0')}/${String(mesAtual).padStart(2, '0')}`;
+
+    // 1. Busca colaboradores ativos
+    const { data: colabs } = await supabase
+      .from('colaboradores')
+      .select('id, id_groot, nome, aniversario, processo')
+      .eq('status', 'Ativo');
+
+    const totalColabs = (colabs || []).length;
+
+    // 2. Aniversariantes hoje
+    const aniversariantes = (colabs || []).filter((c) => {
+      if (!c.aniversario) return false;
+      const partes = String(c.aniversario).split('-');
+      if (partes.length === 3) {
+        return `${partes[2]}/${partes[1]}` === hojeMMDD;
+      }
+      return false;
+    });
+
+    // 3. Busca histórico do mês
+    const { data: hist } = await supabase
+      .from('historico')
+      .select('id_groot, status_meta, prod_liquida, data_referencia, processo')
+      .gte('data_referencia', primeiroDia);
+
+    const totalRegistros = (hist || []).length;
+    const abaixoMeta = (hist || []).filter((h) => h.status_meta === 'Abaixo').length;
+    const superaMeta = (hist || []).filter((h) => h.status_meta === 'Supera').length;
+    const pctAbaixo = totalRegistros > 0 ? (abaixoMeta / totalRegistros) * 100 : 0;
+    const pctSupera = totalRegistros > 0 ? (superaMeta / totalRegistros) * 100 : 0;
+
+    // 4. Conta colaboradores abaixo da meta no último upload
+    const ultimoUpload = (hist || []).reduce((max, h) => {
+      return h.data_referencia > max ? h.data_referencia : max;
+    }, '');
+
+    const colabsDia = (hist || []).filter((h) => h.data_referencia === ultimoUpload);
+    const colabsAbaixoHoje = colabsDia.filter((h) => h.status_meta === 'Abaixo');
+    const colabsSuperaHoje = colabsDia.filter((h) => h.status_meta === 'Supera');
+
+    // 5. Top 3 colabs com mais dias abaixo (ofensores)
+    const diasPorColab: Record<string, number> = {};
+    (hist || []).forEach((h) => {
+      if (h.status_meta === 'Abaixo') {
+        diasPorColab[h.id_groot] = (diasPorColab[h.id_groot] || 0) + 1;
+      }
+    });
+
+    const ofensores = Object.entries(diasPorColab)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3)
+      .map(([idGroot, dias]) => {
+        const colab = (colabs || []).find((c) => c.id_groot === idGroot);
+        return { nome: colab?.nome || idGroot, dias, processo: colab?.processo };
+      });
+
+    // 6. Top 3 destaques (Supera)
+    const superaPorColab: Record<string, number> = {};
+    (hist || []).forEach((h) => {
+      if (h.status_meta === 'Supera') {
+        superaPorColab[h.id_groot] = (superaPorColab[h.id_groot] || 0) + 1;
+      }
+    });
+
+    const destaques = Object.entries(superaPorColab)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3)
+      .map(([idGroot, dias]) => {
+        const colab = (colabs || []).find((c) => c.id_groot === idGroot);
+        return { nome: colab?.nome || idGroot, dias, processo: colab?.processo };
+      });
+
+    // ============================================================
+    // 🎯 DETERMINA HUMOR
+    // ============================================================
+    let humor: Humor = 'happy';
+
+    if (aniversariantes.length > 0) {
+      humor = 'party';
+    } else if (pctSupera >= 80) {
+      humor = 'party';
+    } else if (pctAbaixo >= 50 || ofensores.filter((o) => o.dias >= 5).length >= 3) {
+      humor = 'sad';
+    } else if (pctAbaixo >= 25 || ofensores.length >= 2) {
+      humor = 'surprised';
+    }
+
+    // ============================================================
+    // 🎯 GERA MENSAGENS PERSONALIZADAS
+    // ============================================================
+    const mensagens: Mensagem[] = [];
+
+    // Aniversariantes
+    if (aniversariantes.length > 0) {
+      aniversariantes.forEach((a) => {
+        const primeiroNome = String(a.nome).split(' ')[0];
+        mensagens.push({
+          titulo: '🎂 Hoje é aniversário!',
+          texto: `Lembra de dar os parabéns pro(a) ${primeiroNome}! Faça do dia dele especial!`,
+        });
+      });
+    }
+
+    // Destaques positivos
+    if (destaques.length > 0 && destaques[0].dias >= 3) {
+      const top = destaques[0];
+      const primeiroNome = String(top.nome).split(' ')[0];
+      mensagens.push({
+        titulo: '🏆 Destaque do mês',
+        texto: `${primeiroNome} (${top.processo}) tá voando! ${top.dias} dias batendo a meta. Parabeniza ele!`,
+      });
+    }
+
+    // Ofensores (precisam de feedback)
+    if (ofensores.length > 0 && ofensores[0].dias >= 3) {
+      const top = ofensores[0];
+      const primeiroNome = String(top.nome).split(' ')[0];
+      mensagens.push({
+        titulo: '⚠️ Atenção urgente',
+        texto: `${primeiroNome} (${top.processo}) tá ${top.dias} dias abaixo da meta. Hora de feedback!`,
+      });
+    }
+
+    if (ofensores.length >= 2) {
+      const nomes = ofensores
+        .slice(0, 3)
+        .map((o) => String(o.nome).split(' ')[0])
+        .join(', ');
+      mensagens.push({
+        titulo: '🚨 Lista de feedback',
+        texto: `Esses precisam de atenção: ${nomes}. Não deixa acumular!`,
+      });
+    }
+
+    // Status do time hoje
+    if (colabsDia.length > 0) {
+      const dataFormatada = ultimoUpload.split('-').reverse().join('/');
+      mensagens.push({
+        titulo: '📊 Resumo do dia',
+        texto: `${dataFormatada}: ${colabsSuperaHoje.length} bateram a meta, ${colabsAbaixoHoje.length} ficaram abaixo.`,
+      });
+    }
+
+    // Tudo zerado
+    if (pctAbaixo === 0 && totalRegistros > 0) {
+      mensagens.push({
+        titulo: '🎉 Time campeão',
+        texto: `Mês incrível! 0% abaixo da meta. Seu trabalho tá rendendo!`,
+      });
+    }
+
+    // Estatísticas gerais
+    if (pctSupera >= 60) {
+      mensagens.push({
+        titulo: '🚀 Time engajado',
+        texto: `${pctSupera.toFixed(0)}% das produtividades batendo a meta no mês! Excelente!`,
+      });
+    }
+
+    // Mensagens de motivação genéricas (fallback)
+    if (mensagens.length < 3) {
+      mensagens.push({
+        titulo: '👋 Olá, líder!',
+        texto: `Seu time tem ${totalColabs} colaboradores. Cuide bem deles e dos números!`,
+      });
+
+      mensagens.push({
+        titulo: '💪 Dica do dia',
+        texto: `Feedback constante = time alinhado. Já conversou com seus colabs hoje?`,
+      });
+
+      mensagens.push({
+        titulo: '🎯 Foco no que importa',
+        texto: `Calibração trimestral é essencial. Mantém seu IMA controlado!`,
+      });
+    }
+
+    return NextResponse.json({
+      humor,
+      mensagens,
+      estatisticas: {
+        totalColabs,
+        aniversariantes: aniversariantes.length,
+        pctAbaixo: Math.round(pctAbaixo),
+        pctSupera: Math.round(pctSupera),
+        totalOfensores: ofensores.length,
+      },
+    });
+  } catch (e) {
+    console.error('Erro mascote API:', e);
+    return NextResponse.json({
+      humor: 'happy',
+      mensagens: [
+        { titulo: '👋 Olá!', texto: 'Boa sorte com a operação hoje!' },
+      ],
+      estatisticas: {},
+    });
+  }
+}
