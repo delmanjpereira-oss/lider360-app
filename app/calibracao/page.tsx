@@ -121,8 +121,6 @@ export default function CalibracaoPage() {
   const [metaLiq, setMetaLiq] = useState({ checkin: 296, p2m: 329 });
   const [loading, setLoading] = useState(true);
   const [trimestreSelecionado, setTrimestreSelecionado] = useState<string>('');
-  const [editandoIma, setEditandoIma] = useState<string | null>(null);
-  const [valorImaTemp, setValorImaTemp] = useState('');
 
   useEffect(() => {
     carregar();
@@ -131,14 +129,12 @@ export default function CalibracaoPage() {
   async function carregar() {
     setLoading(true);
     try {
-      const [colabResp, histResp, dpmoResp, dpmoAggResp, fbResp, imaResp, comoResp, confResp] = await Promise.all([
+      const [colabResp, histResp, dpmoResp, dpmoAggResp, fbResp, confResp] = await Promise.all([
         supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
         supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
         supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre'),
         supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo'),
         supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
-        supabase.from('ima_manual').select('*'),
-        supabase.from('como_manual').select('*'),
         supabase.from('config').select('chave, valor'),
       ]);
 
@@ -147,8 +143,6 @@ export default function CalibracaoPage() {
       if (dpmoResp.data) setDpmoEventos(dpmoResp.data as DpmoEvento[]);
       if (dpmoAggResp.data) setDpmoAgregado(dpmoAggResp.data as DpmoAgregado[]);
       if (fbResp.data) setFeedbacks(fbResp.data as FeedbackTrim[]);
-      if (imaResp.data) setImaManual(imaResp.data);
-      if (comoResp.data) setComoManual(comoResp.data);
       if (confResp.data) {
         const map: Record<string, number> = {};
         confResp.data.forEach((c: { chave: string; valor: string }) => {
@@ -394,42 +388,6 @@ export default function CalibracaoPage() {
   const totalNaoAptos = linhasCalibracao.filter((l) => l.aptidao === 'NÃO APTO').length;
   const totalAguardando = linhasCalibracao.filter((l) => l.imaOrigem === 'aguardando').length;
 
-  async function salvarImaManual(linha: LinhaCalib, valor: number) {
-    const quarterKey = `${anoNum}-${quarterSel}`;
-    const { error } = await supabase.from('ima_manual').upsert(
-      { id_groot: linha.idGroot, nome: linha.nome, processo: linha.processo, quarter_ref: quarterKey, valor_ima: valor, atualizado_em: new Date().toISOString() },
-      { onConflict: 'id_groot,quarter_ref' }
-    );
-    if (error) window.showToast('error', error.message);
-    else { setEditandoIma(null); carregar(); window.showToast('success', 'IMA atualizado'); }
-  }
-
-  async function salvarComoManual(linha: LinhaCalib, nota: string) {
-    const quarterKey = `${anoNum}-${quarterSel}`;
-    const { error } = await supabase.from('como_manual').upsert(
-      { id_groot: linha.idGroot, nome: linha.nome, processo: linha.processo, quarter_ref: quarterKey, nota_como: nota, atualizado_em: new Date().toISOString() },
-      { onConflict: 'id_groot,quarter_ref' }
-    );
-    if (error) window.showToast('error', error.message);
-    else { carregar(); window.showToast('success', 'COMO atualizado'); }
-  }
-
-  async function resetarIma(linha: LinhaCalib) {
-    const ok = await window.showConfirm({ title: 'Resetar IMA', message: 'Voltar pro IMA automático?' });
-    if (!ok) return;
-    const quarterKey = `${anoNum}-${quarterSel}`;
-    await supabase.from('ima_manual').delete().eq('id_groot', linha.idGroot).eq('quarter_ref', quarterKey);
-    carregar();
-  }
-
-  async function resetarComo(linha: LinhaCalib) {
-    const ok = await window.showConfirm({ title: 'Resetar COMO', message: 'Voltar pro COMO automático?' });
-    if (!ok) return;
-    const quarterKey = `${anoNum}-${quarterSel}`;
-    await supabase.from('como_manual').delete().eq('id_groot', linha.idGroot).eq('quarter_ref', quarterKey);
-    carregar();
-  }
-
   if (loading) {
     return (
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
@@ -555,35 +513,21 @@ export default function CalibracaoPage() {
                           <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono">{l.ocupTrim ? l.ocupTrim + '%' : '-'}</td>
 
                           <td className="py-2 px-3 text-center">
-                            {editandoIma === l.idGroot ? (
-                              <div className="flex items-center gap-1">
-                                <input type="number" value={valorImaTemp} onChange={(e) => setValorImaTemp(e.target.value)} className="w-20 bg-[#0a0a0a] border border-[#FFD700] rounded px-2 py-1 text-white text-xs" autoFocus />
-                                <button onClick={() => salvarImaManual(l, parseInt(valorImaTemp) || 0)} className="text-green-400 text-xs">✓</button>
-                                <button onClick={() => setEditandoIma(null)} className="text-red-400 text-xs">✕</button>
-                              </div>
-                            ) : (
-                              <div className="cursor-pointer hover:bg-[#1a1a1a] rounded px-1 py-0.5" onClick={() => { setEditandoIma(l.idGroot); setValorImaTemp(l.ima.toString()); }} title="Clica pra editar">
-                                {l.imaOrigem === 'aguardando' ? (
-                                  <div className="text-blue-400 font-bold text-xs">⏳</div>
-                                ) : (
-                                  <div className="text-white font-bold font-mono text-xs">{l.ima || '-'}</div>
-                                )}
-                                {l.imaOrigem === 'manual' && (
-                                  <div className="flex items-center justify-center gap-1">
-                                    <span className="text-[8px] text-yellow-400 font-bold">manual</span>
-                                    <button onClick={(e) => { e.stopPropagation(); resetarIma(l); }} className="text-[8px] text-gray-500 hover:text-red-400">↺</button>
-                                  </div>
-                                )}
-                                {l.imaOrigem === 'auto' && (
-                                  <div className="text-[8px] text-green-400" title={`${l.imaDefeitos} defeitos / ${l.imaUnidades.toLocaleString('pt-BR')} unidades / ${l.imaDiasAuditados} dias`}>
-                                    {l.imaDiasAuditados}d
-                                  </div>
-                                )}
-                                {l.imaOrigem === 'aguardando' && (
-                                  <div className="text-[8px] text-blue-400">aguarda</div>
-                                )}
-                              </div>
-                            )}
+                            <div className="px-1 py-0.5">
+                              {l.imaOrigem === 'aguardando' ? (
+                                <div className="text-blue-400 font-bold text-xs">⏳</div>
+                              ) : (
+                                <div className="text-white font-bold font-mono text-xs">{l.ima || '-'}</div>
+                              )}
+                              {l.imaOrigem === 'auto' && (
+                                <div className="text-[8px] text-green-400" title={`${l.imaDefeitos} defeitos / ${l.imaUnidades.toLocaleString('pt-BR')} unidades`}>
+                                  auto
+                                </div>
+                              )}
+                              {l.imaOrigem === 'aguardando' && (
+                                <div className="text-[8px] text-blue-400">aguarda</div>
+                              )}
+                            </div>
                           </td>
 
                           <td className="py-2 px-2 text-center">
@@ -591,17 +535,7 @@ export default function CalibracaoPage() {
                           </td>
 
                           <td className="py-2 px-2 text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <select value={l.como === 'Sem feedbacks' ? '' : l.como} onChange={(e) => { if (e.target.value) salvarComoManual(l, e.target.value); }} className={`text-xs px-2 py-0.5 rounded-full font-bold border-0 cursor-pointer ${corNota(l.como)}`}>
-                                <option value="">{l.como}</option>
-                                <option value="Supera">Supera</option>
-                                <option value="Alinhado">Alinhado</option>
-                                <option value="Abaixo">Abaixo</option>
-                              </select>
-                              {l.comoOrigem === 'manual' && (
-                                <button onClick={() => resetarComo(l)} className="text-[10px] text-gray-500 hover:text-red-400">↺</button>
-                              )}
-                            </div>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${corNota(l.como)}`}>{l.como}</span>
                           </td>
 
                           <td className="py-2 px-2 text-center">
