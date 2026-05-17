@@ -143,6 +143,34 @@ function iconeTipo(tipo: string): string {
   }
 }
 
+// Converte "HH:MM:SS" pra segundos
+function tempoParaSegundos(tempo: string | null): number {
+  if (!tempo) return 0;
+  const partes = tempo.split(':').map(Number);
+  if (partes.length === 3) return partes[0] * 3600 + partes[1] * 60 + partes[2];
+  if (partes.length === 2) return partes[0] * 3600 + partes[1] * 60;
+  return 0;
+}
+
+// Converte segundos pra "HH:MM:SS"
+function segundosParaTempo(seg: number): string {
+  if (seg <= 0) return '-';
+  const h = Math.floor(seg / 3600);
+  const m = Math.floor((seg % 3600) / 60);
+  const s = seg % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+// 🎯 Calcula ociosidade real: T.Processo - T.Efetivo
+function calcularOciosidade(tempoProcesso: string | null, tempoEfetivo: string | null): string {
+  const proc = tempoParaSegundos(tempoProcesso);
+  const efe = tempoParaSegundos(tempoEfetivo);
+  if (proc <= 0 || efe <= 0) return '-';
+  const ocioso = proc - efe;
+  if (ocioso <= 0) return '00:00:00';
+  return segundosParaTempo(ocioso);
+}
+
 function getSemanaIso(dataStr: string): { semana: number; ano: number } {
   const d = new Date(dataStr + 'T12:00:00');
   const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -167,7 +195,6 @@ export default function DetalheColaboradorPage() {
   const [loading, setLoading] = useState(true);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
-  const [filtroPeriodo, setFiltroPeriodo] = useState<'7' | '30' | '90' | 'tudo'>('30');
 
   useEffect(() => {
     async function buscar() {
@@ -422,12 +449,15 @@ export default function DetalheColaboradorPage() {
     };
   })();
 
+  // 🎯 Histórico só do MÊS ATUAL (mês corrente)
   const historicoFiltrado = (() => {
-    if (filtroPeriodo === 'tudo') return historico;
-    const dias = parseInt(filtroPeriodo);
-    const limite = new Date();
-    limite.setDate(limite.getDate() - dias);
-    return historico.filter((h) => new Date(h.data_referencia) >= limite);
+    const agora = new Date();
+    const mesAtual = agora.getMonth() + 1;
+    const anoAtual = agora.getFullYear();
+    return historico.filter((h) => {
+      const data = new Date(h.data_referencia + 'T12:00:00');
+      return data.getMonth() + 1 === mesAtual && data.getFullYear() === anoAtual;
+    });
   })();
 
   const stats = (() => {
@@ -435,12 +465,23 @@ export default function DetalheColaboradorPage() {
     if (validos.length === 0) return null;
     const somaLiq = validos.reduce((s, h) => s + h.prod_liquida, 0);
     const somaImp = validos.reduce((s, h) => s + h.impacto_net, 0);
+    
+    // 🎯 Calcula ociosidade média (em segundos)
+    const ociosidadesValidas = validos
+      .map((h) => tempoParaSegundos(h.tempo_processo) - tempoParaSegundos(h.tempo_efetivo))
+      .filter((o) => o > 0);
+    const ociosidadeMediaSeg = ociosidadesValidas.length > 0
+      ? Math.round(ociosidadesValidas.reduce((s, v) => s + v, 0) / ociosidadesValidas.length)
+      : 0;
+
     const melhorDia = validos.reduce((max, h) => (h.prod_liquida > max.prod_liquida ? h : max));
     const piorDia = validos.reduce((min, h) => (h.prod_liquida < min.prod_liquida ? h : min));
     return {
       totalDias: validos.length,
       mediaLiquida: Math.round(somaLiq / validos.length),
       mediaImpacto: Number((somaImp / validos.length).toFixed(1)),
+      ociosidadeMedia: segundosParaTempo(ociosidadeMediaSeg),
+      ociosidadeMediaSeg,
       diasSupera: validos.filter((h) => h.status_meta === 'Supera').length,
       diasAlinhado: validos.filter((h) => h.status_meta === 'Alinhado').length,
       diasAbaixo: validos.filter((h) => h.status_meta === 'Abaixo').length,
@@ -505,29 +546,36 @@ export default function DetalheColaboradorPage() {
       </div>
 
       {!loadingHistorico && stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">📊</span>
-              <span className="text-3xl font-black text-white">{stats.mediaLiquida}</span>
+              <span className="text-2xl font-black text-white">{stats.mediaLiquida}</span>
             </div>
             <p className="text-xs text-gray-400">Líquida média (pç/h)</p>
           </div>
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">📈</span>
-              <span className={`text-3xl font-black ${stats.mediaImpacto > 0 ? 'text-green-400' : 'text-red-400'}`}>
+              <span className={`text-2xl font-black ${stats.mediaImpacto > 0 ? 'text-green-400' : 'text-red-400'}`}>
                 {stats.mediaImpacto > 0 ? '+' : ''}{stats.mediaImpacto}%
               </span>
             </div>
             <p className="text-xs text-gray-400">Impacto NET médio</p>
           </div>
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-orange-500/30 rounded-2xl p-4" title="T.Processo - T.Efetivo">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">⏱️</span>
+              <span className="text-2xl font-black text-orange-400 font-mono">{stats.ociosidadeMedia}</span>
+            </div>
+            <p className="text-xs text-gray-400">Ociosidade média</p>
+          </div>
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">📅</span>
-              <span className="text-3xl font-black text-cyan-400">{stats.totalDias}</span>
+              <span className="text-2xl font-black text-cyan-400">{stats.totalDias}</span>
             </div>
-            <p className="text-xs text-gray-400">Dias com dados</p>
+            <p className="text-xs text-gray-400">Dias no mês</p>
           </div>
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
@@ -753,14 +801,10 @@ export default function DetalheColaboradorPage() {
 
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico de Produção</h2>
-          <div className="flex gap-1 bg-[#0a0a0a] rounded-lg p-1">
-            {(['7', '30', '90', 'tudo'] as const).map((periodo) => (
-              <button key={periodo} onClick={() => setFiltroPeriodo(periodo)} className={`px-3 py-1.5 text-xs font-bold rounded transition-all ${filtroPeriodo === periodo ? 'bg-[#FFD700] text-black' : 'text-gray-400 hover:text-white'}`}>
-                {periodo === 'tudo' ? 'Tudo' : `${periodo}d`}
-              </button>
-            ))}
-          </div>
+          <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico do Mês</h2>
+          <span className="text-xs bg-cyan-500/20 text-cyan-400 px-3 py-1 rounded-full font-bold">
+            {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+          </span>
         </div>
 
         {loadingHistorico ? (
@@ -771,7 +815,7 @@ export default function DetalheColaboradorPage() {
         ) : historicoFiltrado.length === 0 ? (
           <div className="text-center py-12">
             <span className="text-6xl block mb-4">📭</span>
-            <p className="text-gray-400 mb-2">Sem dados no período</p>
+            <p className="text-gray-400 mb-2">Sem dados desse mês ainda</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -790,23 +834,28 @@ export default function DetalheColaboradorPage() {
                 </tr>
               </thead>
               <tbody>
-                {historicoFiltrado.map((h) => (
-                  <tr key={h.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors">
-                    <td className="py-3 pr-3 text-white font-mono">{formatarDataCurta(h.data_referencia)}</td>
-                    <td className="py-3 pr-3 text-right text-white font-mono font-bold">{h.prod_liquida.toFixed(0)}</td>
-                    <td className="py-3 pr-3 text-right text-gray-300 font-mono">{h.unidades.toLocaleString('pt-BR')}</td>
-                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_processo || '-'}</td>
-                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_efetivo || '-'}</td>
-                    <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_ocioso || '-'}</td>
-                    <td className="py-3 pr-3 text-right text-gray-300 text-xs">{h.utilizacao || '-'}</td>
-                    <td className={`py-3 pr-3 text-right font-mono font-bold ${h.impacto_net > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {h.impacto_net > 0 ? '+' : ''}{h.impacto_net.toFixed(1)}%
-                    </td>
-                    <td className="py-3 pr-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(h.status_meta)}`}>{h.status_meta}</span>
-                    </td>
-                  </tr>
-                ))}
+                {historicoFiltrado.map((h) => {
+                  const ociosidadeCalc = calcularOciosidade(h.tempo_processo, h.tempo_efetivo);
+                  return (
+                    <tr key={h.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors">
+                      <td className="py-3 pr-3 text-white font-mono">{formatarDataCurta(h.data_referencia)}</td>
+                      <td className="py-3 pr-3 text-right text-white font-mono font-bold">{h.prod_liquida.toFixed(0)}</td>
+                      <td className="py-3 pr-3 text-right text-gray-300 font-mono">{h.unidades.toLocaleString('pt-BR')}</td>
+                      <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_processo || '-'}</td>
+                      <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_efetivo || '-'}</td>
+                      <td className="py-3 pr-3 text-right text-orange-400 font-mono text-xs font-bold" title="T.Processo - T.Efetivo">
+                        {ociosidadeCalc}
+                      </td>
+                      <td className="py-3 pr-3 text-right text-gray-300 text-xs">{h.utilizacao || '-'}</td>
+                      <td className={`py-3 pr-3 text-right font-mono font-bold ${h.impacto_net > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {h.impacto_net > 0 ? '+' : ''}{h.impacto_net.toFixed(1)}%
+                      </td>
+                      <td className="py-3 pr-3">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(h.status_meta)}`}>{h.status_meta}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
