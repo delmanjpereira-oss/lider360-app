@@ -57,6 +57,20 @@ type DpmoAgregado = {
   dpmo: number;
 };
 
+type OcupacaoP2M = {
+  id: number;
+  user_id: string;
+  id_groot: string | null;
+  data_referencia: string;
+  nome_rep: string;
+  qtd_totes: number;
+  ocupacao_pct: number;
+  semana: number;
+  ano: number;
+  mes: number;
+  trimestre: string;
+};
+
 type FeedbackBreve = {
   feedback_id: string;
   tipo: string;
@@ -190,6 +204,7 @@ export default function DetalheColaboradorPage() {
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
   const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
   const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
+  const [ocupacaoP2M, setOcupacaoP2M] = useState<OcupacaoP2M[]>([]);
   const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>([]);
   const [metaIma, setMetaIma] = useState(1567);
   const [loading, setLoading] = useState(true);
@@ -211,6 +226,7 @@ export default function DetalheColaboradorPage() {
             buscarHistorico(data.id_groot);
             buscarDpmoEventos(data.id_groot, data.nome, data.processo);
             buscarDpmoAgregado(data.id_groot, data.nome, data.processo);
+            buscarOcupacaoP2M(data.id_groot, data.nome, data.processo);
             buscarFeedbacks(data.id_groot);
             buscarMetaIma(data.processo);
           }
@@ -315,6 +331,26 @@ export default function DetalheColaboradorPage() {
       setDpmoAgregado(todos);
     } catch (e) {
       console.error('Erro buscando DPMO agregado:', e);
+    }
+  }
+
+  async function buscarOcupacaoP2M(idGroot: string, nome: string, processoColaborador: string | null) {
+    try {
+      // Ocupação é exclusiva do P2M
+      if (processoColaborador !== 'P2M') {
+        setOcupacaoP2M([]);
+        return;
+      }
+
+      const { data: porId } = await supabase
+        .from('ocupacao_p2m')
+        .select('*')
+        .eq('id_groot', idGroot)
+        .order('data_referencia', { ascending: false });
+
+      setOcupacaoP2M((porId as OcupacaoP2M[]) || []);
+    } catch (e) {
+      console.error('Erro buscando ocupação P2M:', e);
     }
   }
 
@@ -691,6 +727,116 @@ export default function DetalheColaboradorPage() {
                 Se você tem produtividade até dia 16 mas inventário até dia 15, ignora o dia 16 (não foi auditado). Igual Looker faz.
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {/* 🎯 SEÇÃO OCUPAÇÃO P2M — só pra colaboradores de P2M */}
+      {colaborador.processo === 'P2M' && (
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
+              📦 Ocupação P2M (Qualidade)
+            </h2>
+            <span className="text-xs text-gray-500">Meta: 80%+ — Quanto maior, melhor</span>
+          </div>
+
+          {ocupacaoP2M.length === 0 ? (
+            <div className="text-center py-8 text-gray-400 text-sm">
+              <span className="text-4xl block mb-2">📭</span>
+              <p>Sem dados de Ocupação P2M ainda</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Sobe o CSV "Totefullness" em MEU TIME → 🎯 Upload Ocupação
+              </p>
+              <p className="text-xs text-yellow-400 mt-2">
+                💡 Confira se o <code>user_id_meli</code> deste colaborador está cadastrado
+              </p>
+            </div>
+          ) : (
+            (() => {
+              // Filtra mês atual
+              const agora = new Date();
+              const mesAtual = agora.getMonth() + 1;
+              const anoAtual = agora.getFullYear();
+              const doMes = ocupacaoP2M.filter((o) => {
+                const d = new Date(o.data_referencia + 'T12:00:00');
+                return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual;
+              });
+
+              if (doMes.length === 0) {
+                return (
+                  <div className="text-center py-6 text-gray-400 text-sm">
+                    <span className="text-3xl block mb-2">📅</span>
+                    <p>Sem dados de Ocupação deste mês</p>
+                  </div>
+                );
+              }
+
+              const mediaOcup = doMes.reduce((s, o) => s + o.ocupacao_pct, 0) / doMes.length;
+              const totalTotes = doMes.reduce((s, o) => s + o.qtd_totes, 0);
+              const naMeta = mediaOcup >= 80;
+
+              return (
+                <>
+                  <div className={`rounded-lg p-4 border ${naMeta ? 'bg-green-500/10 border-green-500/30' : 'bg-yellow-500/10 border-yellow-500/30'}`}>
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase font-bold mb-1">OCUPAÇÃO MÉDIA DO MÊS</p>
+                        <p className={`text-4xl font-black font-mono ${naMeta ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {mediaOcup.toFixed(2)}%
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {doMes.length} dia(s) · {totalTotes.toLocaleString('pt-BR')} totes no total
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400">Meta</p>
+                        <p className="text-2xl font-bold text-white">80%</p>
+                        <p className={`text-xs font-bold mt-1 ${naMeta ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {naMeta ? '✓ acima da meta' : '⚠️ abaixo da meta'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
+                          <th className="py-2 pr-2">Data</th>
+                          <th className="py-2 pr-2 text-right">Qtd Totes</th>
+                          <th className="py-2 pr-2 text-right">Ocupação</th>
+                          <th className="py-2 pr-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {doMes.map((o) => (
+                          <tr key={o.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a]">
+                            <td className="py-2 pr-2 text-white font-mono">{formatarDataCurta(o.data_referencia)}</td>
+                            <td className="py-2 pr-2 text-right text-gray-300 font-mono">{o.qtd_totes}</td>
+                            <td className={`py-2 pr-2 text-right font-mono font-bold ${o.ocupacao_pct >= 80 ? 'text-green-400' : 'text-yellow-400'}`}>
+                              {o.ocupacao_pct.toFixed(2)}%
+                            </td>
+                            <td className="py-2 pr-2">
+                              {o.ocupacao_pct >= 80 ? (
+                                <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-green-500/20 text-green-400">Na meta</span>
+                              ) : (
+                                <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-yellow-500/20 text-yellow-400">Abaixo</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 text-xs text-emerald-300">
+                    💡 <strong>Ocupação = eficiência do tempo</strong> (não quantidade de totes). 
+                    Quanto menos pausas/ociosidade durante o trabalho com totes, maior a ocupação.
+                  </div>
+                </>
+              );
+            })()
           )}
         </div>
       )}
