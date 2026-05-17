@@ -44,6 +44,7 @@ type DpmoEvento = {
   ano: number;
   mes: number;
   trimestre: string;
+  processo: string; // 'CK' ou 'P2M'
 };
 
 type DpmoAgregado = {
@@ -387,16 +388,24 @@ export default function DetalheColaboradorPage() {
   function calcularDpmoPorSemana(): DpmoSemana[] {
     const resultado: Record<string, DpmoSemana> = {};
 
+    // 🎯 PROCESSO PRINCIPAL — só pega dados desse processo
+    const procPrincipal = colaborador?.processo === 'Checkin' ? 'CK' : colaborador?.processo === 'P2M' ? 'P2M' : null;
+    if (!procPrincipal) return [];
+
+    // Filtra eventos só do processo principal
+    const eventosPrincipal = dpmoEventos.filter((e) => e.processo === procPrincipal);
+    const agregadoPrincipal = dpmoAgregado.filter((d) => d.processo === procPrincipal);
+
     // Acha data máxima do inventário (pra filtrar produtividade)
     let dataMaximaInventario = '';
-    dpmoEventos.forEach((e) => {
+    eventosPrincipal.forEach((e) => {
       if (e.checkin_data > dataMaximaInventario) {
         dataMaximaInventario = e.checkin_data;
       }
     });
 
     // 1. Pega DPMO POR SEMANA do AGREGADO (oficial Looker)
-    dpmoAgregado.forEach((d) => {
+    agregadoPrincipal.forEach((d) => {
       const chave = `${d.ano}-S${d.semana}`;
       if (!resultado[chave]) {
         resultado[chave] = {
@@ -404,7 +413,7 @@ export default function DetalheColaboradorPage() {
           semana: d.semana,
           defeitos: 0,
           unidades: 0,
-          dpmo: d.dpmo, // 🎯 Direto do Looker
+          dpmo: d.dpmo,
           diasAuditados: [],
           statusCalculo: 'completo',
         };
@@ -415,7 +424,7 @@ export default function DetalheColaboradorPage() {
     });
 
     // 2. Cruza com DETALHADO pra mostrar defeitos/unidades (informativo)
-    dpmoEventos.forEach((e) => {
+    eventosPrincipal.forEach((e) => {
       const chave = `${e.ano}-S${e.semana}`;
       if (!resultado[chave]) {
         resultado[chave] = {
@@ -449,6 +458,29 @@ export default function DetalheColaboradorPage() {
       return b.semana - a.semana;
     });
   }
+
+  // 🎯 Calcula DPMO/IMA do OUTRO processo (pra feedback adicional)
+  const dpmoOutroProcesso = (() => {
+    if (!colaborador) return null;
+    const procPrincipal = colaborador.processo === 'Checkin' ? 'CK' : colaborador.processo === 'P2M' ? 'P2M' : null;
+    if (!procPrincipal) return null;
+    
+    const outroProcesso = procPrincipal === 'CK' ? 'P2M' : 'CK';
+    const eventosOutro = dpmoEventos.filter((e) => e.processo === outroProcesso);
+    
+    if (eventosOutro.length === 0) return null;
+    
+    const totalDef = eventosOutro.reduce((s, e) => s + (e.qtd_dif || 0), 0);
+    const datasAuditadas = new Set(eventosOutro.map((e) => e.checkin_data));
+    
+    return {
+      processo: outroProcesso === 'CK' ? 'Checkin' : 'P2M',
+      processoSigla: outroProcesso,
+      defeitos: totalDef,
+      diasAuditados: datasAuditadas.size,
+      eventos: eventosOutro.length,
+    };
+  })();
 
   const dpmoPorSemana = calcularDpmoPorSemana();
   const semanasCompletas = dpmoPorSemana.filter((s) => s.statusCalculo === 'completo');
@@ -728,6 +760,43 @@ export default function DetalheColaboradorPage() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* 🎯 SEÇÃO FEEDBACK ADICIONAL — Trabalho em outro processo */}
+      {dpmoOutroProcesso && dpmoOutroProcesso.defeitos > 0 && (
+        <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/30 rounded-2xl p-6 space-y-3" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)' }}>
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">💬</span>
+            <div className="flex-1">
+              <h2 className="text-base font-bold text-amber-400">
+                Dados extras de {dpmoOutroProcesso.processo} — apenas pra feedback
+              </h2>
+              <p className="text-xs text-gray-400 mt-1">
+                Esse colaborador trabalhou em outro processo no período. <strong>Estes dados NÃO contam na calibração</strong>, apenas pra você dar feedback.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 mt-3">
+            <div className="bg-[#0a0a0a]/50 rounded-lg p-3 border border-amber-500/20">
+              <p className="text-xs text-gray-400 uppercase font-bold mb-1">Eventos</p>
+              <p className="text-2xl font-black text-amber-300 font-mono">{dpmoOutroProcesso.eventos}</p>
+            </div>
+            <div className="bg-[#0a0a0a]/50 rounded-lg p-3 border border-amber-500/20">
+              <p className="text-xs text-gray-400 uppercase font-bold mb-1">Defeitos</p>
+              <p className="text-2xl font-black text-red-400 font-mono">{dpmoOutroProcesso.defeitos}</p>
+            </div>
+            <div className="bg-[#0a0a0a]/50 rounded-lg p-3 border border-amber-500/20">
+              <p className="text-xs text-gray-400 uppercase font-bold mb-1">Dias auditados</p>
+              <p className="text-2xl font-black text-amber-300 font-mono">{dpmoOutroProcesso.diasAuditados}</p>
+            </div>
+          </div>
+
+          <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-200">
+            💡 <strong>Como usar:</strong> Esse colaborador é <strong>{colaborador.processo}</strong> mas teve atividade em <strong>{dpmoOutroProcesso.processo}</strong> no período. 
+            Use essa info no feedback: "Bom trabalho ajudando no {dpmoOutroProcesso.processo}!" mas continue focando o desenvolvimento dele no processo principal.
+          </div>
         </div>
       )}
 
