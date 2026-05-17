@@ -392,9 +392,9 @@ export default function CalibracaoPage() {
   }, [colaboradores, historico, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
 
   const porProcesso = {
-    Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
-    P2M: linhasCalibracao.filter((l) => l.processo === 'P2M').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
-    Sorting: linhasCalibracao.filter((l) => l.processo === 'Sorting').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+    Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0)),
+    P2M: linhasCalibracao.filter((l) => l.processo === 'P2M').sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0)),
+    Sorting: linhasCalibracao.filter((l) => l.processo === 'Sorting').sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0)),
   };
 
   const totalAptos = linhasCalibracao.filter((l) => l.aptidao === 'APTO').length;
@@ -459,50 +459,50 @@ export default function CalibracaoPage() {
 
     const procEmoji = processo === 'Checkin' ? '📦' : processo === 'P2M' ? '🚚' : '📋';
 
-    // 🎯 Acha a DATA MÁXIMA dos dados (até quando os dados foram puxados)
+    // 🎯 Acha a DATA MÁXIMA dos dados
     let dataMax = '';
     historico.forEach((h) => {
       if (h.data_referencia > dataMax) dataMax = h.data_referencia;
     });
     const dataMaxFormatada = dataMax ? new Date(dataMax + 'T12:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR');
 
-    const mesAtualNome = new Date().toLocaleDateString('pt-BR', { month: 'long' }).toUpperCase();
     const anoAtual = new Date().getFullYear();
+    const mesesTrim = mesesComDados; // Já vem filtrado: só os meses com dados
 
-    // 🎯 Definição de colunas de QUALIDADE por processo
-    // Checkin: só IMA (ocupação futura, ainda não tem CSV)
-    // P2M: IMA + Ocupação
-    // Sorting: nada
+    // 🎯 Ordena por LÍQUIDA do trimestre, do maior pro menor
+    const linhasOrdenadas = [...linhas].sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0));
+
+    // Definição de colunas de qualidade
     const temIma = processo === 'Checkin' || processo === 'P2M';
-    const temOcup = processo === 'P2M'; // Checkin não tem por enquanto
+    const temOcup = processo === 'P2M';
     const colsQualidade = (temIma ? 1 : 0) + (temOcup ? 1 : 0);
+
+    // 🎨 Cores SIMPLES: VERDE (na meta) + VERMELHO (abaixo)
+    function corStatus(valor: number, meta: number, inverso: boolean = false): string {
+      if (valor === 0) return '#6b7280';
+      if (inverso) return valor <= meta ? '#10b981' : '#ef4444';
+      return valor >= meta ? '#10b981' : '#ef4444';
+    }
+
+    // Largura dinâmica baseada em quantos meses + colunas
+    const numColsTotal = 1 + mesesTrim.length + colsQualidade + 1; // ID + meses + qualidade + trim
+    const widthBase = Math.max(600, numColsTotal * 110);
 
     const div = document.createElement('div');
     div.style.cssText = `
       position: fixed; top: -9999px; left: -9999px;
-      width: 700px; padding: 24px; background: #0a0a0a; color: white;
+      width: ${widthBase}px; padding: 24px; background: #0a0a0a; color: white;
       font-family: -apple-system, system-ui, sans-serif;
     `;
-
-    // 🎨 Cores simples: VERDE (na meta ou superando) + VERMELHO (abaixo)
-    function corStatus(valor: number, meta: number, inverso: boolean = false): string {
-      if (valor === 0) return '#6b7280'; // cinza (sem dados)
-      if (inverso) {
-        // IMA: quanto menor melhor
-        return valor <= meta ? '#10b981' : '#ef4444';
-      }
-      // Produtividade e Ocupação: quanto maior melhor
-      return valor >= meta ? '#10b981' : '#ef4444';
-    }
 
     div.innerHTML = `
       <!-- HEADER -->
       <div style="text-align: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 3px solid #FFD700;">
         <h1 style="color: #FFD700; font-size: 22px; font-weight: 900; margin: 0; letter-spacing: 1px;">
-          ${procEmoji} RESULTADOS ${processo.toUpperCase()} — ${mesAtualNome} ${anoAtual}
+          ${procEmoji} CALIBRAÇÃO ${processo.toUpperCase()} — TRIMESTRE ${quarterSel}
         </h1>
         <p style="color: #aaa; font-size: 12px; margin: 6px 0 0 0;">
-          📅 Dados puxados até ${dataMaxFormatada} · ${linhas.length} colaboradores · Trimestre ${quarterSel}
+          📅 Dados puxados até ${dataMaxFormatada} · ${linhas.length} colaboradores
         </p>
       </div>
 
@@ -514,8 +514,8 @@ export default function CalibracaoPage() {
             <th rowspan="2" style="padding: 10px 8px; text-align: center; background: #1a1a1a; color: #FFD700; font-size: 11px; font-weight: 900; border-bottom: 2px solid #FFD700; vertical-align: middle;">
               ID<br/>COLABORADOR
             </th>
-            <th colspan="1" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #FFD700, #d4a017); color: #000; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #FFD700;">
-              📈 PRODUTIVIDADE
+            <th colspan="${mesesTrim.length}" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #FFD700, #d4a017); color: #000; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #FFD700;">
+              📈 PRODUTIVIDADE (Líquida pç/h)
             </th>
             ${colsQualidade > 0 ? `
               <th colspan="${colsQualidade}" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #a855f7;">
@@ -528,7 +528,9 @@ export default function CalibracaoPage() {
           </tr>
           <!-- Linha de SUB-CABEÇALHOS -->
           <tr style="background: #1a1a1a;">
-            <th style="padding: 7px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #FFD700; font-size: 10px; font-weight: bold;">Líquida (pç/h)</th>
+            ${mesesTrim.map((m) => `
+              <th style="padding: 7px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #FFD700; font-size: 10px; font-weight: bold;">${NOMES_MESES[m]}</th>
+            `).join('')}
             ${temIma ? `
               <th style="padding: 7px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">IMA</th>
             ` : ''}
@@ -538,32 +540,43 @@ export default function CalibracaoPage() {
           </tr>
         </thead>
         <tbody>
-          ${linhas.map((l, idx) => {
+          ${linhasOrdenadas.map((l, idx) => {
             const isPar = idx % 2 === 0;
             const bg = isPar ? '#141414' : '#0f0f0f';
 
-            // PRODUTIVIDADE
-            const liq = l.liqTrim || 0;
+            // Líquida do TRIMESTRE
+            const liqTrim = l.liqTrim || 0;
             const metaL = processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
-            const corLiq = corStatus(liq, metaL);
+            const corTrim = corStatus(liqTrim, metaL);
+
+            // Células dos meses
+            const mesesCells = mesesTrim.map((m) => {
+              const liqMes = l.medMes[m]?.liq || 0;
+              const corMes = corStatus(liqMes, metaL);
+              return `
+                <td style="padding: 10px 6px; text-align: center; color: ${corMes}; font-family: monospace; font-weight: bold; font-size: 13px;">
+                  ${liqMes || '-'}
+                </td>
+              `;
+            }).join('');
 
             // IMA
             let imaHtml = '';
             if (temIma) {
               const ima = l.ima || 0;
               const metaI = processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
-              let corIma = '#6b7280', imaTxt = '⏳ aguarda';
+              let corIma = '#6b7280', imaTxt = '⏳';
               if (l.imaOrigem === 'aguardando') {
                 corIma = '#6b7280';
                 imaTxt = '⏳';
               } else if (ima > 0) {
-                corIma = corStatus(ima, metaI, true); // inverso (quanto menor melhor)
+                corIma = corStatus(ima, metaI, true);
                 imaTxt = ima.toLocaleString('pt-BR');
               }
               imaHtml = `<td style="padding: 10px 8px; text-align: center; color: ${corIma}; font-family: monospace; font-weight: bold; font-size: 13px;">${imaTxt}</td>`;
             }
 
-            // OCUPAÇÃO (só P2M por enquanto)
+            // OCUPAÇÃO (só P2M)
             let ocupHtml = '';
             if (temOcup) {
               const ocup = l.ocupTrim || 0;
@@ -579,10 +592,10 @@ export default function CalibracaoPage() {
             return `
               <tr style="background: ${bg}; border-bottom: 1px solid #2a2a2a;">
                 <td style="padding: 10px 8px; color: white; font-weight: bold; font-family: monospace; font-size: 13px; text-align: center;">${l.idGroot}</td>
-                <td style="padding: 10px 8px; text-align: center; color: ${corLiq}; font-family: monospace; font-weight: bold; font-size: 14px;">${liq || '-'}</td>
+                ${mesesCells}
                 ${imaHtml}
                 ${ocupHtml}
-                <td style="padding: 10px 8px; text-align: center; background: rgba(16, 185, 129, 0.08); color: ${corLiq}; font-family: monospace; font-weight: 900; font-size: 14px;">${liq || '-'}</td>
+                <td style="padding: 10px 8px; text-align: center; background: rgba(16, 185, 129, 0.08); color: ${corTrim}; font-family: monospace; font-weight: 900; font-size: 14px;">${liqTrim || '-'}</td>
               </tr>
             `;
           }).join('')}
@@ -613,7 +626,7 @@ export default function CalibracaoPage() {
       });
 
       const link = document.createElement('a');
-      link.download = `Resultados_${processo}_${mesAtualNome}_${anoAtual}.png`;
+      link.download = `Calibracao_${processo}_${quarterSel}_${anoAtual}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
 
