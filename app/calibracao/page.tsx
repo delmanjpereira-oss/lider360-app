@@ -246,16 +246,39 @@ export default function CalibracaoPage() {
           return false;
         });
 
-        // 2. Lista DATAS AUDITADAS (que têm inventário) desse colaborador no trimestre
-        const datasAuditadas = new Set<string>(eventosTrim.map((e) => e.checkin_data));
+        // 2. Acha a DATA MÁXIMA do inventário GERAL (de todos colaboradores)
+        //    Looker usa essa data como limite — não pega produtividade depois dela
+        let dataMaximaInventario = '';
+        dpmoEventos.forEach((d) => {
+          if (d.checkin_data > dataMaximaInventario) {
+            dataMaximaInventario = d.checkin_data;
+          }
+        });
 
-        // 3. Soma unidades APENAS das datas auditadas
+        // 3. Lista SEMANAS que têm inventário desse colaborador
+        const semanasComInventario = new Set<string>(
+          eventosTrim.map((e) => `${e.ano}-${e.semana}`)
+        );
+
+        // 4. Soma unidades das SEMANAS com inventário, MAS só dias ≤ data máxima geral
         const unidadesAuditadas = histColab
           .filter((h) => h.processo === c.processo)
-          .filter((h) => datasAuditadas.has(h.data_referencia))
+          .filter((h) => {
+            // Ignora dias depois da última auditoria
+            if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return false;
+            // Calcula semana ISO da data
+            const d = new Date(h.data_referencia + 'T12:00:00');
+            const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+            const diaDaSemana = utc.getUTCDay() || 7;
+            utc.setUTCDate(utc.getUTCDate() + 4 - diaDaSemana);
+            const inicioAno = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+            const semana = Math.ceil((((utc.getTime() - inicioAno.getTime()) / 86400000) + 1) / 7);
+            return semanasComInventario.has(`${utc.getUTCFullYear()}-${semana}`);
+          })
           .reduce((s, h) => s + (h.unidades || 0), 0);
 
         const totalDef = eventosTrim.reduce((s, d) => s + (d.qtd_dif || 0), 0);
+        const datasAuditadas = new Set<string>(eventosTrim.map((e) => e.checkin_data));
 
         // Calcula só se tem os 2 dados
         if (unidadesAuditadas > 0 && eventosTrim.length > 0) {
@@ -407,7 +430,7 @@ export default function CalibracaoPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-4xl font-black mb-2">🎯 Calibração <span className="text-[#FFD700]">Trimestral</span></h1>
-        <p className="text-gray-400">IMA = (Σ Defeitos / Σ Unidades dos dias auditados) × 1M · Bate 100% Looker</p>
+        <p className="text-gray-400">IMA = (Σ Defeitos / Σ Unidades das semanas auditadas) × 1M · Bate 100% Looker</p>
       </div>
 
       {trimestresDisponiveis.length === 0 ? (
@@ -581,11 +604,11 @@ export default function CalibracaoPage() {
           })}
 
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
-            <p className="font-bold mb-2">💡 Cálculo inteligente:</p>
+            <p className="font-bold mb-2">💡 Cálculo igual Looker:</p>
             <ul className="space-y-1 list-disc pl-5 text-xs">
-              <li><strong>IMA</strong> = Σ Defeitos (INVENTÁRIO) ÷ Σ Unidades (PRODUTIVIDADE só dos dias auditados) × 1M</li>
-              <li>Se a produtividade está mais adiantada que o inventário, app <strong>ignora os dias sem auditoria</strong></li>
-              <li>Garante que o IMA bate <strong>100% com Looker</strong></li>
+              <li><strong>IMA</strong> = Σ Defeitos ÷ Σ Unidades das semanas auditadas <strong>até a última data com inventário</strong></li>
+              <li>Ignora dias de produtividade <strong>depois</strong> da última auditoria (mesmo se tem no banco)</li>
+              <li>Ex: produtividade até 16/05 + inventário até 15/05 → usa unidades só até 15/05</li>
               <li><strong>QUE</strong> = Líquida + Ocupação + IMA (3 pontos: Supera / 1-2: Alinhado / 0: Abaixo)</li>
               <li><strong>COMO</strong> = derivado dos feedbacks. Pode SOBRESCREVER clicando</li>
               <li><strong>APTIDÃO</strong>: QUE=Supera + COMO≥Alinhado → APTO | Algum Abaixo → NÃO APTO | Resto → EM OBSERVAÇÃO</li>
