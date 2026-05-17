@@ -392,9 +392,9 @@ export default function CalibracaoPage() {
   }, [colaboradores, historico, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
 
   const porProcesso = {
-    Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0)),
-    P2M: linhasCalibracao.filter((l) => l.processo === 'P2M').sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0)),
-    Sorting: linhasCalibracao.filter((l) => l.processo === 'Sorting').sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0)),
+    Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+    P2M: linhasCalibracao.filter((l) => l.processo === 'P2M').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+    Sorting: linhasCalibracao.filter((l) => l.processo === 'Sorting').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
   };
 
   const totalAptos = linhasCalibracao.filter((l) => l.aptidao === 'APTO').length;
@@ -522,7 +522,7 @@ export default function CalibracaoPage() {
                 🎯 QUALIDADE
               </th>
             ` : ''}
-            <th rowspan="2" style="padding: 10px 8px; text-align: center; background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 900; font-size: 11px; letter-spacing: 1px; border: 1px solid #10b981; vertical-align: middle;">
+            <th rowspan="2" style="padding: 12px 10px; text-align: center; background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 900; font-size: 12px; letter-spacing: 1px; border: 1px solid #10b981; vertical-align: middle; min-width: 90px;">
               🏆<br/>TRIMESTRE
             </th>
           </tr>
