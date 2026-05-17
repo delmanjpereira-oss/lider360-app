@@ -516,24 +516,26 @@ export default function BoletimPage() {
                   onClick={() => setNetRealizadoManual(null)}
                   className="text-[10px] bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 px-2 py-0.5 rounded-full font-bold transition-colors"
                   title="Voltar ao cálculo automático"
+                  data-html2canvas-ignore="true"
                 >
                   🔄 Auto
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="text-center">
+            <div className="grid grid-cols-3 gap-2" style={{ minHeight: '70px' }}>
+              <div className="text-center flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">Meta</div>
                 <input
                   type="number"
                   value={metas.netCT}
                   onChange={(e) => salvarMetas({ ...metas, netCT: Number(e.target.value) })}
                   className="w-full bg-transparent text-2xl font-black text-yellow-300 font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded"
+                  style={{ lineHeight: '1.2', padding: '0' }}
                 />
               </div>
-              <div className="text-center border-x border-yellow-500/20">
+              <div className="text-center border-x border-yellow-500/20 flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">
-                  Realizado {netRealizadoManual !== null && <span className="text-yellow-400">✏️</span>}
+                  Realizado <span className="text-yellow-400" data-html2canvas-ignore="true">{netRealizadoManual !== null ? '✏️' : ''}</span>
                 </div>
                 <input
                   type="number"
@@ -546,11 +548,12 @@ export default function BoletimPage() {
                   className={`w-full bg-transparent text-2xl font-black font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded ${
                     netRealizado >= metas.netCT && netRealizado > 0 ? 'text-green-400' : netRealizado > 0 ? 'text-red-400' : 'text-gray-500'
                   }`}
+                  style={{ lineHeight: '1.2', padding: '0' }}
                 />
               </div>
-              <div className="text-center">
+              <div className="text-center flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">Diferença</div>
-                <div className={`text-2xl font-black font-mono ${difNet >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                <div className={`text-2xl font-black font-mono ${difNet >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ lineHeight: '1.2' }}>
                   {netRealizado > 0 ? (difNet >= 0 ? `+${difNet}` : difNet) : '-'}
                 </div>
               </div>
@@ -568,24 +571,26 @@ export default function BoletimPage() {
                   onClick={() => setPecasRealizadoManual(null)}
                   className="text-[10px] bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 px-2 py-0.5 rounded-full font-bold transition-colors"
                   title="Voltar ao cálculo automático"
+                  data-html2canvas-ignore="true"
                 >
                   🔄 Auto
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="text-center">
+            <div className="grid grid-cols-3 gap-2" style={{ minHeight: '70px' }}>
+              <div className="text-center flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">Meta</div>
                 <input
                   type="number"
                   value={metas.totalPecas}
                   onChange={(e) => salvarMetas({ ...metas, totalPecas: Number(e.target.value) })}
                   className="w-full bg-transparent text-2xl font-black text-purple-300 font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded"
+                  style={{ lineHeight: '1.2', padding: '0' }}
                 />
               </div>
-              <div className="text-center border-x border-purple-500/20">
+              <div className="text-center border-x border-purple-500/20 flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">
-                  Realizado {pecasRealizadoManual !== null && <span className="text-purple-400">✏️</span>}
+                  Realizado <span className="text-purple-400" data-html2canvas-ignore="true">{pecasRealizadoManual !== null ? '✏️' : ''}</span>
                 </div>
                 <input
                   type="number"
@@ -598,11 +603,12 @@ export default function BoletimPage() {
                   className={`w-full bg-transparent text-2xl font-black font-mono text-center focus:outline-none focus:bg-[#0a0a0a]/50 rounded ${
                     totalPecasRealizado >= metas.totalPecas && metas.totalPecas > 0 && totalPecasRealizado > 0 ? 'text-green-400' : totalPecasRealizado > 0 ? 'text-red-400' : 'text-gray-500'
                   }`}
+                  style={{ lineHeight: '1.2', padding: '0' }}
                 />
               </div>
-              <div className="text-center">
+              <div className="text-center flex flex-col items-center justify-center">
                 <div className="text-xs text-gray-400 uppercase font-bold mb-1">Diferença</div>
-                <div className={`text-2xl font-black font-mono ${difPecas >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                <div className={`text-2xl font-black font-mono ${difPecas >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ lineHeight: '1.2' }}>
                   {totalPecasRealizado > 0 && metas.totalPecas > 0 ? (difPecas >= 0 ? `+${difPecas.toLocaleString('pt-BR')}` : difPecas.toLocaleString('pt-BR')) : '-'}
                 </div>
               </div>
