@@ -494,7 +494,7 @@ export default function CalibracaoPage() {
         );
 
         // 4. Soma unidades das SEMANAS com inventário, MAS só dias ≤ data máxima geral
-        const unidadesAuditadas = histColab
+        const unidadesAuditadasDiarias = histColab
           .filter((h) => h.processo === c.processo)
           .filter((h) => {
             // Ignora dias depois da última auditoria
@@ -509,6 +509,32 @@ export default function CalibracaoPage() {
             return semanasComInventario.has(`${utc.getUTCFullYear()}-${semana}`);
           })
           .reduce((s, h) => s + (h.unidades || 0), 0);
+
+        // 🎯 COMPLEMENTAR com unidades do CSV MENSAL pra meses sem diário
+        // Soma as unidades de todos os meses do trimestre que vieram pelo mensal
+        const unidadesAuditadasMensal = produtividadeMensal
+          .filter((p) => {
+            if (Number(p.ano) !== anoNum) return false;
+            const pTrim = String(p.trimestre || '').trim().toUpperCase();
+            if (pTrim !== quarterSel) return false;
+            if (!processosIguais(p.processo, c.processo)) return false;
+            
+            // Vincula por ID ou nome
+            if (p.id_groot && c.id_groot && String(p.id_groot).trim() === String(c.id_groot).trim()) {
+              return true;
+            }
+            if (p.nome && nomesIguais(p.nome, c.nome)) {
+              return true;
+            }
+            return false;
+          })
+          .reduce((s, p) => s + (Number(p.unidades_total) || 0), 0);
+
+        const unidadesAuditadas = unidadesAuditadasDiarias + unidadesAuditadasMensal;
+        
+        if (idx < 3) {
+          console.log(`📊 [${c.nome}] IMA Trim: diário=${unidadesAuditadasDiarias} + mensal=${unidadesAuditadasMensal} = ${unidadesAuditadas} unidades`);
+        }
 
         const totalDef = eventosTrim.reduce((s, d) => s + (d.qtd_dif || 0), 0);
         const datasAuditadas = new Set<string>(eventosTrim.map((e) => e.checkin_data));
@@ -528,8 +554,13 @@ export default function CalibracaoPage() {
 
         // 🎯 CÁLCULO IMA POR MÊS — Looker style ponderado
         mesesPossiveis.forEach((mes) => {
-          // Defeitos só do mês X
-          const eventosMes = eventosTrim.filter((e) => e.mes === mes);
+          // Defeitos só do mês X (compara como número pra evitar bug string/number)
+          const eventosMes = eventosTrim.filter((e) => Number(e.mes) === Number(mes));
+          
+          if (idx < 3 && eventosTrim.length > 0) {
+            console.log(`📅 [${c.nome}] Mês ${mes}: ${eventosMes.length} eventos DPMO de ${eventosTrim.length} total`);
+          }
+          
           if (eventosMes.length === 0) {
             medMes[mes].ima = 0;
             return;
