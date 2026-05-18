@@ -301,16 +301,21 @@ export default function CalibracaoPage() {
       }
     });
     
-    // 🎯 4. DPMO agregado (semanal Looker) - usa semana pra inferir mês
+    // 🎯 4. DPMO agregado (semanal Looker) - deduz mês pela semana ISO
     dpmoAgregado.forEach((d) => {
       const dAno = Number(d.ano);
       const dTrim = String(d.trimestre || '').trim().toUpperCase();
       const trimSel = String(quarterSel || '').toUpperCase();
-      if (dAno === anoNum && dTrim === trimSel) {
-        // Pega TODOS os meses do trimestre selecionado
-        // (sem semana exata, melhor mostrar todos do trim)
-        const mesesTrim = MESES_POR_TRIM[quarterSel] || [];
-        mesesTrim.forEach((m) => set.add(m));
+      if (dAno === anoNum && dTrim === trimSel && d.semana) {
+        // Calcula o mês a partir da semana ISO
+        // Semana N do ano → data da quinta-feira → mês
+        const semana = Number(d.semana);
+        // Data: 4 de janeiro + (semana - 1) * 7 dias (referência ISO 8601)
+        const dataRef = new Date(dAno, 0, 4 + (semana - 1) * 7);
+        const mesDaSemana = dataRef.getMonth() + 1;
+        if (mesDaSemana >= 1 && mesDaSemana <= 12) {
+          set.add(mesDaSemana);
+        }
       }
     });
     
@@ -533,8 +538,8 @@ export default function CalibracaoPage() {
           const defMes = eventosMes.reduce((s, e) => s + (e.qtd_dif || 0), 0);
           const semanasMes = new Set<string>(eventosMes.map((e) => `${e.ano}-${e.semana}`));
 
-          // Unidades só dos dias do mês X
-          const unidadesMes = histColab
+          // Unidades só dos dias do mês X (do histórico diário)
+          const unidadesDiarias = histColab
             .filter((h) => h.processo === c.processo)
             .filter((h) => {
               if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return false;
@@ -550,6 +555,21 @@ export default function CalibracaoPage() {
               return semanasMes.has(`${utc.getUTCFullYear()}-${sem}`);
             })
             .reduce((s, h) => s + (h.unidades || 0), 0);
+
+          // 🎯 COMPLEMENTAR com unidades do CSV MENSAL se não tiver no diário
+          // Usado pra meses passados onde só veio o consolidado (ex: Abril)
+          let unidadesMensal = 0;
+          if (unidadesDiarias === 0) {
+            const prodMensalMes = produtividadeMensal.filter((p) => {
+              return Number(p.mes) === mes 
+                && Number(p.ano) === anoNum
+                && p.id_groot === c.id_groot
+                && processosIguais(p.processo, c.processo);
+            });
+            unidadesMensal = prodMensalMes.reduce((s, p) => s + (Number(p.unidades_total) || 0), 0);
+          }
+
+          const unidadesMes = unidadesDiarias + unidadesMensal;
 
           if (unidadesMes > 0) {
             medMes[mes].ima = Math.round((defMes / unidadesMes) * 1_000_000);
