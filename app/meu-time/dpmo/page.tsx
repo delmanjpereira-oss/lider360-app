@@ -256,8 +256,8 @@ export default function DpmoPage() {
     const eventos: EventoDetalhado[] = [];
 
     linhas.forEach((linha, idx) => {
-      const dataHora = pegarValor(linha, ['CHECKIN_DATE_TIME', 'data']);
-      const user = pegarValor(linha, ['CHECKIN_USER', 'user']);
+      const dataHora = pegarValor(linha, ['CHECKIN_DATE_TIME', 'PICK_DATE_TIME', 'data']);
+      const user = pegarValor(linha, ['CHECKIN_USER', 'PICK_USER', 'user']);
       const representante = pegarValor(linha, ['REPRESENTANTE', 'nome']);
       const is = pegarValor(linha, ['IS', 'inbound']);
       const sku = pegarValor(linha, ['SKU']);
