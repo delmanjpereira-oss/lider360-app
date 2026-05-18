@@ -3,9 +3,9 @@
  * API: /api/ia/perfil/[id]
  * app/api/ia/perfil/[id]/route.ts
  *
- * Gera relatório comportamental usando a IA Especialista
+ * Gera relatório comportamental usando a IA Especialista (Groq + Llama)
  * - Verifica cache (válido por 24h)
- * - Se não existe ou expirou, gera via Gemini
+ * - Se não existe ou expirou, gera via Groq
  * - Salva no cache (tabela ia_insights)
  *
  * Query param: ?force=1  → ignora cache e gera novo
@@ -27,6 +27,7 @@ export const maxDuration = 60;
 
 const TIPO_CACHE = 'perfil';
 const CACHE_HORAS = 24;
+const MODELO_USADO = 'llama-3.3-70b-versatile (Groq)';
 
 export async function GET(
   request: Request,
@@ -119,16 +120,14 @@ CONTEXTO DO COLABORADOR:
 ${contextoMarkdown}`;
 
     // ─────────────────────────────────────
-    // 4) CHAMAR GEMINI
+    // 4) CHAMAR IA (Groq + Llama)
     // ─────────────────────────────────────
-    const modelo = 'gemini-2.0-flash';
     const relatorio = await chamarGemini(
       [{ role: 'user', content: prompt }],
       {
         systemPrompt: SYSTEM_PROMPT_BASE,
         temperature: 0.7,
         maxTokens: 4096,
-        modelo,
       }
     );
 
@@ -145,7 +144,7 @@ ${contextoMarkdown}`;
         tipo: TIPO_CACHE,
         conteudo: relatorio,
         cadastro_snapshot: contexto.cadastro,
-        modelo,
+        modelo: MODELO_USADO,
         gerado_em: agora.toISOString(),
         valido_ate: validoAte.toISOString(),
       },
@@ -160,7 +159,7 @@ ${contextoMarkdown}`;
     return NextResponse.json({
       cadastro: contexto.cadastro,
       relatorio,
-      modelo,
+      modelo: MODELO_USADO,
       geradoEm: agora.toISOString(),
       validoAte: validoAte.toISOString(),
       fromCache: false,
