@@ -68,18 +68,69 @@ function normalizarNome(nome: string): string {
 
 function parseDataCsv(str: string): Date | null {
   if (!str) return null;
+  const s = String(str).trim();
+
+  // Formato 1: "17 de mai. de 2026, 14:30:00" (Looker pt-BR)
   const meses: Record<string, number> = {
     jan: 0, fev: 1, mar: 2, abr: 3, mai: 4, jun: 5,
     jul: 6, ago: 7, set: 8, out: 9, nov: 10, dez: 11,
   };
-  const m = str.match(/(\d+)\s+de\s+(\w+)\.?\s+de\s+(\d+),?\s*(\d+):(\d+):(\d+)?/);
-  if (!m) return null;
-  const dia = parseInt(m[1]);
-  const mesAbrev = m[2].toLowerCase().substring(0, 3);
-  const mes = meses[mesAbrev];
-  const ano = parseInt(m[3]);
-  if (mes === undefined) return null;
-  return new Date(ano, mes, dia, parseInt(m[4] || '0'), parseInt(m[5] || '0'), parseInt(m[6] || '0'));
+  const m1 = s.match(/(\d+)\s+de\s+(\w+)\.?\s+de\s+(\d+),?\s*(\d+):(\d+):(\d+)?/);
+  if (m1) {
+    const dia = parseInt(m1[1]);
+    const mesAbrev = m1[2].toLowerCase().substring(0, 3);
+    const mes = meses[mesAbrev];
+    if (mes !== undefined) {
+      const ano = parseInt(m1[3]);
+      return new Date(ano, mes, dia, parseInt(m1[4] || '0'), parseInt(m1[5] || '0'), parseInt(m1[6] || '0'));
+    }
+  }
+
+  // Formato 2: "2026-05-17 14:30:00" ou "2026-05-17T14:30:00" (ISO)
+  const m2 = s.match(/(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2}):?(\d{0,2})/);
+  if (m2) {
+    return new Date(
+      parseInt(m2[1]),
+      parseInt(m2[2]) - 1,
+      parseInt(m2[3]),
+      parseInt(m2[4]),
+      parseInt(m2[5]),
+      parseInt(m2[6] || '0')
+    );
+  }
+
+  // Formato 3: "17/05/2026 14:30:00" ou "17/05/2026, 14:30" (BR)
+  const m3 = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})[,\s]+(\d{1,2}):(\d{1,2}):?(\d{0,2})/);
+  if (m3) {
+    return new Date(
+      parseInt(m3[3]),
+      parseInt(m3[2]) - 1,
+      parseInt(m3[1]),
+      parseInt(m3[4]),
+      parseInt(m3[5]),
+      parseInt(m3[6] || '0')
+    );
+  }
+
+  // Formato 4: "17/05/2026" (só data, sem hora)
+  const m4 = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m4) {
+    return new Date(parseInt(m4[3]), parseInt(m4[2]) - 1, parseInt(m4[1]));
+  }
+
+  // Formato 5: "2026-05-17" (ISO date)
+  const m5 = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m5) {
+    return new Date(parseInt(m5[1]), parseInt(m5[2]) - 1, parseInt(m5[3]));
+  }
+
+  // Última tentativa: Date.parse
+  const tentativa = new Date(s);
+  if (!isNaN(tentativa.getTime())) {
+    return tentativa;
+  }
+
+  return null;
 }
 
 function getSemanaIso(data: Date): { semana: number; ano: number } {
@@ -254,8 +305,20 @@ export default function DpmoPage() {
 
   function processarDetalhado(mapaCadastro: Record<string, ColaboradorMap>) {
     const eventos: EventoDetalhado[] = [];
+    let totalLinhas = 0;
+    let semData = 0;
+    let semRepresentante = 0;
+    let semIS = 0;
+    let semSKU = 0;
+
+    // Log da primeira linha pra debug
+    if (linhas.length > 0) {
+      console.log('📋 Primeira linha do CSV:', linhas[0]);
+      console.log('📋 Headers detectados:', Object.keys(linhas[0]));
+    }
 
     linhas.forEach((linha, idx) => {
+      totalLinhas++;
       const dataHora = pegarValor(linha, ['CHECKIN_DATE_TIME', 'PICK_DATE_TIME', 'data']);
       const user = pegarValor(linha, ['CHECKIN_USER', 'PICK_USER', 'user']);
       const representante = pegarValor(linha, ['REPRESENTANTE', 'nome']);
@@ -263,8 +326,25 @@ export default function DpmoPage() {
       const sku = pegarValor(linha, ['SKU']);
 
       const data = parseDataCsv(dataHora);
+      
+      // Logs detalhados de erros
+      if (idx < 3) {
+        console.log(`🔍 Linha ${idx + 1}:`, {
+          dataHoraOriginal: dataHora,
+          dataParseada: data,
+          user,
+          representante,
+          is,
+          sku,
+        });
+      }
+
+      if (!data) semData++;
+      if (!representante) semRepresentante++;
+      if (!is) semIS++;
+      if (!sku) semSKU++;
+
       if (!data || !representante || !is || !sku) {
-        if (idx < 3) console.warn(`Linha ${idx + 1} inválida:`, linha);
         return;
       }
 
@@ -301,8 +381,25 @@ export default function DpmoPage() {
       });
     });
 
+    // Log final do resumo
+    console.log('📊 Resumo do processamento DPMO:', {
+      totalLinhas,
+      eventosValidos: eventos.length,
+      semData,
+      semRepresentante,
+      semIS,
+      semSKU,
+    });
+
     if (eventos.length === 0) {
-      setErro('Nenhum evento válido detectado.');
+      const motivos = [];
+      if (semData > 0) motivos.push(`${semData} linhas sem data válida`);
+      if (semRepresentante > 0) motivos.push(`${semRepresentante} sem representante`);
+      if (semIS > 0) motivos.push(`${semIS} sem IS`);
+      if (semSKU > 0) motivos.push(`${semSKU} sem SKU`);
+      
+      const detalhes = motivos.length > 0 ? `\n\n📋 Motivos: ${motivos.join(', ')}` : '';
+      setErro(`Nenhum evento válido detectado de ${totalLinhas} linhas.${detalhes}\n\n🔍 Abra o F12 (Console) pra ver os detalhes de cada linha.`);
     } else {
       setEventosDetalhados(eventos);
     }
