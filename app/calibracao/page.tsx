@@ -237,8 +237,18 @@ export default function CalibracaoPage() {
       const { ano, mes, quarter } = getTrimestreDeData(h.data_referencia);
       if (ano === anoNum && quarter === quarterSel) set.add(mes);
     });
+    // 🎯 Considera também o CSV mensal consolidado
+    produtividadeMensal.forEach((p) => {
+      const pAno = Number(p.ano);
+      const pTrim = String(p.trimestre || '').trim().toUpperCase();
+      const trimSel = String(quarterSel || '').toUpperCase();
+      if (pAno === anoNum && pTrim === trimSel && p.mes) {
+        set.add(Number(p.mes));
+      }
+    });
+    console.log('📊 Meses com dados:', Array.from(set).sort(), '| Trimestre:', quarterSel);
     return mesesPossiveis.filter((m) => set.has(m)).sort();
-  }, [historico, anoNum, quarterSel, mesesPossiveis]);
+  }, [historico, produtividadeMensal, anoNum, quarterSel, mesesPossiveis]);
 
   const linhasCalibracao: LinhaCalib[] = useMemo(() => {
     if (!quarterSel) return [];
