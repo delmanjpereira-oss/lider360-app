@@ -64,10 +64,139 @@ export default function ConfiguracoesAppPage() {
   const [loading, setLoading] = useState(true);
   const [apagandoTudo, setApagandoTudo] = useState(false);
   const [confirmacaoApagarTudo, setConfirmacaoApagarTudo] = useState('');
+  
+  // 🎯 States pra duplicatas
+  const [duplicatas, setDuplicatas] = useState<any[]>([]);
+  const [buscandoDup, setBuscandoDup] = useState(false);
+  const [limpandoDup, setLimpandoDup] = useState(false);
+  const [mensagemDup, setMensagemDup] = useState<string | null>(null);
 
   useEffect(() => {
     carregar();
   }, []);
+  
+  // 🎯 Procura duplicatas no histórico
+  async function buscarDuplicatas() {
+    setBuscandoDup(true);
+    setMensagemDup(null);
+    setDuplicatas([]);
+    
+    try {
+      // Pagina pra pegar TODO o histórico
+      const todos: any[] = [];
+      const PAGE = 1000;
+      let pagina = 0;
+      
+      while (true) {
+        const { data, error } = await supabase
+          .from('historico')
+          .select('id, id_groot, data_referencia, processo, unidades, prod_liquida, arquivo_origem, criado_em')
+          .range(pagina * PAGE, pagina * PAGE + PAGE - 1)
+          .order('criado_em', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) break;
+        
+        todos.push(...data);
+        if (data.length < PAGE) break;
+        pagina++;
+        if (pagina > 50) break;
+      }
+      
+      // Agrupa por (id_groot + data + processo)
+      const grupos: Record<string, any[]> = {};
+      todos.forEach((h) => {
+        if (!h.id_groot) return;
+        const chave = `${h.id_groot}|${h.data_referencia}|${h.processo}`;
+        if (!grupos[chave]) grupos[chave] = [];
+        grupos[chave].push(h);
+      });
+      
+      // Filtra só os que têm mais de 1
+      const dups: any[] = [];
+      Object.entries(grupos).forEach(([chave, registros]) => {
+        if (registros.length > 1) {
+          const [id_groot, data_referencia, processo] = chave.split('|');
+          const totalSomado = registros.reduce((s, r) => s + (Number(r.unidades) || 0), 0);
+          const valorCorreto = Number(registros[0].unidades) || 0;
+          dups.push({
+            id_groot,
+            data_referencia,
+            processo,
+            duplicatas: registros.length,
+            total_somado: totalSomado,
+            valor_correto: valorCorreto,
+            arquivos: Array.from(new Set(registros.map((r) => r.arquivo_origem))),
+          });
+        }
+      });
+      
+      // Busca nomes
+      if (dups.length > 0) {
+        const ids = Array.from(new Set(dups.map((d) => d.id_groot)));
+        const { data: colabs } = await supabase
+          .from('colaboradores')
+          .select('id_groot, nome')
+          .in('id_groot', ids);
+        
+        if (colabs) {
+          const nomeMap: Record<string, string> = {};
+          colabs.forEach((c: any) => { nomeMap[c.id_groot] = c.nome; });
+          dups.forEach((d) => { d.nome_colab = nomeMap[d.id_groot] || 'Desconhecido'; });
+        }
+      }
+      
+      dups.sort((a, b) => b.duplicatas - a.duplicatas);
+      setDuplicatas(dups);
+      
+      if (dups.length === 0) {
+        setMensagemDup('✅ Nenhuma duplicata! Banco limpo.');
+      } else {
+        setMensagemDup(`⚠️ ${dups.length} duplicatas detectadas no histórico.`);
+      }
+    } catch (e: any) {
+      setMensagemDup('❌ Erro: ' + e.message);
+    } finally {
+      setBuscandoDup(false);
+    }
+  }
+  
+  // 🎯 Limpa duplicatas mantendo só o mais recente
+  async function limparDuplicatas() {
+    if (!confirm(`⚠️ Vai apagar duplicatas mantendo SÓ o registro mais recente.\n\n${duplicatas.length} grupos serão limpos.\n\nConfirma?`)) return;
+    
+    setLimpandoDup(true);
+    let apagados = 0;
+    let erros = 0;
+    
+    try {
+      for (const d of duplicatas) {
+        const { data: registros } = await supabase
+          .from('historico')
+          .select('id, criado_em')
+          .eq('id_groot', d.id_groot)
+          .eq('data_referencia', d.data_referencia)
+          .eq('processo', d.processo)
+          .order('criado_em', { ascending: false });
+        
+        if (!registros || registros.length <= 1) continue;
+        
+        const idsParaApagar = registros.slice(1).map((r: any) => r.id);
+        const { error } = await supabase.from('historico').delete().in('id', idsParaApagar);
+        
+        if (error) erros++;
+        else apagados += idsParaApagar.length;
+      }
+      
+      setMensagemDup(`✅ ${apagados} registros duplicados apagados! ${erros} erros.`);
+      setDuplicatas([]);
+      carregar();
+    } catch (e: any) {
+      setMensagemDup('❌ Erro: ' + e.message);
+    } finally {
+      setLimpandoDup(false);
+    }
+  }
 
   async function carregar() {
     setLoading(true);
@@ -358,6 +487,97 @@ export default function ConfiguracoesAppPage() {
           </div>
         </div>
       )}
+
+      {/* 🔧 Manutenção / Duplicatas */}
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-6">
+        <h2 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+          🔧 Manutenção do Banco
+        </h2>
+        <p className="text-sm text-gray-400 mb-4">
+          Detecta e limpa registros duplicados no histórico (mesmo colaborador, mesmo dia, mesmo processo).
+          <br />Isso acontece quando você sobe o mesmo CSV mais de uma vez.
+        </p>
+
+        {mensagemDup && (
+          <div className={`rounded-lg p-3 mb-4 text-sm font-bold ${
+            mensagemDup.startsWith('✅') ? 'bg-green-500/10 border border-green-500/40 text-green-300' :
+            mensagemDup.startsWith('⚠️') ? 'bg-yellow-500/10 border border-yellow-500/40 text-yellow-300' :
+            'bg-red-500/10 border border-red-500/40 text-red-300'
+          }`}>
+            {mensagemDup}
+          </div>
+        )}
+
+        <div className="flex gap-3 mb-4 flex-wrap">
+          <button
+            onClick={buscarDuplicatas}
+            disabled={buscandoDup}
+            className="bg-cyan-500 hover:bg-cyan-400 text-white font-bold py-2 px-4 rounded-lg transition-all disabled:opacity-50"
+          >
+            {buscandoDup ? '🔍 Procurando...' : '🔍 Procurar duplicatas'}
+          </button>
+          
+          {duplicatas.length > 0 && (
+            <button
+              onClick={limparDuplicatas}
+              disabled={limpandoDup}
+              className="bg-red-500 hover:bg-red-400 text-white font-bold py-2 px-4 rounded-lg transition-all disabled:opacity-50"
+            >
+              {limpandoDup ? '🗑️ Apagando...' : `🗑️ Limpar ${duplicatas.length} duplicatas`}
+            </button>
+          )}
+        </div>
+
+        {duplicatas.length > 0 && (
+          <div className="border border-red-500/30 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-red-500/10 text-red-300">
+                  <tr>
+                    <th className="p-2 text-left">Colab</th>
+                    <th className="p-2 text-left">Data</th>
+                    <th className="p-2 text-left">Processo</th>
+                    <th className="p-2 text-center">Cópias</th>
+                    <th className="p-2 text-right">Soma errada</th>
+                    <th className="p-2 text-right">Valor correto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {duplicatas.slice(0, 30).map((d, i) => (
+                    <tr key={i} className="border-t border-[#2a2a2a] hover:bg-[#0a0a0a]">
+                      <td className="p-2 text-white font-bold whitespace-nowrap">{d.nome_colab}</td>
+                      <td className="p-2 text-gray-400 whitespace-nowrap">{d.data_referencia}</td>
+                      <td className="p-2">
+                        <span className={`text-xs px-2 py-0.5 rounded font-bold ${
+                          d.processo === 'Checkin' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-orange-500/20 text-orange-300'
+                        }`}>
+                          {d.processo}
+                        </span>
+                      </td>
+                      <td className="p-2 text-center">
+                        <span className="bg-red-500/20 text-red-300 px-2 py-0.5 rounded font-bold">
+                          {d.duplicatas}x
+                        </span>
+                      </td>
+                      <td className="p-2 text-right text-red-400 font-mono">
+                        {d.total_somado.toLocaleString('pt-BR')}
+                      </td>
+                      <td className="p-2 text-right text-green-400 font-mono">
+                        {d.valor_correto.toLocaleString('pt-BR')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {duplicatas.length > 30 && (
+              <p className="p-3 text-xs text-gray-500 text-center bg-[#0a0a0a]">
+                Mostrando 30 de {duplicatas.length}. O botão "Limpar" resolve TODAS.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Zona de Perigo */}
       <div
