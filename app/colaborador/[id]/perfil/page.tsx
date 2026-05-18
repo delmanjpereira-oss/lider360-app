@@ -3,7 +3,7 @@
 /**
  * ====================================================
  * TELA: Perfil Comportamental (gerado pela IA)
- * URL: /colaborador/[id]/perfil
+ * app/colaborador/[id]/perfil/page.tsx
  *
  * Busca: GET /api/ia/perfil/[id]
  * Renderiza relatório narrativo em markdown
