@@ -624,6 +624,11 @@ export default function CalibracaoPage() {
 
           if (unidadesMes > 0) {
             medMes[mes].ima = Math.round((defMes / unidadesMes) * 1_000_000);
+            if (idx < 5) {
+              console.log(`🔥 [${c.nome}] IMA MÊS ${mes} CALCULADO: ${medMes[mes].ima} (def=${defMes}, unid=${unidadesMes})`);
+            }
+          } else if (idx < 5) {
+            console.warn(`⚠️ [${c.nome}] IMA Mês ${mes}: unidades=0, IMA não calcula! (def=${defMes})`);
           }
         });
       }
