@@ -121,6 +121,7 @@ function corAptidao(apt: string): string {
 export default function CalibracaoPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
+  const [produtividadeMensal, setProdutividadeMensal] = useState<any[]>([]);
   const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
   const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
   const [ocupacaoP2M, setOcupacaoP2M] = useState<OcupacaoP2MTipo[]>([]);
@@ -138,9 +139,10 @@ export default function CalibracaoPage() {
   async function carregar() {
     setLoading(true);
     try {
-      const [colabResp, histResp, dpmoResp, dpmoAggResp, ocupResp, fbResp, confResp] = await Promise.all([
+      const [colabResp, histResp, prodMensalResp, dpmoResp, dpmoAggResp, ocupResp, fbResp, confResp] = await Promise.all([
         supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
         supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
+        supabase.from('produtividade_mensal').select('id_groot, mes, ano, trimestre, processo, prod_liquida_media, unidades_total, dias_trabalhados'),
         supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre, processo'),
         supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo'),
         supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre'),
@@ -150,6 +152,10 @@ export default function CalibracaoPage() {
 
       if (colabResp.data) setColaboradores(colabResp.data);
       if (histResp.data) setHistorico(histResp.data);
+      if (prodMensalResp.data) {
+        setProdutividadeMensal(prodMensalResp.data);
+        console.log('📆 Produtividade Mensal carregada:', prodMensalResp.data.length, 'registros');
+      }
       if (dpmoResp.data) setDpmoEventos(dpmoResp.data as DpmoEvento[]);
       if (dpmoAggResp.data) setDpmoAgregado(dpmoAggResp.data as DpmoAgregado[]);
       if (ocupResp.data) setOcupacaoP2M(ocupResp.data as OcupacaoP2MTipo[]);
@@ -177,8 +183,14 @@ export default function CalibracaoPage() {
     dpmoEventos.forEach((d) => {
       set.add(`${d.ano}-${d.trimestre}`);
     });
+    // 🎯 Inclui trimestres do CSV mensal
+    produtividadeMensal.forEach((p) => {
+      if (p.trimestre && p.ano) {
+        set.add(`${p.ano}-${p.trimestre}`);
+      }
+    });
     return Array.from(set).sort().reverse();
-  }, [historico, dpmoEventos]);
+  }, [historico, dpmoEventos, produtividadeMensal]);
 
   useEffect(() => {
     if (!trimestreSelecionado && trimestresDisponiveis.length > 0) {
@@ -217,6 +229,25 @@ export default function CalibracaoPage() {
         if (h.prod_liquida > 0) mediasPorMes[mes].liq.push(h.prod_liquida);
         // ⚠️ Utilização do CSV de produtividade NÃO é usada como ocupação
         // Ocupação real virá de tabelas específicas (ocupacao_p2m, ocupacao_checkin futuro)
+      });
+
+      // 🎯 COMPLEMENTAR com produtividade_mensal (CSV consolidado)
+      // Esses dados vem do CSV "Lista 2026-04-01 al 2026-04-30..." 
+      // Usado APENAS quando não tem dados diários suficientes no mês
+      const prodMensalColab = produtividadeMensal.filter((p) => {
+        if (p.id_groot !== c.id_groot) return false;
+        if (p.ano !== anoNum) return false;
+        if (p.trimestre !== quarterSel) return false;
+        if (p.processo !== c.processo) return false;
+        return true;
+      });
+      
+      prodMensalColab.forEach((p) => {
+        if (!mediasPorMes[p.mes]) mediasPorMes[p.mes] = { liq: [], ocup: [] };
+        // Adiciona a média mensal como UM valor (representa o mês inteiro)
+        if (p.prod_liquida_media > 0) {
+          mediasPorMes[p.mes].liq.push(Number(p.prod_liquida_media));
+        }
       });
 
       // 🎯 Pra P2M, ocupação vem da tabela ocupacao_p2m (CSV Totefullness)
@@ -428,7 +459,7 @@ export default function CalibracaoPage() {
         aptidao,
       };
     });
-  }, [colaboradores, historico, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
+  }, [colaboradores, historico, produtividadeMensal, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
 
   const porProcesso = {
     Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
