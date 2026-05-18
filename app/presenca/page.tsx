@@ -108,8 +108,8 @@ export default function PresencaPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          idGroot: p.idGroot,
-          dataISO: p.dataISO,
+          linha: p.linha,
+          coluna: p.coluna,
           motivo: getSigla(modal.motivo),
           comentario: modal.comentario,
         }),

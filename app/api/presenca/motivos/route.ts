@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// Motivos do dropdown do Google Form (espelha o Form real).
-// Se o Form mudar, atualizar aqui também.
-const MOTIVOS = [
+const MOTIVOS_FALLBACK = [
   'P - Presente',
   'HE - Hora Extra',
   'PCO - Presença com Compensação',
@@ -22,7 +20,29 @@ const MOTIVOS = [
 ];
 
 export async function GET() {
-  return NextResponse.json(MOTIVOS, {
+  const scriptUrl = process.env.APPS_SCRIPT_URL;
+  const token = process.env.APPS_SCRIPT_TOKEN || '';
+
+  if (scriptUrl) {
+    try {
+      const url = new URL(scriptUrl);
+      url.searchParams.set('action', 'getMotivosPresenca');
+      if (token) url.searchParams.set('token', token);
+
+      const res = await fetch(url.toString(), { redirect: 'follow' });
+      const data = await res.json();
+
+      if (Array.isArray(data?.motivos) && data.motivos.length > 0) {
+        return NextResponse.json(data.motivos, {
+          headers: { 'Cache-Control': 'public, max-age=3600' },
+        });
+      }
+    } catch {
+      // fallback to hardcoded list
+    }
+  }
+
+  return NextResponse.json(MOTIVOS_FALLBACK, {
     headers: { 'Cache-Control': 'public, max-age=3600' },
   });
 }
