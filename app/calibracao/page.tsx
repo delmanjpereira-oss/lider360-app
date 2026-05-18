@@ -233,11 +233,14 @@ export default function CalibracaoPage() {
   const mesesComDados = useMemo(() => {
     if (!quarterSel) return [];
     const set = new Set<number>();
+    
+    // 1. Histórico diário
     historico.forEach((h) => {
       const { ano, mes, quarter } = getTrimestreDeData(h.data_referencia);
       if (ano === anoNum && quarter === quarterSel) set.add(mes);
     });
-    // 🎯 Considera também o CSV mensal consolidado
+    
+    // 2. CSV mensal consolidado
     produtividadeMensal.forEach((p) => {
       const pAno = Number(p.ano);
       const pTrim = String(p.trimestre || '').trim().toUpperCase();
@@ -246,9 +249,44 @@ export default function CalibracaoPage() {
         set.add(Number(p.mes));
       }
     });
-    console.log('📊 Meses com dados:', Array.from(set).sort(), '| Trimestre:', quarterSel);
-    return mesesPossiveis.filter((m) => set.has(m)).sort();
-  }, [historico, produtividadeMensal, anoNum, quarterSel, mesesPossiveis]);
+    
+    // 🎯 3. DPMO eventos (detalhado)
+    dpmoEventos.forEach((d) => {
+      const dAno = Number(d.ano);
+      const dTrim = String(d.trimestre || '').trim().toUpperCase();
+      const trimSel = String(quarterSel || '').toUpperCase();
+      if (dAno === anoNum && dTrim === trimSel && d.mes) {
+        set.add(Number(d.mes));
+      }
+    });
+    
+    // 🎯 4. DPMO agregado (semanal Looker) - usa semana pra inferir mês
+    dpmoAgregado.forEach((d) => {
+      const dAno = Number(d.ano);
+      const dTrim = String(d.trimestre || '').trim().toUpperCase();
+      const trimSel = String(quarterSel || '').toUpperCase();
+      if (dAno === anoNum && dTrim === trimSel) {
+        // Pega TODOS os meses do trimestre selecionado
+        // (sem semana exata, melhor mostrar todos do trim)
+        const mesesTrim = MESES_POR_TRIM[quarterSel] || [];
+        mesesTrim.forEach((m) => set.add(m));
+      }
+    });
+    
+    // 🎯 5. Ocupação P2M
+    ocupacaoP2M.forEach((o) => {
+      const oAno = Number(o.ano);
+      const oTrim = String(o.trimestre || '').trim().toUpperCase();
+      const trimSel = String(quarterSel || '').toUpperCase();
+      if (oAno === anoNum && oTrim === trimSel && o.mes) {
+        set.add(Number(o.mes));
+      }
+    });
+    
+    const meses = mesesPossiveis.filter((m) => set.has(m)).sort();
+    console.log('📊 Meses com dados:', meses, '| Trimestre:', quarterSel);
+    return meses;
+  }, [historico, produtividadeMensal, dpmoEventos, dpmoAgregado, ocupacaoP2M, anoNum, quarterSel, mesesPossiveis]);
 
   const linhasCalibracao: LinhaCalib[] = useMemo(() => {
     if (!quarterSel) return [];
