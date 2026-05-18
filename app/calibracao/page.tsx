@@ -561,12 +561,32 @@ export default function CalibracaoPage() {
           let unidadesMensal = 0;
           if (unidadesDiarias === 0) {
             const prodMensalMes = produtividadeMensal.filter((p) => {
-              return Number(p.mes) === mes 
-                && Number(p.ano) === anoNum
-                && p.id_groot === c.id_groot
-                && processosIguais(p.processo, c.processo);
+              if (Number(p.mes) !== mes) return false;
+              if (Number(p.ano) !== anoNum) return false;
+              if (!processosIguais(p.processo, c.processo)) return false;
+              
+              // Tenta por id_groot
+              if (p.id_groot && c.id_groot && String(p.id_groot).trim() === String(c.id_groot).trim()) {
+                return true;
+              }
+              
+              // 🎯 Tenta também por nome flexível (caso não tenha id_groot)
+              if (p.nome && nomesIguais(p.nome, c.nome)) {
+                return true;
+              }
+              
+              return false;
             });
             unidadesMensal = prodMensalMes.reduce((s, p) => s + (Number(p.unidades_total) || 0), 0);
+            
+            if (idx < 3 && prodMensalMes.length > 0) {
+              console.log(`💰 [${c.nome}] IMA Mês ${mes}: usando ${prodMensalMes.length} registros mensais, ${unidadesMensal} unidades`);
+            }
+            if (idx < 3 && eventosMes.length > 0 && unidadesMensal === 0 && unidadesDiarias === 0) {
+              console.warn(`⚠️ [${c.nome}] IMA Mês ${mes}: TEM ${eventosMes.length} eventos DPMO mas NÃO achou unidades`);
+              console.warn(`   procurando: mes=${mes}, ano=${anoNum}, processo=${c.processo}, id=${c.id_groot}`);
+              console.warn(`   produtividadeMensal disponíveis pro mês:`, produtividadeMensal.filter((p) => Number(p.mes) === mes).map((p) => ({ id: p.id_groot, nome: p.nome, proc: p.processo })));
+            }
           }
 
           const unidadesMes = unidadesDiarias + unidadesMensal;
