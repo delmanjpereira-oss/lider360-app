@@ -118,6 +118,34 @@ function classificar(
 
 // 🎯 Detecta data no nome do arquivo
 // Formatos suportados: 2026-05-16, 2026_05_16, 16-05-2026, 16_05_2026, 2026.05.16
+// 🎯 Detecta se o CSV é MENSAL (range de datas no nome)
+// Ex: "Lista 2026-04-01 al 2026-04-30 de 00_00_00 a 00_00_00.csv"
+function detectarCsvMensal(nomeArquivo: string): { mes: number; ano: number; trimestre: string } | null {
+  const nome = nomeArquivo.replace(/\.csv$/i, '');
+  
+  // Padrão: YYYY-MM-DD al YYYY-MM-DD (com "al" no meio)
+  const matchMensal = nome.match(/(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})\s+al\s+(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})/i);
+  if (matchMensal) {
+    const anoInicio = parseInt(matchMensal[1]);
+    const mesInicio = parseInt(matchMensal[2]);
+    const diaInicio = parseInt(matchMensal[3]);
+    const mesFim = parseInt(matchMensal[5]);
+    const diaFim = parseInt(matchMensal[6]);
+    
+    // Confirma que abrange o mês inteiro (dia 1 ao 28+)
+    if (diaInicio === 1 && diaFim >= 28 && mesInicio === mesFim) {
+      let trimestre = 'Q1';
+      if (mesInicio >= 4 && mesInicio <= 6) trimestre = 'Q2';
+      else if (mesInicio >= 7 && mesInicio <= 9) trimestre = 'Q3';
+      else if (mesInicio >= 10) trimestre = 'Q4';
+      
+      return { mes: mesInicio, ano: anoInicio, trimestre };
+    }
+  }
+  
+  return null;
+}
+
 function detectarDataNoNome(nomeArquivo: string): string | null {
   // Limpa o nome (remove extensão e caracteres especiais)
   const nome = nomeArquivo.replace(/\.csv$/i, '');
@@ -167,6 +195,9 @@ export default function UploadPage() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState<string | null>(null);
+  
+  // 🎯 Modo MENSAL (CSV consolidado de um mês inteiro)
+  const [csvMensal, setCsvMensal] = useState<{ mes: number; ano: number; trimestre: string; nomeArquivo: string } | null>(null);
 
   useEffect(() => {
     async function carregarBase() {
@@ -198,14 +229,25 @@ export default function UploadPage() {
 
     console.log('📂 Arquivo selecionado:', f.name);
 
-    // 🎯 Tenta detectar a data no nome do arquivo
-    // Formatos suportados: 2026-05-16, 2026_05_16, 16-05-2026, 16_05_2026
-    const dataDetectada = detectarDataNoNome(f.name);
-    if (dataDetectada) {
-      setDataRef(dataDetectada);
-      console.log('📅 Data detectada automaticamente:', dataDetectada);
+    // 🎯 Tenta detectar se é CSV MENSAL (range de datas)
+    const mensal = detectarCsvMensal(f.name);
+    if (mensal) {
+      setCsvMensal({ ...mensal, nomeArquivo: f.name });
+      console.log('📆 CSV MENSAL detectado:', mensal);
       if (typeof window !== 'undefined' && window.showToast) {
-        window.showToast('info', `Data detectada: ${dataDetectada.split('-').reverse().join('/')}`);
+        window.showToast('info', `📆 CSV Mensal detectado: ${String(mensal.mes).padStart(2, '0')}/${mensal.ano}`);
+      }
+    } else {
+      setCsvMensal(null);
+      
+      // Tenta detectar a data no nome (modo diário)
+      const dataDetectada = detectarDataNoNome(f.name);
+      if (dataDetectada) {
+        setDataRef(dataDetectada);
+        console.log('📅 Data detectada automaticamente:', dataDetectada);
+        if (typeof window !== 'undefined' && window.showToast) {
+          window.showToast('info', `Data detectada: ${dataDetectada.split('-').reverse().join('/')}`);
+        }
       }
     }
 
@@ -389,6 +431,147 @@ export default function UploadPage() {
 
     if (finais.length === 0) {
       setErro('⚠️ Nenhuma linha do CSV tem ID Groot válido. Verifique o arquivo.');
+    }
+  }
+
+  // 🎯 Salva CSV MENSAL com subtração inteligente
+  // Lógica: pega o total do mês, subtrai o que já tem no histórico diário,
+  // e salva o RESTANTE como "fonte mensal" pra calibração
+  async function salvarMensal() {
+    if (!processado.length || !arquivo || !csvMensal) return;
+    console.log('📆 Salvando CSV MENSAL...');
+    setSalvando(true);
+    setErro(null);
+    setSucesso(null);
+
+    try {
+      const { mes, ano, trimestre } = csvMensal;
+      const primeiroDia = `${ano}-${String(mes).padStart(2, '0')}-01`;
+      const ultimoDia = `${ano}-${String(mes).padStart(2, '0')}-31`;
+
+      // 🔍 Busca o que JÁ existe no histórico daquele mês/processo
+      const { data: historicoExistente } = await supabase
+        .from('historico')
+        .select('id_groot, prod_liquida, unidades, data_referencia')
+        .eq('processo', processoSelecionado)
+        .gte('data_referencia', primeiroDia)
+        .lte('data_referencia', ultimoDia);
+
+      console.log(`📊 Histórico existente: ${historicoExistente?.length || 0} registros em ${mes}/${ano}`);
+
+      // Agrupa histórico por id_groot
+      const histPorColab: Record<string, { unidades: number; dias: number; somaLiquida: number }> = {};
+      (historicoExistente || []).forEach((h) => {
+        if (!h.id_groot) return;
+        if (!histPorColab[h.id_groot]) {
+          histPorColab[h.id_groot] = { unidades: 0, dias: 0, somaLiquida: 0 };
+        }
+        histPorColab[h.id_groot].unidades += Number(h.unidades) || 0;
+        histPorColab[h.id_groot].dias++;
+        histPorColab[h.id_groot].somaLiquida += Number(h.prod_liquida) || 0;
+      });
+
+      // 🎯 Processa cada colaborador do CSV mensal
+      const registrosParaSalvar: any[] = [];
+      let complementados = 0;
+      let novos = 0;
+      let ignorados = 0;
+
+      processado.forEach((r) => {
+        if (!r.idGroot) {
+          ignorados++;
+          return;
+        }
+
+        const existente = histPorColab[r.idGroot];
+
+        if (existente && existente.unidades >= r.unidades) {
+          // Já tem MAIS no histórico do que o CSV mensal mostra → ignora
+          console.log(`⏭️ ${r.nomeOficial}: histórico (${existente.unidades}) >= CSV (${r.unidades}), ignora`);
+          ignorados++;
+          return;
+        }
+
+        // Calcula o RESTANTE (CSV - já tem)
+        const unidadesRestantes = existente
+          ? Math.max(0, r.unidades - existente.unidades)
+          : r.unidades;
+
+        // Dias estimados ainda não cobertos (assume 22 dias úteis no mês)
+        const diasUteisEstimados = 22;
+        const diasComplementares = existente
+          ? Math.max(0, diasUteisEstimados - existente.dias)
+          : diasUteisEstimados;
+
+        // Líquida média do restante (mantém a do CSV se não souber)
+        const liquidaRestante = r.prodLiquida;
+
+        registrosParaSalvar.push({
+          id_groot: r.idGroot,
+          nome: r.nomeOficial || r.nomeCsv,
+          nome_csv: r.nomeCsv,
+          mes,
+          ano,
+          trimestre,
+          processo: processoSelecionado,
+          prod_liquida_media: liquidaRestante,
+          unidades_total: unidadesRestantes,
+          dias_trabalhados: diasComplementares,
+          arquivo_origem: arquivo.name,
+        });
+
+        if (existente) {
+          complementados++;
+          console.log(`🔀 ${r.nomeOficial}: já tinha ${existente.unidades}, complementando com ${unidadesRestantes}`);
+        } else {
+          novos++;
+        }
+      });
+
+      if (registrosParaSalvar.length === 0) {
+        setErro('Nenhum registro pra salvar — o histórico diário já cobre todo o mês.');
+        setSalvando(false);
+        return;
+      }
+
+      // 🗑️ Apaga registros mensais antigos do mesmo mês/processo (evita duplicatas)
+      await supabase
+        .from('produtividade_mensal')
+        .delete()
+        .eq('mes', mes)
+        .eq('ano', ano)
+        .eq('processo', processoSelecionado);
+
+      // 💾 Insere os novos
+      const { error: errInsert } = await supabase
+        .from('produtividade_mensal')
+        .insert(registrosParaSalvar);
+
+      if (errInsert) throw new Error(errInsert.message);
+
+      // Registra o upload
+      const uploadId = 'UP-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+      await supabase.from('uploads').insert({
+        upload_id: uploadId,
+        data_referencia: primeiroDia,
+        tipo_base: processoSelecionado,
+        arquivo: arquivo.name,
+        linhas_processadas: linhas.length,
+        linhas_vinculadas: processado.filter((r) => r.vinculado).length,
+        usuario: 'delman.jpereira@mercadolivre.com',
+        modelo_csv: 'mensal_consolidado',
+      });
+
+      setSucesso(
+        `✅ CSV MENSAL salvo! ${registrosParaSalvar.length} registros: ${novos} novos, ${complementados} complementaram histórico, ${ignorados} ignorados (já tinha tudo).`
+      );
+      
+      console.log('📆 RESUMO MENSAL:', { novos, complementados, ignorados, total: registrosParaSalvar.length });
+    } catch (e: any) {
+      setErro('Erro ao salvar: ' + e.message);
+      console.error('❌ Erro mensal:', e);
+    } finally {
+      setSalvando(false);
     }
   }
 
@@ -781,13 +964,40 @@ export default function UploadPage() {
             )}
           </div>
 
-          <button
-            onClick={confirmarEnvio}
-            disabled={salvando}
-            className="w-full bg-green-500 text-white font-bold py-4 rounded-lg hover:bg-green-400 transition-colors text-lg disabled:opacity-50"
-          >
-            {salvando ? '💾 Salvando...' : `✅ Confirmar envio (${processado.length} registros)`}
-          </button>
+          {csvMensal ? (
+            <button
+              onClick={salvarMensal}
+              disabled={salvando}
+              className="w-full bg-purple-500 text-white font-bold py-4 rounded-lg hover:bg-purple-400 transition-colors text-lg disabled:opacity-50"
+            >
+              {salvando ? '💾 Salvando...' : `📆 Salvar CSV MENSAL (${csvMensal.mes}/${csvMensal.ano}) - ${processado.length} colabs`}
+            </button>
+          ) : (
+            <button
+              onClick={confirmarEnvio}
+              disabled={salvando}
+              className="w-full bg-green-500 text-white font-bold py-4 rounded-lg hover:bg-green-400 transition-colors text-lg disabled:opacity-50"
+            >
+              {salvando ? '💾 Salvando...' : `✅ Confirmar envio (${processado.length} registros)`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Aviso CSV MENSAL detectado */}
+      {csvMensal && (
+        <div className="bg-purple-500/10 border-2 border-purple-500/40 rounded-2xl p-4 mb-4">
+          <h3 className="text-purple-300 font-black text-base mb-2 flex items-center gap-2">
+            📆 CSV MENSAL detectado!
+          </h3>
+          <p className="text-sm text-purple-200 mb-2">
+            Esse CSV é do mês <strong>{String(csvMensal.mes).padStart(2, '0')}/{csvMensal.ano}</strong> ({csvMensal.trimestre}).
+          </p>
+          <ul className="text-xs text-purple-200/80 space-y-1 list-disc pl-5">
+            <li>Os dados vão pra tabela <code className="bg-purple-500/20 px-1 rounded">produtividade_mensal</code> (não duplica o histórico diário)</li>
+            <li>Se já tem dados diários do mês, o app <strong>subtrai</strong> e salva só o restante</li>
+            <li>Usado apenas pra <strong>calibração</strong>, não aparece no detalhe diário do colaborador</li>
+          </ul>
         </div>
       )}
 
