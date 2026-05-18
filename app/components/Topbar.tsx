@@ -26,22 +26,19 @@ export default function Topbar() {
     <header className="bg-gradient-to-r from-[#0a0a0a] via-[#0f0f0f] to-[#0a0a0a] border-b border-[#1a1a1a] px-6 py-3 flex items-center justify-between sticky top-0 z-30 backdrop-blur-md bg-opacity-90">
       {/* Lado esquerdo - Logos + saudação */}
       <div className="flex items-center gap-4">
-        {/* 🤝 Logo Mercado Livre - símbolo handshake oficial */}
+        {/* 🤝 Logo Mercado Livre - PNG com transparência */}
         <div
-          className="flex items-center justify-center w-14 h-10 rounded-xl shadow-md overflow-hidden"
-          style={{
-            background: 'linear-gradient(135deg, #FFE600 0%, #FFD700 100%)',
-            boxShadow: '0 4px 12px rgba(255, 215, 0, 0.3)',
-          }}
+          className="flex items-center justify-center"
           title="Mercado Livre"
         >
           <img
             src="/logos/pngwing.com.png"
             alt="Mercado Livre"
             style={{
-              width: '32px',
-              height: '32px',
+              width: '48px',
+              height: '48px',
               objectFit: 'contain',
+              filter: 'drop-shadow(0 2px 8px rgba(255, 215, 0, 0.25))',
             }}
           />
         </div>
