@@ -1,9 +1,13 @@
 /**
  * ====================================================
- * CLIENTE GEMINI
- * Comunica com a API do Google Gemini (gratuita até 1500 req/dia)
+ * CLIENTE GEMINI (com fallback automático)
+ * lib/ia/gemini-client.ts
  *
- * Suporta nome de env var: `gemini` ou `GEMINI_API_KEY`
+ * Tenta uma cascata de modelos. Se o primeiro der 429 (quota),
+ * tenta o próximo automaticamente.
+ *
+ * Cascata: 1.5-flash → 1.5-flash-8b → 2.0-flash
+ * (modelos legados costumam ter free tier mais aberto)
  * ====================================================
  */
 
@@ -19,18 +23,21 @@ interface GeminiOptions {
   modelo?: string;
 }
 
+// Cascata de modelos pra tentar (ordem do mais permissivo pro menos)
+const MODELOS_FALLBACK = [
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+  'gemini-2.0-flash',
+];
+
 /**
- * Chama a API do Gemini com uma conversa.
- *
- * @param mensagens - Array de mensagens da conversa
- * @param options - systemPrompt, temperature, maxTokens, modelo
- * @returns Texto gerado pela IA
+ * Chama a API do Gemini, com fallback automático entre modelos
+ * se der 429 (quota excedida).
  */
 export async function chamarGemini(
   mensagens: MensagemIA[],
   options: GeminiOptions = {}
 ): Promise<string> {
-  // Aceita ambos os nomes de env var (caso o usuário tenha colocado 'gemini' minúsculo)
   const apiKey = process.env.GEMINI_API_KEY || process.env.gemini;
 
   if (!apiKey) {
@@ -39,9 +46,45 @@ export async function chamarGemini(
     );
   }
 
-  const modelo = options.modelo || 'gemini-2.0-flash';
+  // Se o usuário passou um modelo específico, usa só ele
+  // Senão, tenta a cascata
+  const modelosParaTentar = options.modelo ? [options.modelo] : MODELOS_FALLBACK;
 
-  // Gemini usa 'user' e 'model' (não 'assistant')
+  let ultimoErro: Error | null = null;
+
+  for (const modelo of modelosParaTentar) {
+    try {
+      return await chamarGeminiInterno(apiKey, modelo, mensagens, options);
+    } catch (err: any) {
+      ultimoErro = err;
+      const msg = err?.message || '';
+      // Se for erro 429 (quota), tenta próximo modelo
+      if (msg.includes('429') || msg.toLowerCase().includes('quota')) {
+        console.warn(`[Gemini] ${modelo} sem quota, tentando próximo...`);
+        continue;
+      }
+      // Outros erros: aborta na hora
+      throw err;
+    }
+  }
+
+  // Se chegou aqui, todos os modelos falharam
+  throw new Error(
+    `Todos os modelos Gemini sem quota disponível. Último erro: ${
+      ultimoErro?.message || 'desconhecido'
+    }`
+  );
+}
+
+/**
+ * Chamada interna a um modelo específico.
+ */
+async function chamarGeminiInterno(
+  apiKey: string,
+  modelo: string,
+  mensagens: MensagemIA[],
+  options: GeminiOptions
+): Promise<string> {
   const contents = mensagens.map((m) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
@@ -55,7 +98,6 @@ export async function chamarGemini(
       topP: 0.95,
       topK: 40,
     },
-    // Safety settings — relaxar pra análise corporativa funcionar
     safetySettings: [
       { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
       { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
@@ -64,7 +106,6 @@ export async function chamarGemini(
     ],
   };
 
-  // System prompt vai como systemInstruction (não como mensagem)
   if (options.systemPrompt) {
     body.systemInstruction = {
       parts: [{ text: options.systemPrompt }],
@@ -97,13 +138,11 @@ export async function chamarGemini(
 
   const data = await response.json();
 
-  // Verifica se foi bloqueado por safety
   const candidato = data?.candidates?.[0];
   if (candidato?.finishReason === 'SAFETY') {
     throw new Error('Resposta bloqueada por filtros de segurança do Gemini');
   }
 
-  // Extrai texto
   const texto = candidato?.content?.parts?.[0]?.text;
 
   if (!texto || typeof texto !== 'string') {
@@ -115,8 +154,7 @@ export async function chamarGemini(
 }
 
 /**
- * Helper pra chamar Gemini com 1 prompt simples + system prompt.
- * Wrapper conveniente pra casos onde não precisa de histórico de conversa.
+ * Helper pra 1 prompt simples + system prompt.
  */
 export async function gerarTextoComIA(
   prompt: string,
