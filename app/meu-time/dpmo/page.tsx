@@ -803,7 +803,11 @@ export default function DpmoPage() {
 
     for (let i = 0; i < linhasInsert.length; i += 500) {
       const lote = linhasInsert.slice(i, i + 500);
-      const { error } = await supabase.from('dpmo_eventos').insert(lote);
+      // 🎯 Usa upsert pra evitar erro de duplicate key
+      const { error } = await supabase.from('dpmo_eventos').upsert(lote, {
+        onConflict: 'chave_unica',
+        ignoreDuplicates: false, // atualiza se já existe
+      });
       if (error) throw new Error(error.message);
     }
 
