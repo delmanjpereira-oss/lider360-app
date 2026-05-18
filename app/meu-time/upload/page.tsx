@@ -400,11 +400,34 @@ export default function UploadPage() {
     setSucesso(null);
 
     try {
-      // Apaga registros antigos do mesmo dia + arquivo
+      // 🎯 Apaga registros antigos do MESMO DIA + MESMO PROCESSO + MESMOS IDS
+      // Isso evita duplicatas quando você sobe o CSV 2x do mesmo dia/processo
+      const idsParaApagar = processado
+        .filter((r) => r.idGroot)
+        .map((r) => r.idGroot);
+      
+      if (idsParaApagar.length > 0) {
+        const { error: errDelete } = await supabase
+          .from('historico')
+          .delete()
+          .eq('data_referencia', dataRef)
+          .eq('processo', processoSelecionado)
+          .in('id_groot', idsParaApagar);
+        
+        if (errDelete) {
+          console.error('Erro deletando duplicatas:', errDelete);
+        } else {
+          console.log(`🗑️ Limpou registros antigos: ${dataRef} + ${processoSelecionado} (${idsParaApagar.length} IDs)`);
+        }
+      }
+
+      // Também apaga registros sem id_groot do mesmo dia/processo/arquivo
       await supabase
         .from('historico')
         .delete()
         .eq('data_referencia', dataRef)
+        .eq('processo', processoSelecionado)
+        .is('id_groot', null)
         .eq('arquivo_origem', arquivo.name);
 
       const dataObj = new Date(dataRef + 'T12:00:00');
