@@ -36,7 +36,7 @@ export default function Topbar() {
           title="Mercado Livre"
         >
           <img
-            src="https://logodownload.org/wp-content/uploads/2018/09/mercado-livre-icone.png"
+            src="/logos/pngwing.com.png"
             alt="Mercado Livre"
             style={{
               width: '32px',
