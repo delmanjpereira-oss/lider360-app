@@ -150,11 +150,30 @@ export default function CalibracaoPage() {
         supabase.from('config').select('chave, valor'),
       ]);
 
+      // 🔍 LOGS DETALHADOS PRA DEBUG
+      console.log('🔍 ===== DEBUG CALIBRAÇÃO =====');
+      console.log('👥 Colaboradores:', colabResp.data?.length || 0);
+      console.log('📅 Histórico diário:', histResp.data?.length || 0);
+      console.log('📆 Produtividade MENSAL:', prodMensalResp.data?.length || 0);
+      
+      if (prodMensalResp.error) {
+        console.error('❌ ERRO buscando produtividade_mensal:', prodMensalResp.error);
+      }
+      
+      if (prodMensalResp.data && prodMensalResp.data.length > 0) {
+        console.log('📆 Primeiros 3 registros mensais:', prodMensalResp.data.slice(0, 3));
+        const trimestresMensal = new Set(prodMensalResp.data.map((p: any) => `${p.ano}-${p.trimestre}`));
+        console.log('📆 Trimestres no mensal:', Array.from(trimestresMensal));
+      } else {
+        console.warn('⚠️ Nenhum dado em produtividade_mensal! Verifica:');
+        console.warn('   1. Você rodou o SQL CREATE TABLE produtividade_mensal?');
+        console.warn('   2. O upload do CSV mensal salvou ou deu erro?');
+      }
+
       if (colabResp.data) setColaboradores(colabResp.data);
       if (histResp.data) setHistorico(histResp.data);
       if (prodMensalResp.data) {
         setProdutividadeMensal(prodMensalResp.data);
-        console.log('📆 Produtividade Mensal carregada:', prodMensalResp.data.length, 'registros');
       }
       if (dpmoResp.data) setDpmoEventos(dpmoResp.data as DpmoEvento[]);
       if (dpmoAggResp.data) setDpmoAgregado(dpmoAggResp.data as DpmoAgregado[]);
@@ -183,14 +202,23 @@ export default function CalibracaoPage() {
     dpmoEventos.forEach((d) => {
       set.add(`${d.ano}-${d.trimestre}`);
     });
+    // 🎯 Inclui trimestres do DPMO agregado (CSV Looker semanal)
+    dpmoAgregado.forEach((d) => {
+      if (d.trimestre && d.ano) {
+        set.add(`${d.ano}-${d.trimestre}`);
+      }
+    });
     // 🎯 Inclui trimestres do CSV mensal
     produtividadeMensal.forEach((p) => {
       if (p.trimestre && p.ano) {
         set.add(`${p.ano}-${p.trimestre}`);
       }
     });
-    return Array.from(set).sort().reverse();
-  }, [historico, dpmoEventos, produtividadeMensal]);
+    
+    const lista = Array.from(set).sort().reverse();
+    console.log('📅 Trimestres disponíveis:', lista);
+    return lista;
+  }, [historico, dpmoEventos, dpmoAgregado, produtividadeMensal]);
 
   useEffect(() => {
     if (!trimestreSelecionado && trimestresDisponiveis.length > 0) {
@@ -215,7 +243,7 @@ export default function CalibracaoPage() {
   const linhasCalibracao: LinhaCalib[] = useMemo(() => {
     if (!quarterSel) return [];
 
-    return colaboradores.map((c) => {
+    return colaboradores.map((c, idx) => {
       const histColab = historico.filter((h) => {
         if (h.id_groot !== c.id_groot) return false;
         const { quarter, ano } = getTrimestreDeData(h.data_referencia);
@@ -235,18 +263,43 @@ export default function CalibracaoPage() {
       // Esses dados vem do CSV "Lista 2026-04-01 al 2026-04-30..." 
       // Usado APENAS quando não tem dados diários suficientes no mês
       const prodMensalColab = produtividadeMensal.filter((p) => {
-        if (p.id_groot !== c.id_groot) return false;
-        if (p.ano !== anoNum) return false;
-        if (p.trimestre !== quarterSel) return false;
-        if (p.processo !== c.processo) return false;
+        // Normaliza tipos pra comparação (banco pode vir string ou number)
+        const pIdGroot = String(p.id_groot || '').trim();
+        const cIdGroot = String(c.id_groot || '').trim();
+        const pAno = Number(p.ano);
+        const pTrim = String(p.trimestre || '').trim().toUpperCase();
+        const pProc = String(p.processo || '').trim();
+        const cProc = String(c.processo || '').trim();
+        const trimSelUpper = String(quarterSel || '').toUpperCase();
+        
+        if (pIdGroot !== cIdGroot) return false;
+        if (pAno !== anoNum) return false;
+        if (pTrim !== trimSelUpper) return false;
+        if (pProc !== cProc) return false;
         return true;
       });
+
+      // LOG DEBUG - mostra o que tá rolando pra cada colab
+      if (produtividadeMensal.length > 0 && idx < 5) {
+        console.log(`🔍 [${c.nome}] Procurando produtividade mensal:`, {
+          id_groot_colab: c.id_groot,
+          processo_colab: c.processo,
+          anoNum,
+          quarterSel,
+          totalProdMensal: produtividadeMensal.length,
+          encontrados: prodMensalColab.length,
+          exemplo: produtividadeMensal[0],
+        });
+      }
       
       prodMensalColab.forEach((p) => {
-        if (!mediasPorMes[p.mes]) mediasPorMes[p.mes] = { liq: [], ocup: [] };
+        const pMes = Number(p.mes);
+        if (!mediasPorMes[pMes]) mediasPorMes[pMes] = { liq: [], ocup: [] };
         // Adiciona a média mensal como UM valor (representa o mês inteiro)
-        if (p.prod_liquida_media > 0) {
-          mediasPorMes[p.mes].liq.push(Number(p.prod_liquida_media));
+        const liqValue = Number(p.prod_liquida_media);
+        if (liqValue > 0) {
+          mediasPorMes[pMes].liq.push(liqValue);
+          console.log(`✅ [${c.nome}] Adicionou produtividade mensal: Mês ${pMes}, Líquida ${liqValue}`);
         }
       });
 
