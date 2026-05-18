@@ -291,6 +291,18 @@ export default function CalibracaoPage() {
   const linhasCalibracao: LinhaCalib[] = useMemo(() => {
     if (!quarterSel) return [];
 
+    console.log('🔥 ============================================');
+    console.log('🔥 CALCULANDO LINHAS CALIBRAÇÃO');
+    console.log('🔥 Trimestre:', quarterSel, '| Ano:', anoNum);
+    console.log('🔥 Meses possíveis no trim:', mesesPossiveis);
+    console.log('🔥 Meses COM dados:', mesesComDados);
+    console.log('🔥 Total colaboradores:', colaboradores.length);
+    console.log('🔥 Total histórico:', historico.length);
+    console.log('🔥 Total prod_mensal:', produtividadeMensal.length);
+    console.log('🔥 Total DPMO eventos:', dpmoEventos.length);
+    console.log('🔥 Total DPMO agregado:', dpmoAgregado.length);
+    console.log('🔥 ============================================');
+
     return colaboradores.map((c, idx) => {
       const histColab = historico.filter((h) => {
         if (h.id_groot !== c.id_groot) return false;
