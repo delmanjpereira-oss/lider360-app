@@ -177,49 +177,108 @@ export default function CalibracaoPage() {
     carregar();
   }, []);
 
+  // 🎯 Helper que pagina automaticamente pra burlar limite do Supabase
+  async function fetchAll(query: any, tableName: string): Promise<any[]> {
+    const todos: any[] = [];
+    const PAGE_SIZE = 1000;
+    let pagina = 0;
+    
+    while (true) {
+      const from = pagina * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      
+      const { data, error } = await query.range(from, to);
+      
+      if (error) {
+        console.error(`❌ Erro paginando ${tableName} pag ${pagina}:`, error);
+        return todos;
+      }
+      
+      if (!data || data.length === 0) break;
+      
+      todos.push(...data);
+      
+      if (data.length < PAGE_SIZE) break; // última página
+      pagina++;
+      
+      if (pagina > 50) { // segurança: max 50 páginas = 50k linhas
+        console.warn(`⚠️ ${tableName} parou em 50 páginas`);
+        break;
+      }
+    }
+    
+    console.log(`📦 ${tableName}: ${todos.length} registros baixados em ${pagina + 1} página(s)`);
+    return todos;
+  }
+
   async function carregar() {
     setLoading(true);
     try {
-      const [colabResp, histResp, prodMensalResp, dpmoResp, dpmoAggResp, ocupResp, fbResp, confResp] = await Promise.all([
-        supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
-        supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades').limit(50000),
-        supabase.from('produtividade_mensal').select('id_groot, nome, mes, ano, trimestre, processo, prod_liquida_media, unidades_total, dias_trabalhados').limit(50000),
-        supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre, processo').limit(50000),
-        supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo').limit(50000),
-        supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre').limit(50000),
-        supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em').limit(50000),
+      // 🎯 Usa paginação manual pra GARANTIR que pega TODOS os registros
+      // O Supabase tem limite default de 1000 que .limit() nem sempre supera
+      const [
+        colabData,
+        histData,
+        prodMensalData,
+        dpmoData,
+        dpmoAggData,
+        ocupData,
+        fbData,
+        confResp,
+      ] = await Promise.all([
+        fetchAll(
+          supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
+          'colaboradores'
+        ),
+        fetchAll(
+          supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
+          'historico'
+        ),
+        fetchAll(
+          supabase.from('produtividade_mensal').select('id_groot, nome, mes, ano, trimestre, processo, prod_liquida_media, unidades_total, dias_trabalhados'),
+          'produtividade_mensal'
+        ),
+        fetchAll(
+          supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre, processo'),
+          'dpmo_eventos'
+        ),
+        fetchAll(
+          supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo'),
+          'dpmo_agregado'
+        ),
+        fetchAll(
+          supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre'),
+          'ocupacao_p2m'
+        ),
+        fetchAll(
+          supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
+          'feedbacks'
+        ),
         supabase.from('config').select('chave, valor'),
       ]);
 
-      // 🔍 LOGS DETALHADOS PRA DEBUG
+      // Logs de validação
       console.log('🔍 ===== DEBUG CALIBRAÇÃO =====');
-      console.log('👥 Colaboradores:', colabResp.data?.length || 0);
-      console.log('📅 Histórico diário:', histResp.data?.length || 0);
-      console.log('📆 Produtividade MENSAL:', prodMensalResp.data?.length || 0);
+      console.log('👥 Colaboradores:', colabData.length);
+      console.log('📅 Histórico diário:', histData.length);
+      console.log('📆 Produtividade MENSAL:', prodMensalData.length);
+      console.log('🔥 DPMO eventos TOTAL:', dpmoData.length);
+      console.log('🔥 DPMO agregado TOTAL:', dpmoAggData.length);
       
-      if (prodMensalResp.error) {
-        console.error('❌ ERRO buscando produtividade_mensal:', prodMensalResp.error);
-      }
-      
-      if (prodMensalResp.data && prodMensalResp.data.length > 0) {
-        console.log('📆 Primeiros 3 registros mensais:', prodMensalResp.data.slice(0, 3));
-        const trimestresMensal = new Set(prodMensalResp.data.map((p: any) => `${p.ano}-${p.trimestre}`));
+      if (prodMensalData.length > 0) {
+        console.log('📆 Primeiros 3 registros mensais:', prodMensalData.slice(0, 3));
+        const trimestresMensal = new Set(prodMensalData.map((p: any) => `${p.ano}-${p.trimestre}`));
         console.log('📆 Trimestres no mensal:', Array.from(trimestresMensal));
-      } else {
-        console.warn('⚠️ Nenhum dado em produtividade_mensal! Verifica:');
-        console.warn('   1. Você rodou o SQL CREATE TABLE produtividade_mensal?');
-        console.warn('   2. O upload do CSV mensal salvou ou deu erro?');
       }
 
-      if (colabResp.data) setColaboradores(colabResp.data);
-      if (histResp.data) setHistorico(histResp.data);
-      if (prodMensalResp.data) {
-        setProdutividadeMensal(prodMensalResp.data);
-      }
-      if (dpmoResp.data) setDpmoEventos(dpmoResp.data as DpmoEvento[]);
-      if (dpmoAggResp.data) setDpmoAgregado(dpmoAggResp.data as DpmoAgregado[]);
-      if (ocupResp.data) setOcupacaoP2M(ocupResp.data as OcupacaoP2MTipo[]);
-      if (fbResp.data) setFeedbacks(fbResp.data as FeedbackTrim[]);
+      setColaboradores(colabData);
+      setHistorico(histData);
+      setProdutividadeMensal(prodMensalData);
+      setDpmoEventos(dpmoData as DpmoEvento[]);
+      setDpmoAgregado(dpmoAggData as DpmoAgregado[]);
+      setOcupacaoP2M(ocupData as OcupacaoP2MTipo[]);
+      setFeedbacks(fbData as FeedbackTrim[]);
+      
       if (confResp.data) {
         const map: Record<string, number> = {};
         confResp.data.forEach((c: { chave: string; valor: string }) => {
