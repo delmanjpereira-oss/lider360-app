@@ -430,7 +430,11 @@ export default function DpmoPage() {
 
     // Lista os representantes que NÃO foram vinculados (pra debug)
     if (naoVinculados > 0) {
-      const nomesNaoVinculados = [...new Set(eventos.filter((e) => !e.idGroot).map((e) => `${e.representante} (USER: ${e.checkinUser})`))];
+      const nomesUnicos = new Set<string>();
+      eventos.filter((e) => !e.idGroot).forEach((e) => {
+        nomesUnicos.add(`${e.representante} (USER: ${e.checkinUser})`);
+      });
+      const nomesNaoVinculados = Array.from(nomesUnicos);
       console.warn('⚠️ Representantes NÃO vinculados ao cadastro:', nomesNaoVinculados);
     }
 
