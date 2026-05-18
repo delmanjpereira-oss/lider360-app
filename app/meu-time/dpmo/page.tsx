@@ -801,15 +801,32 @@ export default function DpmoPage() {
       arquivo_origem: arquivo!.name,
     }));
 
+    console.log(`💾 INICIANDO save de ${linhasInsert.length} eventos detalhados em lotes de 500...`);
+    let totalSalvos = 0;
+    
     for (let i = 0; i < linhasInsert.length; i += 500) {
       const lote = linhasInsert.slice(i, i + 500);
+      const numeroLote = Math.floor(i / 500) + 1;
+      const totalLotes = Math.ceil(linhasInsert.length / 500);
+      
+      console.log(`📦 Lote ${numeroLote}/${totalLotes} (${lote.length} registros)...`);
+      
       // 🎯 Usa upsert pra evitar erro de duplicate key
-      const { error } = await supabase.from('dpmo_eventos').upsert(lote, {
+      const { error, data } = await supabase.from('dpmo_eventos').upsert(lote, {
         onConflict: 'chave_unica',
         ignoreDuplicates: false, // atualiza se já existe
       });
-      if (error) throw new Error(error.message);
+      
+      if (error) {
+        console.error(`❌ ERRO no lote ${numeroLote}:`, error);
+        throw new Error(`Erro no lote ${numeroLote} de ${totalLotes}: ${error.message}`);
+      }
+      
+      totalSalvos += lote.length;
+      console.log(`✅ Lote ${numeroLote} OK! Total salvos: ${totalSalvos}/${linhasInsert.length}`);
     }
+    
+    console.log(`🎉 SUCESSO! Total de ${totalSalvos} eventos salvos no banco`);
 
     const { count } = await supabase
       .from('dpmo_eventos')
@@ -841,13 +858,30 @@ export default function DpmoPage() {
       atualizado_em: new Date().toISOString(),
     }));
 
+    console.log(`💾 INICIANDO save de ${linhasInsert.length} linhas agregadas...`);
+    let totalSalvosAg = 0;
+    
     for (let i = 0; i < linhasInsert.length; i += 500) {
       const lote = linhasInsert.slice(i, i + 500);
+      const numeroLote = Math.floor(i / 500) + 1;
+      const totalLotes = Math.ceil(linhasInsert.length / 500);
+      
+      console.log(`📦 Agregado Lote ${numeroLote}/${totalLotes} (${lote.length} registros)...`);
+      
       const { error } = await supabase.from('dpmo_agregado').upsert(lote, {
         onConflict: 'chave_unica',
       });
-      if (error) throw new Error(error.message);
+      
+      if (error) {
+        console.error(`❌ ERRO no lote agregado ${numeroLote}:`, error);
+        throw new Error(`Erro no lote agregado ${numeroLote}: ${error.message}`);
+      }
+      
+      totalSalvosAg += lote.length;
+      console.log(`✅ Agregado Lote ${numeroLote} OK! Total: ${totalSalvosAg}/${linhasInsert.length}`);
     }
+    
+    console.log(`🎉 AGREGADO SUCESSO! ${totalSalvosAg} linhas salvas`);
 
     const { count } = await supabase
       .from('dpmo_agregado')
