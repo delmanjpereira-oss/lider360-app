@@ -1,13 +1,15 @@
 /**
  * ====================================================
- * CLIENTE GEMINI (com fallback automático)
+ * CLIENTE IA — GROQ (Llama 3.3 70B Versatile)
  * lib/ia/gemini-client.ts
  *
- * Tenta uma cascata de modelos. Se o primeiro der 429 (quota),
- * tenta o próximo automaticamente.
+ * Arquivo mantém o nome "gemini-client" pra retrocompatibilidade,
+ * mas por baixo agora usa a API do Groq (free tier muito mais amplo).
  *
- * Cascata: 1.5-flash → 1.5-flash-8b → 2.0-flash
- * (modelos legados costumam ter free tier mais aberto)
+ * Modelo: llama-3.3-70b-versatile (Meta, hospedado no Groq)
+ * Free tier Groq: 30 req/min, 14.400 req/dia
+ *
+ * Endpoint compatível com formato OpenAI.
  * ====================================================
  */
 
@@ -16,113 +18,109 @@ export interface MensagemIA {
   content: string;
 }
 
-interface GeminiOptions {
+interface IaOptions {
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
   modelo?: string;
 }
 
-// Cascata de modelos pra tentar (ordem do mais permissivo pro menos)
-const MODELOS_FALLBACK = [
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
-  'gemini-2.0-flash',
+// Cascata de modelos do Groq (fallback automático)
+const MODELOS_GROQ = [
+  'llama-3.3-70b-versatile',  // melhor qualidade
+  'llama-3.1-8b-instant',      // mais rápido (fallback)
+  'gemma2-9b-it',              // último recurso
 ];
 
+const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+
 /**
- * Chama a API do Gemini, com fallback automático entre modelos
- * se der 429 (quota excedida).
+ * Chama a IA com fallback automático entre modelos.
+ * Mantém o nome `chamarGemini` pra retrocompatibilidade.
  */
 export async function chamarGemini(
   mensagens: MensagemIA[],
-  options: GeminiOptions = {}
+  options: IaOptions = {}
 ): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.gemini;
+  const apiKey = process.env.GROQ_API_KEY;
 
   if (!apiKey) {
     throw new Error(
-      'GEMINI_API_KEY (ou gemini) não configurada nas Environment Variables do Vercel'
+      'GROQ_API_KEY não configurada nas Environment Variables do Vercel. Crie a chave em https://console.groq.com/keys'
     );
   }
 
-  // Se o usuário passou um modelo específico, usa só ele
-  // Senão, tenta a cascata
-  const modelosParaTentar = options.modelo ? [options.modelo] : MODELOS_FALLBACK;
+  const modelosParaTentar = options.modelo ? [options.modelo] : MODELOS_GROQ;
 
   let ultimoErro: Error | null = null;
 
   for (const modelo of modelosParaTentar) {
     try {
-      return await chamarGeminiInterno(apiKey, modelo, mensagens, options);
+      return await chamarGroqInterno(apiKey, modelo, mensagens, options);
     } catch (err: any) {
       ultimoErro = err;
       const msg = err?.message || '';
-      // Se for erro 429 (quota), tenta próximo modelo
-      if (msg.includes('429') || msg.toLowerCase().includes('quota')) {
-        console.warn(`[Gemini] ${modelo} sem quota, tentando próximo...`);
+      // 429 = rate limit, 503 = serviço sobrecarregado → tenta próximo
+      if (msg.includes('429') || msg.includes('503') || msg.toLowerCase().includes('rate')) {
+        console.warn(`[Groq] ${modelo} sem quota/sobrecarregado, tentando próximo...`);
         continue;
       }
-      // Outros erros: aborta na hora
       throw err;
     }
   }
 
-  // Se chegou aqui, todos os modelos falharam
   throw new Error(
-    `Todos os modelos Gemini sem quota disponível. Último erro: ${
-      ultimoErro?.message || 'desconhecido'
-    }`
+    `Todos os modelos Groq indisponíveis. Último erro: ${ultimoErro?.message || 'desconhecido'}`
   );
 }
 
 /**
- * Chamada interna a um modelo específico.
+ * Chamada interna a um modelo Groq específico.
  */
-async function chamarGeminiInterno(
+async function chamarGroqInterno(
   apiKey: string,
   modelo: string,
   mensagens: MensagemIA[],
-  options: GeminiOptions
+  options: IaOptions
 ): Promise<string> {
-  const contents = mensagens.map((m) => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }],
-  }));
-
-  const body: any = {
-    contents,
-    generationConfig: {
-      temperature: options.temperature ?? 0.7,
-      maxOutputTokens: options.maxTokens ?? 8192,
-      topP: 0.95,
-      topK: 40,
-    },
-    safetySettings: [
-      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
-      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
-      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
-      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
-    ],
-  };
+  // Formato OpenAI: system vai como mensagem com role='system'
+  const messages: Array<{ role: string; content: string }> = [];
 
   if (options.systemPrompt) {
-    body.systemInstruction = {
-      parts: [{ text: options.systemPrompt }],
-    };
+    messages.push({
+      role: 'system',
+      content: options.systemPrompt,
+    });
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`;
+  for (const m of mensagens) {
+    messages.push({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+    });
+  }
+
+  const body = {
+    model: modelo,
+    messages,
+    temperature: options.temperature ?? 0.7,
+    max_tokens: options.maxTokens ?? 4096,
+    top_p: 0.95,
+    stream: false,
+  };
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetch(GROQ_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify(body),
     });
   } catch (err: any) {
-    throw new Error(`Falha de rede ao chamar Gemini: ${err?.message || 'desconhecido'}`);
+    throw new Error(`Falha de rede ao chamar Groq: ${err?.message || 'desconhecido'}`);
   }
 
   if (!response.ok) {
@@ -133,21 +131,16 @@ async function chamarGeminiInterno(
     } catch {
       // ignora
     }
-    throw new Error(`Gemini API erro: ${detalhe}`);
+    throw new Error(`Groq API erro: ${detalhe}`);
   }
 
   const data = await response.json();
 
-  const candidato = data?.candidates?.[0];
-  if (candidato?.finishReason === 'SAFETY') {
-    throw new Error('Resposta bloqueada por filtros de segurança do Gemini');
-  }
-
-  const texto = candidato?.content?.parts?.[0]?.text;
+  const texto = data?.choices?.[0]?.message?.content;
 
   if (!texto || typeof texto !== 'string') {
-    console.error('[Gemini] Resposta inesperada:', JSON.stringify(data).slice(0, 500));
-    throw new Error('Resposta vazia ou inválida do Gemini');
+    console.error('[Groq] Resposta inesperada:', JSON.stringify(data).slice(0, 500));
+    throw new Error('Resposta vazia ou inválida do Groq');
   }
 
   return texto.trim();
@@ -159,7 +152,7 @@ async function chamarGeminiInterno(
 export async function gerarTextoComIA(
   prompt: string,
   systemPrompt: string,
-  options: Omit<GeminiOptions, 'systemPrompt'> = {}
+  options: Omit<IaOptions, 'systemPrompt'> = {}
 ): Promise<string> {
   return chamarGemini(
     [{ role: 'user', content: prompt }],
