@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 
 export default function Topbar() {
   const [hora, setHora] = useState('');
@@ -90,7 +89,7 @@ export default function Topbar() {
         </div>
       </div>
 
-      {/* Lado direito - Hora + RC + Config */}
+      {/* Lado direito - Hora + RC */}
       <div className="flex items-center gap-3">
         {/* Centro de Distribuição */}
         <div className="hidden md:flex flex-col items-center px-3 py-1.5 bg-gradient-to-br from-cyan-500/10 to-blue-500/5 border border-cyan-500/30 rounded-lg">
@@ -103,15 +102,6 @@ export default function Topbar() {
           <p className="text-xs text-gray-500">Hora atual</p>
           <p className="text-lg text-white font-mono font-bold">{hora}</p>
         </div>
-
-        {/* Configurações */}
-        <Link
-          href="/configuracoes-app"
-          title="Configurações do App"
-          className="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] hover:from-[#FFD700]/20 hover:to-yellow-600/10 text-gray-400 hover:text-[#FFD700] rounded-xl transition-all border border-[#2a2a2a] hover:border-[#FFD700]/40 hover:-translate-y-0.5 active:translate-y-0 text-xl"
-        >
-          ⚙️
-        </Link>
       </div>
     </header>
   );
