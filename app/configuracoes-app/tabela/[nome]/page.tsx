@@ -18,6 +18,7 @@ type GrupoUpload = {
   registros: number;
   primeiraData: string | null;
   ultimaData: string | null;
+  processos: string[]; // 🎯 Quais processos (Checkin, P2M, etc) tem nesse arquivo
 };
 
 const TABELAS_CONFIG: Record<string, TabelaConfig> = {
@@ -65,31 +66,50 @@ export default function TabelaDetalhePage() {
   async function carregar() {
     setLoading(true);
     try {
-      // Pega TODOS os registros pra agrupar (limita a 50k pra segurança)
-      const { data, error, count } = await supabase
-        .from(nomeTabela)
-        .select('arquivo_origem, criado_em', { count: 'exact' })
-        .limit(50000);
-
-      if (error) throw new Error(error.message);
+      // 🎯 Pega TODOS os registros pra agrupar (com processo se a tabela tiver)
+      // Tenta com processo primeiro, se der erro tenta sem
+      let dataResult: any[] | null = null;
+      let count = 0;
+      
+      try {
+        const { data, error, count: c } = await supabase
+          .from(nomeTabela)
+          .select('arquivo_origem, criado_em, processo', { count: 'exact' })
+          .limit(50000);
+        
+        if (error) throw error;
+        dataResult = data;
+        count = c || 0;
+      } catch {
+        // Tabela não tem coluna processo, busca sem
+        const { data, error, count: c } = await supabase
+          .from(nomeTabela)
+          .select('arquivo_origem, criado_em', { count: 'exact' })
+          .limit(50000);
+        
+        if (error) throw new Error(error.message);
+        dataResult = data;
+        count = c || 0;
+      }
 
       setTotal(count || 0);
 
-      if (data) {
+      if (dataResult) {
         // Agrupa por arquivo_origem
-        const mapa: Record<string, { registros: number; datas: string[] }> = {};
+        const mapa: Record<string, { registros: number; datas: string[]; processos: Set<string> }> = {};
         let semOrig = 0;
 
-        data.forEach((r: { arquivo_origem: string | null; criado_em: string | null }) => {
+        dataResult.forEach((r: { arquivo_origem: string | null; criado_em: string | null; processo?: string | null }) => {
           if (!r.arquivo_origem || r.arquivo_origem.trim() === '') {
             semOrig++;
             return;
           }
           if (!mapa[r.arquivo_origem]) {
-            mapa[r.arquivo_origem] = { registros: 0, datas: [] };
+            mapa[r.arquivo_origem] = { registros: 0, datas: [], processos: new Set() };
           }
           mapa[r.arquivo_origem].registros++;
           if (r.criado_em) mapa[r.arquivo_origem].datas.push(r.criado_em);
+          if (r.processo) mapa[r.arquivo_origem].processos.add(r.processo);
         });
 
         const lista: GrupoUpload[] = Object.entries(mapa).map(([arquivo, dados]) => {
@@ -99,6 +119,7 @@ export default function TabelaDetalhePage() {
             registros: dados.registros,
             primeiraData: datasOrdenadas[0] || null,
             ultimaData: datasOrdenadas[datasOrdenadas.length - 1] || null,
+            processos: Array.from(dados.processos),
           };
         });
 
@@ -294,6 +315,32 @@ export default function TabelaDetalhePage() {
                           <span>📅 {formatarData(g.ultimaData)}</span>
                           <span className="text-gray-600">·</span>
                           <span className="text-cyan-400">{tempoAtras(g.ultimaData)}</span>
+                          
+                          {/* 🎯 Badges de processo */}
+                          {g.processos && g.processos.length > 0 && (
+                            <>
+                              <span className="text-gray-600">·</span>
+                              <div className="flex gap-1 flex-wrap">
+                                {g.processos.map((p) => {
+                                  const cor = 
+                                    p === 'Checkin' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' :
+                                    p === 'P2M' ? 'bg-orange-500/20 text-orange-300 border-orange-500/40' :
+                                    p === 'Sorting' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+                                    p === 'CK' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' :
+                                    'bg-purple-500/20 text-purple-300 border-purple-500/40';
+                                  
+                                  return (
+                                    <span
+                                      key={p}
+                                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border ${cor}`}
+                                    >
+                                      {p}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
