@@ -89,8 +89,49 @@ const MESES_POR_TRIM: Record<string, number[]> = {
   Q1: [1, 2, 3], Q2: [4, 5, 6], Q3: [7, 8, 9], Q4: [10, 11, 12],
 };
 
+// 🎯 Normaliza o processo pra aceitar variações
+// "CK" = "Checkin" = "Check-in" = "CHECKIN"
+// "P2M" = "p2m" = "P2m"
+function normalizarProcesso(p: string | null | undefined): string {
+  if (!p) return '';
+  const norm = String(p).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (norm === 'CK' || norm === 'CHECKIN' || norm === 'CHECK') return 'CHECKIN';
+  if (norm === 'P2M') return 'P2M';
+  if (norm === 'SORTING' || norm === 'SORT') return 'SORTING';
+  return norm;
+}
+
+// 🎯 Compara dois processos, ignorando diferenças de escrita
+function processosIguais(a: string | null | undefined, b: string | null | undefined): boolean {
+  return normalizarProcesso(a) === normalizarProcesso(b);
+}
+
 function normalizarNome(nome: string): string {
   return String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim().replace(/\s+/g, ' ');
+}
+
+// 🎯 Verifica se dois nomes "batem" (matching flexível)
+// "VITORIA DOS SANTOS" bate com "VITORIA DOS SANTOS MARQUES"
+function nomesIguais(a: string, b: string): boolean {
+  const na = normalizarNome(a);
+  const nb = normalizarNome(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  
+  // Tira conectivos (DA, DE, DO, DOS, DAS, E)
+  const limpar = (s: string) => s.split(' ').filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p));
+  const partesA = limpar(na);
+  const partesB = limpar(nb);
+  
+  if (partesA.length === 0 || partesB.length === 0) return false;
+  
+  // Conta palavras em comum
+  let comuns = 0;
+  partesA.forEach((p) => { if (partesB.includes(p)) comuns++; });
+  
+  // Se 60% ou mais das palavras do menor nome batem, considera igual
+  const minTamanho = Math.min(partesA.length, partesB.length);
+  return (comuns / minTamanho) >= 0.6;
 }
 
 function getTrimestreDeData(dataStr: string): { quarter: string; ano: number; mes: number } {
@@ -413,13 +454,25 @@ export default function CalibracaoPage() {
         const procDpmo = c.processo === 'Checkin' ? 'CK' : 'P2M';
 
         // 1. Pega eventos do trimestre desse colaborador (filtra POR PROCESSO PRINCIPAL)
+        // 🎯 Usa nomesIguais (matching flexível) pra pegar mesmo quando id_groot é null
         const eventosTrim = dpmoEventos.filter((d) => {
           if (d.ano !== anoNum || d.trimestre !== quarterSel) return false;
           if (d.processo !== procDpmo) return false; // 🎯 Só dados do processo principal
-          if (d.id_groot === c.id_groot) return true;
-          if (!d.id_groot && normalizarNome(d.representante) === nomeNorm) return true;
+          // Vincula por id_groot OU por nome flexível
+          if (d.id_groot && d.id_groot === c.id_groot) return true;
+          if (nomesIguais(d.representante, c.nome)) return true;
           return false;
         });
+
+        if (idx < 3) {
+          console.log(`🎯 [${c.nome}] DPMO eventos encontrados:`, eventosTrim.length);
+          if (eventosTrim.length === 0) {
+            const exemplos = dpmoEventos
+              .filter((d) => d.ano === anoNum && d.trimestre === quarterSel && d.processo === procDpmo)
+              .slice(0, 3);
+            console.log(`   🔎 Exemplos DPMO disponíveis (${procDpmo}/${quarterSel}/${anoNum}):`, exemplos.map((e) => ({ rep: e.representante, id: e.id_groot })));
+          }
+        }
 
         // 2. Acha a DATA MÁXIMA do inventário GERAL (de todos colaboradores)
         //    Looker usa essa data como limite — não pega produtividade depois dela
