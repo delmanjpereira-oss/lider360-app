@@ -288,7 +288,17 @@ export default function DpmoPage() {
 
     const mapaCadastro: Record<string, ColaboradorMap> = {};
     colabsDoProcesso.forEach((c) => {
+      // Indexa por NOME normalizado
       mapaCadastro[normalizarNome(c.nome)] = c;
+      // Indexa também por ID_GROOT (chave universal MELI)
+      if (c.id_groot) {
+        mapaCadastro[`__ID__${String(c.id_groot).trim()}`] = c;
+      }
+    });
+
+    console.log('🗺️ Mapa de cadastro criado:', {
+      totalColabs: colabsDoProcesso.length,
+      chaves: Object.keys(mapaCadastro).slice(0, 10),
     });
 
     if (formato === 'detalhado') {
@@ -324,6 +334,20 @@ export default function DpmoPage() {
       const representante = pegarValor(linha, ['REPRESENTANTE', 'nome']);
       const is = pegarValor(linha, ['IS', 'inbound']);
       const sku = pegarValor(linha, ['SKU']);
+      
+      // 🎯 ID GROOT - busca em várias possíveis colunas
+      const idGrootCsv = pegarValor(linha, [
+        'id_groot',
+        'ID_GROOT',
+        'Id_Groot',
+        'id groot',
+        'ID GROOT',
+        'Id Groot',
+        'groot',
+        'GROOT',
+        'id',
+        'ID',
+      ]);
 
       const data = parseDataCsv(dataHora);
       
@@ -333,6 +357,7 @@ export default function DpmoPage() {
           dataHoraOriginal: dataHora,
           dataParseada: data,
           user,
+          idGrootCsv,
           representante,
           is,
           sku,
@@ -358,8 +383,15 @@ export default function DpmoPage() {
       const trimestre = getTrimestre(mes);
 
       const chaveUnica = `${data.toISOString()}_${user}_${is}_${sku}`;
-      const cadastro = mapaCadastro[normalizarNome(representante)];
-      const idGroot = cadastro?.id_groot || null;
+      
+      // 🎯 Tenta vincular por ID_GROOT primeiro, depois por USER, depois por nome
+      const idGrootLimpo = String(idGrootCsv || '').replace(/\D/g, '').trim();
+      const userLimpo = String(user).trim();
+      const cadastro = 
+        (idGrootLimpo && mapaCadastro[`__ID__${idGrootLimpo}`]) ||   // 1ª: ID_GROOT do CSV
+        mapaCadastro[`__ID__${userLimpo}`] ||                         // 2ª: USER do CSV (caso seja id)
+        mapaCadastro[normalizarNome(representante)];                  // 3ª: nome normalizado
+      const idGroot = cadastro?.id_groot || idGrootLimpo || null;
 
       eventos.push({
         chaveUnica,
@@ -381,15 +413,26 @@ export default function DpmoPage() {
       });
     });
 
-    // Log final do resumo
+    // Log final do resumo + estatística de vinculação
+    const vinculados = eventos.filter((e) => e.idGroot).length;
+    const naoVinculados = eventos.length - vinculados;
+    
     console.log('📊 Resumo do processamento DPMO:', {
       totalLinhas,
       eventosValidos: eventos.length,
+      vinculadosAoColab: vinculados,
+      naoVinculados,
       semData,
       semRepresentante,
       semIS,
       semSKU,
     });
+
+    // Lista os representantes que NÃO foram vinculados (pra debug)
+    if (naoVinculados > 0) {
+      const nomesNaoVinculados = [...new Set(eventos.filter((e) => !e.idGroot).map((e) => `${e.representante} (USER: ${e.checkinUser})`))];
+      console.warn('⚠️ Representantes NÃO vinculados ao cadastro:', nomesNaoVinculados);
+    }
 
     if (eventos.length === 0) {
       const motivos = [];
@@ -417,6 +460,30 @@ export default function DpmoPage() {
         'OV_NOME_COMPLETO',
         'NOME_COMPLETO',
         'nome',
+      ]);
+
+      // 🎯 ID GROOT - busca em várias possíveis colunas
+      const idGrootCsv = pegarValor(linha, [
+        'id_groot',
+        'ID_GROOT',
+        'Id_Groot',
+        'id groot',
+        'ID GROOT',
+        'Id Groot',
+        'groot',
+        'GROOT',
+        'id',
+        'ID',
+        'CK_USER',
+        'P2M_USER',
+        'TP_USER',
+        'SH_USER',
+        'OV_USER',
+        'CHECKIN_USER',
+        'PICK_USER',
+        'USER',
+        'user_id',
+        'USER_ID',
       ]);
 
       // Tenta achar a coluna de semana
@@ -479,8 +546,11 @@ export default function DpmoPage() {
       const mes = dataAprox.getMonth() + 1;
       const trimestre = getTrimestre(mes);
 
-      const cadastro = mapaCadastro[normalizarNome(nome)];
-      const idGroot = cadastro?.id_groot || null;
+      const idGrootLimpoAg = String(idGrootCsv || '').replace(/\D/g, '').trim();
+      const cadastro = 
+        (idGrootLimpoAg && mapaCadastro[`__ID__${idGrootLimpoAg}`]) ||   // 1ª: ID do CSV
+        mapaCadastro[normalizarNome(nome)];                               // 2ª: nome
+      const idGroot = cadastro?.id_groot || idGrootLimpoAg || null;
 
       const chaveUnica = `${normalizarNome(nome)}_${processo}_${ano}_S${semana}`;
 
