@@ -376,8 +376,17 @@ export default function MeuTimePage() {
                 </div>
               </Link>
 
+              {/* 🧠 PERFIL COMPORTAMENTAL (destaque) */}
+              <Link
+                href={`/colaborador/${c.id_groot}/perfil`}
+                className="flex items-center justify-center gap-2 mt-4 w-full text-center text-sm bg-gradient-to-r from-purple-500/20 via-fuchsia-500/15 to-pink-500/20 hover:from-purple-500/40 hover:via-fuchsia-500/30 hover:to-pink-500/40 text-purple-200 hover:text-white font-bold py-2.5 rounded-xl transition-all border border-purple-500/30 hover:border-purple-400/60 hover:shadow-lg hover:shadow-purple-500/20 active:scale-95"
+              >
+                <span className="text-base">🧠</span>
+                <span>Ver Perfil Comportamental</span>
+              </Link>
+
               {/* Ações */}
-              <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a2a2a]">
+              <div className="flex gap-2 mt-3 pt-3 border-t border-[#2a2a2a]">
                 <Link
                   href={`/meu-time/${c.id}/feedbacks`}
                   className="flex-1 text-center text-xs bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 font-bold py-2 rounded-lg transition-all active:scale-95"
