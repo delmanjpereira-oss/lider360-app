@@ -66,6 +66,93 @@ function normalizarNome(nome: string): string {
     .replace(/\s+/g, ' ');
 }
 
+// 🎯 Gera várias variações do nome pra tentar matchear
+function gerarVariacoesNome(nome: string): string[] {
+  const limpo = normalizarNome(nome);
+  if (!limpo) return [];
+
+  const partes = limpo.split(' ').filter((p) => p.length > 1); // ignora "DA", "DE", "DO"
+  const variacoes = new Set<string>();
+
+  // 1. Nome completo
+  variacoes.add(limpo);
+
+  // 2. Sem palavras curtas (DA, DE, DO, DOS, DAS)
+  const semConectivos = limpo
+    .split(' ')
+    .filter((p) => !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p))
+    .join(' ');
+  variacoes.add(semConectivos);
+
+  // 3. Só primeiro + último nome
+  if (partes.length >= 2) {
+    variacoes.add(`${partes[0]} ${partes[partes.length - 1]}`);
+  }
+
+  // 4. Invertido (último primeiro)
+  if (partes.length >= 2) {
+    variacoes.add(`${partes[partes.length - 1]} ${partes[0]}`);
+  }
+
+  // 5. Só primeiros 3
+  if (partes.length >= 3) {
+    variacoes.add(`${partes[0]} ${partes[1]} ${partes[2]}`);
+  }
+
+  // 6. Só os 2 primeiros
+  if (partes.length >= 2) {
+    variacoes.add(`${partes[0]} ${partes[1]}`);
+  }
+
+  return Array.from(variacoes);
+}
+
+// 🎯 Calcula similaridade entre dois nomes (0 a 1)
+function similaridadeNome(a: string, b: string): number {
+  const na = normalizarNome(a);
+  const nb = normalizarNome(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+
+  const partesA = new Set(na.split(' ').filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p)));
+  const partesB = new Set(nb.split(' ').filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p)));
+
+  if (partesA.size === 0 || partesB.size === 0) return 0;
+
+  // Conta quantas palavras coincidem
+  let comuns = 0;
+  partesA.forEach((p) => {
+    if (partesB.has(p)) comuns++;
+  });
+
+  const total = Math.max(partesA.size, partesB.size);
+  return comuns / total;
+}
+
+// 🎯 Busca melhor match no mapa de cadastro (similaridade >= 0.5)
+function buscarMelhorMatch(
+  nomeCSV: string,
+  mapaCadastro: Record<string, { id_groot: string; nome: string; processo: string }>,
+  threshold: number = 0.5
+): { id_groot: string; nome: string; processo: string } | null {
+  let melhorMatch = null;
+  let melhorScore = 0;
+
+  // Filtra só chaves de nome (ignora __ID__)
+  const chavesNome = Object.keys(mapaCadastro).filter((k) => !k.startsWith('__ID__'));
+
+  for (const chave of chavesNome) {
+    const colab = mapaCadastro[chave];
+    const score = similaridadeNome(nomeCSV, colab.nome);
+    if (score > melhorScore && score >= threshold) {
+      melhorScore = score;
+      melhorMatch = colab;
+    }
+  }
+
+  return melhorMatch;
+}
+
 function parseDataCsv(str: string): Date | null {
   if (!str) return null;
   const s = String(str).trim();
@@ -288,8 +375,11 @@ export default function DpmoPage() {
 
     const mapaCadastro: Record<string, ColaboradorMap> = {};
     colabsDoProcesso.forEach((c) => {
-      // Indexa por NOME normalizado
-      mapaCadastro[normalizarNome(c.nome)] = c;
+      // Indexa por TODAS as variações de nome
+      const variacoes = gerarVariacoesNome(c.nome);
+      variacoes.forEach((v) => {
+        if (!mapaCadastro[v]) mapaCadastro[v] = c;
+      });
       // Indexa também por ID_GROOT (chave universal MELI)
       if (c.id_groot) {
         mapaCadastro[`__ID__${String(c.id_groot).trim()}`] = c;
@@ -298,7 +388,8 @@ export default function DpmoPage() {
 
     console.log('🗺️ Mapa de cadastro criado:', {
       totalColabs: colabsDoProcesso.length,
-      chaves: Object.keys(mapaCadastro).slice(0, 10),
+      totalChaves: Object.keys(mapaCadastro).length,
+      exemplos: Object.keys(mapaCadastro).filter((k) => !k.startsWith('__ID__')).slice(0, 10),
     });
 
     if (formato === 'detalhado') {
@@ -384,13 +475,58 @@ export default function DpmoPage() {
 
       const chaveUnica = `${data.toISOString()}_${user}_${is}_${sku}`;
       
-      // 🎯 Tenta vincular por ID_GROOT primeiro, depois por USER, depois por nome
+      // 🎯 Sistema robusto de vinculação por nome
+      // 1ª tentativa: ID se tiver no CSV
       const idGrootLimpo = String(idGrootCsv || '').replace(/\D/g, '').trim();
-      const userLimpo = String(user).trim();
-      const cadastro = 
-        (idGrootLimpo && mapaCadastro[`__ID__${idGrootLimpo}`]) ||   // 1ª: ID_GROOT do CSV
-        mapaCadastro[`__ID__${userLimpo}`] ||                         // 2ª: USER do CSV (caso seja id)
-        mapaCadastro[normalizarNome(representante)];                  // 3ª: nome normalizado
+      const userLimpo = String(user || '').replace(/\D/g, '').trim();
+      
+      let cadastro = null;
+      let metodoVinculacao = '';
+      
+      // Tenta por ID se for número
+      if (idGrootLimpo && idGrootLimpo.length >= 5) {
+        cadastro = mapaCadastro[`__ID__${idGrootLimpo}`];
+        if (cadastro) metodoVinculacao = 'ID_GROOT';
+      }
+      if (!cadastro && userLimpo && userLimpo.length >= 5) {
+        cadastro = mapaCadastro[`__ID__${userLimpo}`];
+        if (cadastro) metodoVinculacao = 'USER';
+      }
+      
+      // 2ª tentativa: nome com TODAS as variações
+      if (!cadastro && representante) {
+        const variacoes = gerarVariacoesNome(representante);
+        for (const v of variacoes) {
+          if (mapaCadastro[v]) {
+            cadastro = mapaCadastro[v];
+            metodoVinculacao = 'NOME_VARIACAO';
+            break;
+          }
+        }
+      }
+      
+      // 3ª tentativa: matching por SIMILARIDADE (fuzzy)
+      if (!cadastro && representante) {
+        cadastro = buscarMelhorMatch(representante, mapaCadastro, 0.6);
+        if (cadastro) metodoVinculacao = 'FUZZY';
+      }
+
+      // Debug do método de vinculação
+      if (idx < 5 && cadastro) {
+        console.log(`✅ Linha ${idx + 1} vinculou via ${metodoVinculacao}:`, {
+          csv: representante,
+          cadastro: cadastro.nome,
+          id_groot: cadastro.id_groot,
+        });
+      }
+      if (idx < 5 && !cadastro && representante) {
+        console.warn(`❌ Linha ${idx + 1} NÃO vinculou:`, {
+          representante,
+          user,
+          idGrootCsv,
+        });
+      }
+
       const idGroot = cadastro?.id_groot || idGrootLimpo || null;
 
       eventos.push({
@@ -551,9 +687,30 @@ export default function DpmoPage() {
       const trimestre = getTrimestre(mes);
 
       const idGrootLimpoAg = String(idGrootCsv || '').replace(/\D/g, '').trim();
-      const cadastro = 
-        (idGrootLimpoAg && mapaCadastro[`__ID__${idGrootLimpoAg}`]) ||   // 1ª: ID do CSV
-        mapaCadastro[normalizarNome(nome)];                               // 2ª: nome
+      
+      let cadastro = null;
+      
+      // 1ª: por ID se tiver
+      if (idGrootLimpoAg && idGrootLimpoAg.length >= 5) {
+        cadastro = mapaCadastro[`__ID__${idGrootLimpoAg}`];
+      }
+      
+      // 2ª: nome com variações
+      if (!cadastro && nome) {
+        const variacoes = gerarVariacoesNome(nome);
+        for (const v of variacoes) {
+          if (mapaCadastro[v]) {
+            cadastro = mapaCadastro[v];
+            break;
+          }
+        }
+      }
+      
+      // 3ª: fuzzy match
+      if (!cadastro && nome) {
+        cadastro = buscarMelhorMatch(nome, mapaCadastro, 0.6);
+      }
+      
       const idGroot = cadastro?.id_groot || idGrootLimpoAg || null;
 
       const chaveUnica = `${normalizarNome(nome)}_${processo}_${ano}_S${semana}`;
