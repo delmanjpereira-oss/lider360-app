@@ -182,12 +182,12 @@ export default function CalibracaoPage() {
     try {
       const [colabResp, histResp, prodMensalResp, dpmoResp, dpmoAggResp, ocupResp, fbResp, confResp] = await Promise.all([
         supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
-        supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
-        supabase.from('produtividade_mensal').select('id_groot, mes, ano, trimestre, processo, prod_liquida_media, unidades_total, dias_trabalhados'),
-        supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre, processo'),
-        supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo'),
-        supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre'),
-        supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
+        supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades').limit(50000),
+        supabase.from('produtividade_mensal').select('id_groot, nome, mes, ano, trimestre, processo, prod_liquida_media, unidades_total, dias_trabalhados').limit(50000),
+        supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre, processo').limit(50000),
+        supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo').limit(50000),
+        supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre').limit(50000),
+        supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em').limit(50000),
         supabase.from('config').select('chave, valor'),
       ]);
 
