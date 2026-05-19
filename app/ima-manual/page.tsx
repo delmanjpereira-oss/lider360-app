@@ -276,32 +276,45 @@ export default function ImaManualPage() {
     const linhas: LinhaOcr[] = [];
     const blocos = texto.split('\n');
 
-    blocos.forEach((linha) => {
+    blocos.forEach((linha, idx) => {
       const limpa = linha.trim();
       if (!limpa || limpa.length < 5) return;
 
-      const padroes = [
-        /^(.+?)\s+([\d.,]+)\s*$/,
-        /^(.+?)\s+([\d]+[\.,][\d]+)\s*$/,
-        /^(.+?)\s+([\d]{2,6})\s*$/,
-      ];
-
-      for (const regex of padroes) {
-        const match = limpa.match(regex);
-        if (match) {
-          const nome = match[1].trim();
-          const numStr = match[2].replace(/[.,]/g, '');
-          const num = parseInt(numStr);
-          
-          if (nome.length < 3) continue;
-          if (isNaN(num) || num < 1 || num > 100000) continue;
-          if (!/[a-zA-ZÀ-ú]/.test(nome)) continue;
-          
-          linhas.push({ nomeOcr: nome, imaOcr: num });
-          break;
-        }
+      // 🎯 Acha TODOS os números da linha
+      // Padrão aceita: 1.567, 1567, 1,567.50, 12.345
+      const numerosMatches = Array.from(limpa.matchAll(/[\d]{1,3}(?:[.,][\d]{3})*(?:[.,][\d]+)?|\d+/g));
+      
+      if (numerosMatches.length === 0) return;
+      
+      // 🎯 Pega o ÚLTIMO número (que tá no canto direito da linha)
+      const ultimoMatch = numerosMatches[numerosMatches.length - 1];
+      const numStr = ultimoMatch[0].replace(/[.,]/g, '');
+      const num = parseInt(numStr);
+      
+      // Valida o número
+      if (isNaN(num) || num < 1 || num > 100000) return;
+      
+      // 🎯 Tudo ANTES do último número é considerado o NOME
+      const posicaoUltimo = ultimoMatch.index || 0;
+      const nome = limpa.substring(0, posicaoUltimo).trim()
+        // Remove números intermediários que sobraram (deixa só letras)
+        .replace(/\s+\d[\d.,]*\s*$/g, '')
+        .trim();
+      
+      // Valida o nome
+      if (nome.length < 3) return;
+      if (!/[a-zA-ZÀ-ú]/.test(nome)) return;
+      
+      // Logs pra debug
+      if (idx < 5) {
+        console.log(`📝 Linha "${limpa}" → Nome: "${nome}" | IMA: ${num}`);
       }
+      
+      linhas.push({ nomeOcr: nome, imaOcr: num });
     });
+
+    return linhas;
+  }
 
     return linhas;
   }
