@@ -58,6 +58,25 @@ function normalizarNome(nome: string): string {
     .replace(/\s+/g, ' ');
 }
 
+function nomesIguais(a: string, b: string): { igual: boolean; score: number } {
+  const na = normalizarNome(a);
+  const nb = normalizarNome(b);
+  if (!na || !nb) return { igual: false, score: 0 };
+  if (na === nb) return { igual: true, score: 1 };
+
+  const limpar = (s: string) =>
+    s.split(' ').filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p));
+  const partesA = limpar(na);
+  const partesB = limpar(nb);
+  if (partesA.length === 0 || partesB.length === 0) return { igual: false, score: 0 };
+
+  let comuns = 0;
+  partesA.forEach((p) => { if (partesB.includes(p)) comuns++; });
+  const minTamanho = Math.min(partesA.length, partesB.length);
+  const score = comuns / minTamanho;
+  return { igual: score >= 0.6, score };
+}
+
 function partesNome(nome: string): string[] {
   return normalizarNome(nome)
     .split(' ')
@@ -115,8 +134,11 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
     const posicaoPrimeiro = posicoes[0];
 
     let nome = limpa.substring(0, posicaoPrimeiro).trim();
+    nome = nome.replace(/\.+/g, ''); // remove "..." e ".."
     nome = nome.replace(/[^a-zA-ZÀ-ú\s]/g, ' ').replace(/\s+/g, ' ').trim();
     nome = nome.replace(/\b(sm|em|eos|amo|asso)\b/gi, '').replace(/\s+/g, ' ').trim();
+    // 🎯 Remove letras soltas (1 caractere) que são lixo do OCR
+    nome = nome.split(' ').filter((p) => p.length >= 2).join(' ').trim();
 
     if (nome.length < 3) return;
     if (!/[a-zA-ZÀ-ú]{3,}/.test(nome)) return;
@@ -289,41 +311,107 @@ export default function DpmoPage() {
 
   function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
     return linhasInput.map((linha) => {
-      const partesOcr = partesNome(linha.nomeOcr);
+      // Remove reticências e pontos do final dos nomes (OCR trunca com "...")
+      const nomeLimpo = linha.nomeOcr.replace(/\.+/g, '').trim();
+      const partesOcr = partesNome(nomeLimpo);
+      
       if (partesOcr.length === 0) {
         return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
       }
 
+      // 🎯 Helper: parte do OCR "casa" com parte do cadastro?
+      // Aceita prefixo (OCR truncado): "SOU" casa com "SOUZA"
+      function parteCasa(ocr: string, cadastro: string): boolean {
+        if (ocr === cadastro) return true;
+        // Se OCR tem 3+ letras E é prefixo do cadastro → bate
+        if (ocr.length >= 3 && cadastro.startsWith(ocr)) return true;
+        // Ou se cadastro é prefixo do OCR (raro mas pode)
+        if (cadastro.length >= 3 && ocr.startsWith(cadastro)) return true;
+        return false;
+      }
+
+      // 🎯 ETAPA 1: Match perfeito por todas as partes (ordem pode variar)
       const matchExato = colaboradores.find((c) => {
         const partesColab = partesNome(c.nome);
         if (partesColab.length === 0) return false;
-        return partesOcr.every((p) => partesColab.includes(p)) &&
-               partesColab.every((p) => partesOcr.includes(p));
+        // Todas as partes do OCR têm que casar com alguma do cadastro
+        const todasOcrCasam = partesOcr.every((po) =>
+          partesColab.some((pc) => parteCasa(po, pc))
+        );
+        // E todas do cadastro têm que casar com alguma do OCR
+        const todasCadastroCasam = partesColab.every((pc) =>
+          partesOcr.some((po) => parteCasa(po, pc))
+        );
+        return todasOcrCasam && todasCadastroCasam;
       });
-      if (matchExato) return { ...linha, cadastroVinculado: matchExato, metodo: 'exato' as const };
+      
+      if (matchExato) {
+        console.log(`✅ EXATO: "${linha.nomeOcr}" → ${matchExato.nome}`);
+        return { ...linha, cadastroVinculado: matchExato, metodo: 'exato' as const };
+      }
 
+      // 🎯 ETAPA 2: Nome+Sobrenome (2 primeiros nomes batem)
       if (partesOcr.length < 2) {
+        console.log(`❌ "${linha.nomeOcr}" só tem 1 nome`);
         return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
       }
+
       const candidatos = colaboradores.filter((c) => {
         const partesColab = partesNome(c.nome);
         if (partesColab.length < 2) return false;
-        return partesColab[0] === partesOcr[0] && partesColab[1] === partesOcr[1];
+        return parteCasa(partesOcr[0], partesColab[0]) && 
+               parteCasa(partesOcr[1], partesColab[1]);
       });
+
       if (candidatos.length === 1) {
+        console.log(`✅ NOME+SOB: "${linha.nomeOcr}" → ${candidatos[0].nome}`);
         return { ...linha, cadastroVinculado: candidatos[0], metodo: 'fuzzy' as const };
       }
 
+      // 🎯 ETAPA 3: Desempate pelo 3º nome
       if (candidatos.length > 1 && partesOcr.length >= 3) {
         const terceiroOcr = partesOcr[2];
         const desempate = candidatos.find((c) => {
           const partesColab = partesNome(c.nome);
           const t = partesColab[2] || '';
-          return t.startsWith(terceiroOcr) || terceiroOcr.startsWith(t);
+          return parteCasa(terceiroOcr, t);
         });
-        if (desempate) return { ...linha, cadastroVinculado: desempate, metodo: 'fuzzy' as const };
+        if (desempate) {
+          console.log(`✅ DESEMPATE: "${linha.nomeOcr}" → ${desempate.nome}`);
+          return { ...linha, cadastroVinculado: desempate, metodo: 'fuzzy' as const };
+        }
       }
 
+      // 🎯 ETAPA 4 (NOVO): Match flexível - se 2 OU MAIS partes batem
+      // Útil pra nomes truncados no print mas com partes únicas
+      let melhorCandidato: Colaborador | undefined;
+      let melhorScore = 0;
+      
+      colaboradores.forEach((c) => {
+        const partesColab = partesNome(c.nome);
+        if (partesColab.length === 0) return;
+        
+        let comuns = 0;
+        partesOcr.forEach((po) => {
+          if (partesColab.some((pc) => parteCasa(po, pc))) {
+            comuns++;
+          }
+        });
+        
+        // Score: quantas partes batem / max(tamanho)
+        const score = comuns / Math.max(partesOcr.length, partesColab.length);
+        if (score > melhorScore && score >= 0.5) {
+          melhorScore = score;
+          melhorCandidato = c;
+        }
+      });
+
+      if (melhorCandidato && melhorScore >= 0.5) {
+        console.log(`🔶 FLEX (${Math.round(melhorScore * 100)}%): "${linha.nomeOcr}" → ${melhorCandidato.nome}`);
+        return { ...linha, cadastroVinculado: melhorCandidato, metodo: 'fuzzy' as const };
+      }
+
+      console.log(`❌ NÃO VINCULOU: "${linha.nomeOcr}"`);
       return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
     });
   }
