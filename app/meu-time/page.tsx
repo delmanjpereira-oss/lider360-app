@@ -136,7 +136,7 @@ export default function MeuTimePage() {
 
           <Link
             href="/meu-time/dpmo"
-            title="Upload DPMO (Qualidade)"
+            title="DPMO via Print do Looker (até 3 fotos)"
             className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-purple-500/20 to-purple-600/10 hover:from-purple-500/40 hover:to-purple-600/30 text-purple-300 rounded-xl transition-all text-2xl border border-purple-500/30 hover:border-purple-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-purple-500/20 active:translate-y-0"
           >
             📊
@@ -148,14 +148,6 @@ export default function MeuTimePage() {
             className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 hover:from-emerald-500/40 hover:to-emerald-600/30 text-emerald-300 rounded-xl transition-all text-2xl border border-emerald-500/30 hover:border-emerald-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20 active:translate-y-0"
           >
             📦
-          </Link>
-
-          <Link
-            href="/ima-manual"
-            title="Editar IMA Manual (preencher meses passados)"
-            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-yellow-500/20 to-yellow-600/10 hover:from-yellow-500/40 hover:to-yellow-600/30 text-yellow-300 rounded-xl transition-all text-2xl border border-yellow-500/30 hover:border-yellow-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-yellow-500/20 active:translate-y-0"
-          >
-            ✏️
           </Link>
 
           <Link
