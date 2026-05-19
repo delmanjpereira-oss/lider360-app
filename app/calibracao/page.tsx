@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
+import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 
 type Colaborador = {
@@ -163,6 +164,7 @@ export default function CalibracaoPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
   const [produtividadeMensal, setProdutividadeMensal] = useState<any[]>([]);
+  const [imaManual, setImaManual] = useState<any[]>([]);
   const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
   const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
   const [ocupacaoP2M, setOcupacaoP2M] = useState<OcupacaoP2MTipo[]>([]);
@@ -224,6 +226,7 @@ export default function CalibracaoPage() {
         dpmoAggData,
         ocupData,
         fbData,
+        imaManualData,
         confResp,
       ] = await Promise.all([
         fetchAll(
@@ -254,6 +257,10 @@ export default function CalibracaoPage() {
           supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
           'feedbacks'
         ),
+        fetchAll(
+          supabase.from('ima_manual').select('id_groot, mes, ano, trimestre, processo, ima'),
+          'ima_manual'
+        ),
         supabase.from('config').select('chave, valor'),
       ]);
 
@@ -274,6 +281,7 @@ export default function CalibracaoPage() {
       setColaboradores(colabData);
       setHistorico(histData);
       setProdutividadeMensal(prodMensalData);
+      setImaManual(imaManualData);
       setDpmoEventos(dpmoData as DpmoEvento[]);
       setDpmoAgregado(dpmoAggData as DpmoAgregado[]);
       setOcupacaoP2M(ocupData as OcupacaoP2MTipo[]);
@@ -518,13 +526,21 @@ export default function CalibracaoPage() {
         const procDpmo = c.processo === 'Checkin' ? 'CK' : 'P2M';
 
         // 1. Pega eventos do trimestre desse colaborador (filtra POR PROCESSO PRINCIPAL)
-        // 🎯 Usa nomesIguais (matching flexível) pra pegar mesmo quando id_groot é null
+        // 🎯 Matching RIGOROSO:
+        //   - Se DPMO tem id_groot: vincula SÓ por id_groot (mais confiável)
+        //   - Se DPMO NÃO tem id_groot: vincula por nome flexível (fallback)
         const eventosTrim = dpmoEventos.filter((d) => {
           if (d.ano !== anoNum || d.trimestre !== quarterSel) return false;
-          if (d.processo !== procDpmo) return false; // 🎯 Só dados do processo principal
-          // Vincula por id_groot OU por nome flexível
-          if (d.id_groot && d.id_groot === c.id_groot) return true;
+          if (d.processo !== procDpmo) return false;
+          
+          // Tem id_groot? Vincula APENAS por id_groot
+          if (d.id_groot) {
+            return String(d.id_groot).trim() === String(c.id_groot).trim();
+          }
+          
+          // Sem id_groot? Tenta por nome flexível
           if (nomesIguais(d.representante, c.nome)) return true;
+          
           return false;
         });
 
@@ -686,13 +702,32 @@ export default function CalibracaoPage() {
             if (idx < 5) {
               console.log(`🔥 [${c.nome}] IMA MÊS ${mes} CALCULADO: ${medMes[mes].ima} (def=${defMes}, unid=${unidadesMes})`);
             }
+            // Alerta se IMA tá muito alto (provável bug)
+            if (medMes[mes].ima > 10000) {
+              console.warn(`🚨 [${c.nome}] IMA Mês ${mes} ABSURDO: ${medMes[mes].ima}! def=${defMes}, unid=${unidadesMes} - VERIFICAR!`);
+            }
           } else if (idx < 5) {
             console.warn(`⚠️ [${c.nome}] IMA Mês ${mes}: unidades=0, IMA não calcula! (def=${defMes})`);
           }
         });
+        
+        // 🎯 SOBRESCREVE com IMA MANUAL se tiver (prioridade máxima)
+        mesesPossiveis.forEach((mes) => {
+          const manual = imaManual.find((m: any) =>
+            String(m.id_groot) === String(c.id_groot) &&
+            Number(m.mes) === Number(mes) &&
+            Number(m.ano) === anoNum &&
+            processosIguais(m.processo, c.processo)
+          );
+          if (manual && Number(manual.ima) > 0) {
+            const valorAuto = medMes[mes].ima;
+            medMes[mes].ima = Number(manual.ima);
+            if (idx < 5) {
+              console.log(`✏️ [${c.nome}] IMA MANUAL Mês ${mes}: ${manual.ima} (substituiu auto=${valorAuto})`);
+            }
+          }
+        });
       }
-
-      // QUE
       let que = 'Sem dados';
       if (c.processo === 'Checkin' || c.processo === 'P2M') {
         const metaL = c.processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
@@ -760,7 +795,7 @@ export default function CalibracaoPage() {
         aptidao,
       };
     });
-  }, [colaboradores, historico, produtividadeMensal, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
+  }, [colaboradores, historico, produtividadeMensal, imaManual, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
 
   const porProcesso = {
     Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
