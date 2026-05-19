@@ -8,11 +8,21 @@ import { useToast } from '../components/ToastProvider';
 type StatusBanco = {
   totalRegistros: number;
   tamanhoMB: number;
-  ultimoUpload?: string;
   totalColabs: number;
   totalIMAs: number;
   totalDPMOs: number;
   totalSemanas: number;
+  totalHistorico: number;
+  totalOcupacao: number;
+  totalFeedbacks: number;
+};
+
+type UploadHistorico = {
+  id: number;
+  arquivo: string;
+  tabela: string;
+  linhas: number;
+  data: string;
 };
 
 const MESES = [
@@ -24,7 +34,7 @@ const MESES = [
   { num: 11, label: 'Novembro' }, { num: 12, label: 'Dezembro' },
 ];
 
-export default function ConfiguracoesPage() {
+export default function ConfiguracoesBancoPage() {
   const toast = useToast();
   const [status, setStatus] = useState<StatusBanco>({
     totalRegistros: 0,
@@ -33,8 +43,17 @@ export default function ConfiguracoesPage() {
     totalIMAs: 0,
     totalDPMOs: 0,
     totalSemanas: 0,
+    totalHistorico: 0,
+    totalOcupacao: 0,
+    totalFeedbacks: 0,
   });
+  const [uploads, setUploads] = useState<UploadHistorico[]>([]);
+  const [duplicatas, setDuplicatas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Sections collapse
+  const [mostrarUploads, setMostrarUploads] = useState(false);
+  const [mostrarDuplicatas, setMostrarDuplicatas] = useState(false);
   const [mostrarAvancado, setMostrarAvancado] = useState(false);
   
   // Limpeza por mês
@@ -42,6 +61,13 @@ export default function ConfiguracoesPage() {
   const [anoLimpeza, setAnoLimpeza] = useState(2026);
   const [processoLimpeza, setProcessoLimpeza] = useState<'Checkin' | 'P2M' | 'Ambos'>('Ambos');
   const [limpandoMes, setLimpandoMes] = useState(false);
+  
+  // Limpar histórico/produtividade
+  const [limpandoHist, setLimpandoHist] = useState(false);
+  
+  // Duplicatas
+  const [buscandoDup, setBuscandoDup] = useState(false);
+  const [limpandoDup, setLimpandoDup] = useState(false);
   
   // Zona perigosa
   const [confirmarApagarTudo, setConfirmarApagarTudo] = useState('');
@@ -58,10 +84,16 @@ export default function ConfiguracoesPage() {
         { count: colabs },
         { count: imas },
         { count: dpmos },
+        { count: hist },
+        { count: ocup },
+        { count: fbs },
       ] = await Promise.all([
         supabase.from('colaboradores').select('id', { count: 'exact', head: true }),
         supabase.from('ima_manual').select('id', { count: 'exact', head: true }),
         supabase.from('dpmo_agregado').select('id', { count: 'exact', head: true }),
+        supabase.from('historico').select('id', { count: 'exact', head: true }),
+        supabase.from('ocupacao_p2m').select('id', { count: 'exact', head: true }),
+        supabase.from('feedbacks').select('feedback_id', { count: 'exact', head: true }),
       ]);
 
       const { data: semanas } = await supabase
@@ -72,8 +104,8 @@ export default function ConfiguracoesPage() {
       const semanasUnicas = new Set<string>();
       (semanas || []).forEach((s: any) => semanasUnicas.add(`${s.ano}-${s.semana}`));
 
-      const totalReg = (colabs || 0) + (imas || 0) + (dpmos || 0);
-      const tamMB = (totalReg * 250) / (1024 * 1024);
+      const totalReg = (colabs || 0) + (imas || 0) + (dpmos || 0) + (hist || 0) + (ocup || 0) + (fbs || 0);
+      const tamMB = (totalReg * 300) / (1024 * 1024);
 
       setStatus({
         totalRegistros: totalReg,
@@ -82,16 +114,27 @@ export default function ConfiguracoesPage() {
         totalIMAs: imas || 0,
         totalDPMOs: dpmos || 0,
         totalSemanas: semanasUnicas.size,
+        totalHistorico: hist || 0,
+        totalOcupacao: ocup || 0,
+        totalFeedbacks: fbs || 0,
       });
+      
+      // Carrega uploads
+      const { data: uploadsData } = await supabase
+        .from('uploads')
+        .select('*')
+        .order('data', { ascending: false })
+        .limit(15);
+      if (uploadsData) setUploads(uploadsData as UploadHistorico[]);
     } catch (e: any) {
-      toast.error('Erro ao carregar status', e.message);
+      toast.error('Erro ao carregar', e.message);
     } finally {
       setLoading(false);
     }
   }
 
   async function limparMes() {
-    if (!confirm(`Apagar dados de ${MESES[mesLimpeza - 1].label}/${anoLimpeza}?`)) return;
+    if (!confirm(`Apagar dados de IMA + DPMO de ${MESES[mesLimpeza - 1].label}/${anoLimpeza}?`)) return;
     
     setLimpandoMes(true);
     const loadingId = toast.loading('Apagando dados...', `${MESES[mesLimpeza - 1].label}/${anoLimpeza}`);
@@ -147,11 +190,113 @@ export default function ConfiguracoesPage() {
     }
   }
 
+  async function limparHistoricoProdutividade() {
+    if (!confirm('Apagar TODO o histórico de produtividade diária + ocupação? Os IMAs salvos via print continuam intactos.')) return;
+    
+    setLimpandoHist(true);
+    const loadingId = toast.loading('Apagando histórico...', 'Produtividade + Ocupação');
+    
+    try {
+      const { count: histCount } = await supabase.from('historico').delete({ count: 'exact' }).gt('id', 0);
+      const { count: ocupCount } = await supabase.from('ocupacao_p2m').delete({ count: 'exact' }).gt('id', 0);
+      const { count: prodCount } = await supabase.from('produtividade_mensal').delete({ count: 'exact' }).gt('id', 0);
+      
+      toast.update(loadingId, {
+        type: 'success',
+        title: 'Histórico apagado',
+        description: `${(histCount || 0) + (ocupCount || 0) + (prodCount || 0)} registros removidos`,
+      });
+      carregar();
+    } catch (e: any) {
+      toast.update(loadingId, { type: 'error', title: 'Erro', description: e.message });
+    } finally {
+      setLimpandoHist(false);
+    }
+  }
+
+  async function buscarDuplicatas() {
+    setBuscandoDup(true);
+    const loadingId = toast.loading('Buscando duplicatas...');
+    
+    try {
+      const { data } = await supabase
+        .from('historico')
+        .select('id_groot, data_referencia, processo, unidades, criado_em')
+        .order('criado_em', { ascending: false })
+        .limit(5000);
+      
+      if (!data) {
+        toast.update(loadingId, { type: 'info', title: 'Nada encontrado' });
+        return;
+      }
+      
+      const grupos: Record<string, any[]> = {};
+      data.forEach((r: any) => {
+        const k = `${r.id_groot}|${r.data_referencia}|${r.processo}`;
+        if (!grupos[k]) grupos[k] = [];
+        grupos[k].push(r);
+      });
+      
+      const dups = Object.entries(grupos)
+        .filter(([_, v]) => v.length > 1)
+        .map(([k, v]) => ({ chave: k, registros: v }));
+      
+      setDuplicatas(dups);
+      
+      if (dups.length === 0) {
+        toast.update(loadingId, { type: 'success', title: 'Banco limpo!', description: 'Nenhuma duplicata encontrada' });
+      } else {
+        toast.update(loadingId, { type: 'info', title: `${dups.length} duplicatas`, description: 'Veja a lista abaixo' });
+      }
+    } catch (e: any) {
+      toast.update(loadingId, { type: 'error', title: 'Erro', description: e.message });
+    } finally {
+      setBuscandoDup(false);
+    }
+  }
+
+  async function limparDuplicatas() {
+    if (!confirm(`Apagar duplicatas (mantém apenas o registro mais recente de cada grupo)?`)) return;
+    
+    setLimpandoDup(true);
+    const loadingId = toast.loading('Removendo duplicatas...');
+    
+    try {
+      let apagados = 0;
+      for (const dup of duplicatas) {
+        const ordenados = [...dup.registros].sort((a: any, b: any) => 
+          new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime()
+        );
+        const manter = ordenados[0];
+        const apagar = ordenados.slice(1);
+        
+        for (const r of apagar) {
+          await supabase
+            .from('historico')
+            .delete()
+            .eq('id_groot', r.id_groot)
+            .eq('data_referencia', r.data_referencia)
+            .eq('processo', r.processo)
+            .neq('criado_em', manter.criado_em);
+          apagados++;
+        }
+      }
+      
+      toast.update(loadingId, { type: 'success', title: 'Duplicatas removidas', description: `${apagados} registros apagados` });
+      setDuplicatas([]);
+      carregar();
+    } catch (e: any) {
+      toast.update(loadingId, { type: 'error', title: 'Erro', description: e.message });
+    } finally {
+      setLimpandoDup(false);
+    }
+  }
+
   async function apagarTudo() {
     if (confirmarApagarTudo !== 'APAGAR TUDO') return;
     
     setApagandoTudo(true);
-    const loadingId = toast.loading('Apagando todos os dados...', 'Isso pode levar alguns segundos');
+    const loadingId = toast.loading('Apagando todos os dados...', 'Pode levar alguns segundos');
     
     try {
       await supabase.from('ima_manual').delete().gt('id', 0);
@@ -164,8 +309,8 @@ export default function ConfiguracoesPage() {
       
       toast.update(loadingId, {
         type: 'success',
-        title: 'Tudo apagado',
-        description: 'Banco resetado. Colaboradores e config mantidos.',
+        title: 'Banco resetado',
+        description: 'Colaboradores e configurações preservados',
       });
       setConfirmarApagarTudo('');
       carregar();
@@ -176,54 +321,35 @@ export default function ConfiguracoesPage() {
     }
   }
 
+  function formatarData(iso: string): string {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  }
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
       <div className="max-w-5xl mx-auto px-4 py-8">
         <div className="mb-8">
-          <Link href="/configuracoes" className="text-yellow-400 hover:underline text-sm">← Voltar</Link>
+          <Link href="/" className="text-yellow-400 hover:underline text-sm">← Voltar ao início</Link>
           <h1 className="text-4xl font-black mt-3 mb-2">
             ⚙️ <span className="text-[#FFD700]">Banco de Dados</span>
           </h1>
         </div>
 
-        {/* 📊 STATUS - Cards bonitos */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-          <StatusCard
-            icone="👥"
-            valor={loading ? '...' : status.totalColabs}
-            label="Colaboradores"
-            cor="from-cyan-500/20 to-cyan-600/5"
-            corBorda="border-cyan-500/30"
-          />
-          <StatusCard
-            icone="🎯"
-            valor={loading ? '...' : status.totalIMAs}
-            label="IMAs Salvos"
-            cor="from-yellow-500/20 to-yellow-600/5"
-            corBorda="border-yellow-500/30"
-          />
-          <StatusCard
-            icone="📊"
-            valor={loading ? '...' : status.totalDPMOs}
-            label="DPMOs Semanais"
-            cor="from-purple-500/20 to-purple-600/5"
-            corBorda="border-purple-500/30"
-          />
-          <StatusCard
-            icone="📅"
-            valor={loading ? '...' : status.totalSemanas}
-            label="Semanas com Dados"
-            cor="from-emerald-500/20 to-emerald-600/5"
-            corBorda="border-emerald-500/30"
-          />
+        {/* 📊 STATUS - Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <StatusCard icone="👥" valor={loading ? '...' : status.totalColabs} label="Colaboradores" cor="from-cyan-500/20 to-cyan-600/5" corBorda="border-cyan-500/30" />
+          <StatusCard icone="🎯" valor={loading ? '...' : status.totalIMAs} label="IMAs Salvos" cor="from-yellow-500/20 to-yellow-600/5" corBorda="border-yellow-500/30" />
+          <StatusCard icone="📊" valor={loading ? '...' : status.totalDPMOs} label="DPMOs Semanais" cor="from-purple-500/20 to-purple-600/5" corBorda="border-purple-500/30" />
+          <StatusCard icone="📅" valor={loading ? '...' : status.totalSemanas} label="Semanas c/ Dados" cor="from-emerald-500/20 to-emerald-600/5" corBorda="border-emerald-500/30" />
         </div>
 
         {/* 🧹 LIMPAR POR MÊS - Seção Principal */}
-        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-6 shadow-2xl">
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4 shadow-2xl">
           <div className="flex items-center gap-3 mb-5">
-            <div className="w-12 h-12 rounded-xl bg-orange-500/20 flex items-center justify-center text-2xl">
-              🧹
-            </div>
+            <div className="w-12 h-12 rounded-xl bg-orange-500/20 flex items-center justify-center text-2xl">🧹</div>
             <div>
               <h2 className="text-xl font-bold text-white">Limpar Dados por Mês</h2>
               <p className="text-xs text-gray-500">Remove IMAs + DPMOs de um período específico</p>
@@ -233,31 +359,22 @@ export default function ConfiguracoesPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
             <div>
               <label className="text-xs text-gray-400 uppercase tracking-wider mb-2 block">Mês</label>
-              <select
-                value={mesLimpeza}
-                onChange={(e) => setMesLimpeza(Number(e.target.value))}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white hover:border-[#3a3a3a] focus:border-yellow-500/50 transition-all outline-none"
-              >
+              <select value={mesLimpeza} onChange={(e) => setMesLimpeza(Number(e.target.value))}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white hover:border-[#3a3a3a] focus:border-yellow-500/50 transition-all outline-none">
                 {MESES.map((m) => <option key={m.num} value={m.num}>{m.label}</option>)}
               </select>
             </div>
             <div>
               <label className="text-xs text-gray-400 uppercase tracking-wider mb-2 block">Ano</label>
-              <select
-                value={anoLimpeza}
-                onChange={(e) => setAnoLimpeza(Number(e.target.value))}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white hover:border-[#3a3a3a] focus:border-yellow-500/50 transition-all outline-none"
-              >
+              <select value={anoLimpeza} onChange={(e) => setAnoLimpeza(Number(e.target.value))}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white hover:border-[#3a3a3a] focus:border-yellow-500/50 transition-all outline-none">
                 {[2024, 2025, 2026, 2027].map((a) => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
             <div>
               <label className="text-xs text-gray-400 uppercase tracking-wider mb-2 block">Processo</label>
-              <select
-                value={processoLimpeza}
-                onChange={(e) => setProcessoLimpeza(e.target.value as any)}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white hover:border-[#3a3a3a] focus:border-yellow-500/50 transition-all outline-none"
-              >
+              <select value={processoLimpeza} onChange={(e) => setProcessoLimpeza(e.target.value as any)}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white hover:border-[#3a3a3a] focus:border-yellow-500/50 transition-all outline-none">
                 <option value="Ambos">Ambos</option>
                 <option value="Checkin">Checkin</option>
                 <option value="P2M">P2M</option>
@@ -265,55 +382,103 @@ export default function ConfiguracoesPage() {
             </div>
           </div>
 
-          <button
-            onClick={limparMes}
-            disabled={limpandoMes}
-            className="w-full bg-gradient-to-br from-orange-500 to-orange-600 hover:from-orange-400 hover:to-orange-500 text-white font-bold py-3 px-6 rounded-xl transition-all disabled:opacity-50 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-orange-500/30 active:translate-y-0 flex items-center justify-center gap-2"
-          >
-            {limpandoMes ? (
-              <><span className="inline-block animate-spin">⏳</span> Apagando...</>
-            ) : (
-              <>🗑️ Apagar {MESES[mesLimpeza - 1].label}/{anoLimpeza}</>
-            )}
+          <button onClick={limparMes} disabled={limpandoMes}
+            className="w-full bg-gradient-to-br from-orange-500 to-orange-600 hover:from-orange-400 hover:to-orange-500 text-white font-bold py-3 px-6 rounded-xl transition-all disabled:opacity-50 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-orange-500/30 active:translate-y-0 flex items-center justify-center gap-2">
+            {limpandoMes ? <><span className="inline-block animate-spin">⏳</span> Apagando...</> : `🗑️ Apagar ${MESES[mesLimpeza - 1].label}/${anoLimpeza}`}
           </button>
         </div>
 
-        {/* ⚙️ AVANÇADO - Collapse */}
-        <button
-          onClick={() => setMostrarAvancado(!mostrarAvancado)}
-          className="w-full bg-[#1a1a1a] hover:bg-[#222] border border-[#2a2a2a] rounded-xl p-4 mb-6 flex items-center justify-between transition-all"
-        >
-          <span className="text-sm font-bold text-gray-300 flex items-center gap-2">
-            ⚙️ Opções avançadas
-          </span>
-          <span className={`text-gray-400 transition-transform ${mostrarAvancado ? 'rotate-180' : ''}`}>▼</span>
-        </button>
-
-        {mostrarAvancado && (
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 mb-6 space-y-4">
+        {/* 🗑️ LIMPAR HISTÓRICO DE PRODUTIVIDADE (CSV legado) */}
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-12 h-12 rounded-xl bg-rose-500/20 flex items-center justify-center text-2xl">📥</div>
             <div>
-              <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Tamanho estimado</p>
-              <p className="text-2xl font-black text-white">{status.tamanhoMB.toFixed(2)} <span className="text-sm text-gray-500 font-normal">MB</span></p>
+              <h2 className="text-lg font-bold text-white">Limpar Histórico de CSV</h2>
+              <p className="text-xs text-gray-500">{status.totalHistorico} registros · Produtividade + Ocupação</p>
             </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Total de registros</p>
-              <p className="text-2xl font-black text-white">{status.totalRegistros.toLocaleString('pt-BR')}</p>
-            </div>
-            <p className="text-xs text-gray-500 pt-3 border-t border-[#2a2a2a]">
-              Dica: o Supabase Free aceita até 500 MB. Você está usando {((status.tamanhoMB / 500) * 100).toFixed(1)}%.
-            </p>
           </div>
-        )}
+          <button onClick={limparHistoricoProdutividade} disabled={limpandoHist}
+            className="bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-bold py-2 px-5 rounded-xl transition-all disabled:opacity-50">
+            {limpandoHist ? '⏳ Apagando...' : '🗑️ Apagar histórico de CSV'}
+          </button>
+        </div>
+
+        {/* 📥 Histórico de Uploads - Collapse */}
+        <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4">
+          <summary className="cursor-pointer p-4 flex items-center justify-between hover:bg-[#222] transition-all rounded-xl">
+            <span className="text-sm font-bold text-gray-300 flex items-center gap-2">📥 Histórico de Uploads</span>
+            <span className="text-xs text-gray-500">{uploads.length}</span>
+          </summary>
+          <div className="px-4 pb-4 space-y-2">
+            {uploads.length === 0 ? (
+              <p className="text-xs text-gray-500 py-2">Nenhum upload registrado</p>
+            ) : (
+              uploads.map((u) => (
+                <div key={u.id} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3 text-xs flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <p className="text-white font-bold truncate">{u.arquivo}</p>
+                    <p className="text-gray-500">{u.tabela} · {u.linhas} linhas</p>
+                  </div>
+                  <p className="text-gray-500">{formatarData(u.data)}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </details>
+
+        {/* 🔧 Duplicatas - Collapse */}
+        <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4">
+          <summary className="cursor-pointer p-4 flex items-center justify-between hover:bg-[#222] transition-all rounded-xl">
+            <span className="text-sm font-bold text-gray-300 flex items-center gap-2">🔧 Detectar Duplicatas no Histórico</span>
+            <span className="text-xs text-gray-500">{duplicatas.length > 0 ? `${duplicatas.length} grupos` : 'verificar'}</span>
+          </summary>
+          <div className="px-4 pb-4">
+            <div className="flex gap-2 mb-3 flex-wrap">
+              <button onClick={buscarDuplicatas} disabled={buscandoDup}
+                className="bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 font-bold py-2 px-4 rounded-lg text-sm transition-all disabled:opacity-50">
+                {buscandoDup ? '⏳ Buscando...' : '🔍 Verificar'}
+              </button>
+              {duplicatas.length > 0 && (
+                <button onClick={limparDuplicatas} disabled={limpandoDup}
+                  className="bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-bold py-2 px-4 rounded-lg text-sm transition-all disabled:opacity-50">
+                  {limpandoDup ? '⏳ Limpando...' : `🗑️ Apagar duplicatas`}
+                </button>
+              )}
+            </div>
+            {duplicatas.slice(0, 10).map((d, i) => (
+              <div key={i} className="text-xs bg-[#0a0a0a] border border-[#2a2a2a] rounded p-2 mb-1 font-mono text-gray-400">
+                {d.chave} → {d.registros.length} cópias
+              </div>
+            ))}
+            {duplicatas.length > 10 && (
+              <p className="text-xs text-gray-500 mt-2">Mostrando 10 de {duplicatas.length}. Limpar resolve todas.</p>
+            )}
+          </div>
+        </details>
+
+        {/* ⚙️ AVANÇADO - Collapse */}
+        <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-6">
+          <summary className="cursor-pointer p-4 flex items-center justify-between hover:bg-[#222] transition-all rounded-xl">
+            <span className="text-sm font-bold text-gray-300 flex items-center gap-2">📊 Detalhes técnicos</span>
+            <span className="text-gray-400">▼</span>
+          </summary>
+          <div className="px-4 pb-4 grid grid-cols-2 gap-3">
+            <DetailItem label="Tamanho estimado" valor={`${status.tamanhoMB.toFixed(2)} MB`} />
+            <DetailItem label="Total de registros" valor={status.totalRegistros.toLocaleString('pt-BR')} />
+            <DetailItem label="Histórico" valor={status.totalHistorico.toLocaleString('pt-BR')} />
+            <DetailItem label="Ocupação P2M" valor={status.totalOcupacao.toLocaleString('pt-BR')} />
+            <DetailItem label="Feedbacks" valor={status.totalFeedbacks.toLocaleString('pt-BR')} />
+            <DetailItem label="Capacidade Supabase" valor={`${((status.tamanhoMB / 500) * 100).toFixed(1)}% de 500MB`} />
+          </div>
+        </details>
 
         {/* 🚨 ZONA DE PERIGO */}
         <div className="bg-gradient-to-br from-red-500/5 to-red-700/5 border border-red-500/30 rounded-2xl p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center text-2xl">
-              🚨
-            </div>
+            <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center text-2xl">🚨</div>
             <div>
               <h2 className="text-xl font-bold text-red-300">Zona de Perigo</h2>
-              <p className="text-xs text-red-300/60">Resetar TUDO (preserva apenas colaboradores)</p>
+              <p className="text-xs text-red-300/60">Resetar TUDO (preserva apenas colaboradores e config)</p>
             </div>
           </div>
 
@@ -328,11 +493,8 @@ export default function ConfiguracoesPage() {
               placeholder="APAGAR TUDO"
               className="w-full bg-[#0a0a0a] border border-red-500/30 rounded-xl px-4 py-3 text-white mb-3 font-mono outline-none focus:border-red-500"
             />
-            <button
-              onClick={apagarTudo}
-              disabled={confirmarApagarTudo !== 'APAGAR TUDO' || apagandoTudo}
-              className="w-full bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold py-3 px-6 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
+            <button onClick={apagarTudo} disabled={confirmarApagarTudo !== 'APAGAR TUDO' || apagandoTudo}
+              className="w-full bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold py-3 px-6 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2">
               {apagandoTudo ? <><span className="inline-block animate-spin">⏳</span> Apagando...</> : '🔥 Resetar Banco'}
             </button>
           </div>
@@ -348,6 +510,15 @@ function StatusCard({ icone, valor, label, cor, corBorda }: { icone: string; val
       <div className="text-2xl mb-2">{icone}</div>
       <div className="text-2xl font-black text-white">{typeof valor === 'number' ? valor.toLocaleString('pt-BR') : valor}</div>
       <div className="text-xs text-gray-400 mt-1">{label}</div>
+    </div>
+  );
+}
+
+function DetailItem({ label, valor }: { label: string; valor: string }) {
+  return (
+    <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3">
+      <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{label}</p>
+      <p className="text-sm font-bold text-white">{valor}</p>
     </div>
   );
 }
