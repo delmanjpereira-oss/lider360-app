@@ -206,6 +206,7 @@ export default function DpmoPage() {
         }
       });
       setColaboradores(unicos);
+      console.log(`👥 ${unicos.length} colabs ${processoSelecionado} carregados:`, unicos.map((c) => c.nome));
     }
   }
 
@@ -311,7 +312,7 @@ export default function DpmoPage() {
 
   function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
     return linhasInput.map((linha) => {
-      // Remove reticências e pontos do final dos nomes (OCR trunca com "...")
+      // Remove reticências e pontos do final dos nomes
       const nomeLimpo = linha.nomeOcr.replace(/\.+/g, '').trim();
       const partesOcr = partesNome(nomeLimpo);
       
@@ -319,26 +320,36 @@ export default function DpmoPage() {
         return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
       }
 
-      // 🎯 Helper: parte do OCR "casa" com parte do cadastro?
-      // Aceita prefixo (OCR truncado): "SOU" casa com "SOUZA"
+      // 🎯 Helper: parte do OCR "casa" com parte do cadastro (aceita prefixo)
       function parteCasa(ocr: string, cadastro: string): boolean {
         if (ocr === cadastro) return true;
-        // Se OCR tem 3+ letras E é prefixo do cadastro → bate
         if (ocr.length >= 3 && cadastro.startsWith(ocr)) return true;
-        // Ou se cadastro é prefixo do OCR (raro mas pode)
         if (cadastro.length >= 3 && ocr.startsWith(cadastro)) return true;
         return false;
       }
 
-      // 🎯 ETAPA 1: Match perfeito por todas as partes (ordem pode variar)
-      const matchExato = colaboradores.find((c) => {
+      // 🎯 REGRA OBRIGATÓRIA: PRIMEIRO NOME do OCR TEM que bater com o PRIMEIRO do cadastro
+      // Isso evita que "GABRIEL HENRIQUE" match com "HENRIQUE SILVA"
+      const primeiroOcr = partesOcr[0];
+
+      // Filtra colabs cujo PRIMEIRO nome bate com o primeiro do OCR
+      const colabsComPrimeiroIgual = colaboradores.filter((c) => {
         const partesColab = partesNome(c.nome);
         if (partesColab.length === 0) return false;
-        // Todas as partes do OCR têm que casar com alguma do cadastro
+        return parteCasa(primeiroOcr, partesColab[0]);
+      });
+
+      if (colabsComPrimeiroIgual.length === 0) {
+        console.log(`❌ Primeiro nome "${primeiroOcr}" não existe: "${linha.nomeOcr}"`);
+        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+      }
+
+      // 🎯 ETAPA 1: Match perfeito - todas as partes do OCR batem com alguma do cadastro
+      const matchExato = colabsComPrimeiroIgual.find((c) => {
+        const partesColab = partesNome(c.nome);
         const todasOcrCasam = partesOcr.every((po) =>
           partesColab.some((pc) => parteCasa(po, pc))
         );
-        // E todas do cadastro têm que casar com alguma do OCR
         const todasCadastroCasam = partesColab.every((pc) =>
           partesOcr.some((po) => parteCasa(po, pc))
         );
@@ -350,17 +361,17 @@ export default function DpmoPage() {
         return { ...linha, cadastroVinculado: matchExato, metodo: 'exato' as const };
       }
 
-      // 🎯 ETAPA 2: Nome+Sobrenome (2 primeiros nomes batem)
+      // 🎯 ETAPA 2: Nome+Sobrenome (2 primeiros batem)
       if (partesOcr.length < 2) {
-        console.log(`❌ "${linha.nomeOcr}" só tem 1 nome`);
+        console.log(`❌ "${linha.nomeOcr}" só tem 1 nome - ambíguo`);
         return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
       }
 
-      const candidatos = colaboradores.filter((c) => {
+      const segundoOcr = partesOcr[1];
+      const candidatos = colabsComPrimeiroIgual.filter((c) => {
         const partesColab = partesNome(c.nome);
         if (partesColab.length < 2) return false;
-        return parteCasa(partesOcr[0], partesColab[0]) && 
-               parteCasa(partesOcr[1], partesColab[1]);
+        return parteCasa(segundoOcr, partesColab[1]);
       });
 
       if (candidatos.length === 1) {
@@ -382,36 +393,11 @@ export default function DpmoPage() {
         }
       }
 
-      // 🎯 ETAPA 4 (NOVO): Match flexível - se 2 OU MAIS partes batem
-      // Útil pra nomes truncados no print mas com partes únicas
-      let melhorCandidato: Colaborador | undefined;
-      let melhorScore = 0;
-      
-      colaboradores.forEach((c) => {
-        const partesColab = partesNome(c.nome);
-        if (partesColab.length === 0) return;
-        
-        let comuns = 0;
-        partesOcr.forEach((po) => {
-          if (partesColab.some((pc) => parteCasa(po, pc))) {
-            comuns++;
-          }
-        });
-        
-        // Score: quantas partes batem / max(tamanho)
-        const score = comuns / Math.max(partesOcr.length, partesColab.length);
-        if (score > melhorScore && score >= 0.5) {
-          melhorScore = score;
-          melhorCandidato = c;
-        }
-      });
-
-      if (melhorCandidato && melhorScore >= 0.5) {
-        console.log(`🔶 FLEX (${Math.round(melhorScore * 100)}%): "${linha.nomeOcr}" → ${melhorCandidato.nome}`);
-        return { ...linha, cadastroVinculado: melhorCandidato, metodo: 'fuzzy' as const };
+      if (candidatos.length > 1) {
+        console.log(`⚠️ AMBÍGUO: "${linha.nomeOcr}" → ${candidatos.length} candidatos com nome+sob`);
+      } else {
+        console.log(`❌ NÃO VINCULOU: "${linha.nomeOcr}"`);
       }
-
-      console.log(`❌ NÃO VINCULOU: "${linha.nomeOcr}"`);
       return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
     });
   }
