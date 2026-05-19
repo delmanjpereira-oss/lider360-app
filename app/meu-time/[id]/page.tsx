@@ -206,6 +206,7 @@ export default function DetalheColaboradorPage() {
   const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
   const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
   const [ocupacaoP2M, setOcupacaoP2M] = useState<OcupacaoP2M[]>([]);
+  const [imaManual, setImaManual] = useState<any[]>([]);
   const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>([]);
   const [metaIma, setMetaIma] = useState(1567);
   const [loading, setLoading] = useState(true);
@@ -229,6 +230,7 @@ export default function DetalheColaboradorPage() {
             buscarDpmoAgregado(data.id_groot, data.nome, data.processo);
             buscarOcupacaoP2M(data.id_groot, data.nome, data.processo);
             buscarFeedbacks(data.id_groot);
+            buscarImaManual(data.id_groot, data.processo);
             buscarMetaIma(data.processo);
           }
         }
@@ -365,6 +367,27 @@ export default function DetalheColaboradorPage() {
     if (data) setFeedbacksRecentes(data as FeedbackBreve[]);
   }
 
+  // 🎯 Busca IMA manual desse colab pra sobrescrever cálculos
+  async function buscarImaManual(idGroot: string, processoColaborador: string | null) {
+    if (!processoColaborador) return;
+    try {
+      const { data } = await supabase
+        .from('ima_manual')
+        .select('mes, ano, trimestre, processo, ima, atualizado_em')
+        .eq('id_groot', idGroot)
+        .eq('processo', processoColaborador)
+        .order('ano', { ascending: false })
+        .order('mes', { ascending: false });
+      
+      if (data) {
+        setImaManual(data);
+        console.log(`✏️ IMA Manual carregado: ${data.length} registros`);
+      }
+    } catch (e) {
+      console.warn('Erro buscando IMA manual:', e);
+    }
+  }
+
   async function excluir() {
     if (!colaborador) return;
     const ok = await window.showConfirm({
@@ -443,14 +466,26 @@ export default function DetalheColaboradorPage() {
       }
     });
 
-    // 3. Soma unidades (pra mostrar — usadas só no Total Geral)
+    // 3. Soma unidades de TODAS as semanas (mesmo as que não estão no map ainda)
     historico.forEach((h) => {
       if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return;
       const { ano, semana } = getSemanaIso(h.data_referencia);
       const chave = `${ano}-S${semana}`;
-      if (resultado[chave]) {
-        resultado[chave].unidades += h.unidades || 0;
+      
+      // 🎯 Se a semana não existe no resultado, CRIA ela
+      // Antes só somava em semanas com DPMO, agora soma em todas
+      if (!resultado[chave]) {
+        resultado[chave] = {
+          ano,
+          semana,
+          defeitos: 0,
+          unidades: 0,
+          dpmo: 0,
+          diasAuditados: [],
+          statusCalculo: 'falta_inventario',
+        };
       }
+      resultado[chave].unidades += h.unidades || 0;
     });
 
     return Object.values(resultado).sort((a, b) => {
@@ -508,6 +543,18 @@ export default function DetalheColaboradorPage() {
         return semanasComInventario.has(`${ano}-S${semana}`);
       })
       .reduce((s, h) => s + (h.unidades || 0), 0);
+
+    // 🎯 SE TEM IMA MANUAL, faz a média dos meses preenchidos
+    // Isso permite que o "Total Geral" reflita os IMAs editados manualmente
+    if (imaManual.length > 0) {
+      const totalIma = imaManual.reduce((s, m) => s + (Number(m.ima) || 0), 0);
+      const mediaIma = Math.round(totalIma / imaManual.length);
+      return {
+        defeitos: totalDef,
+        unidades: totalUnid,
+        dpmo: mediaIma, // ← usa a média dos IMAs manuais
+      };
+    }
 
     if (totalUnid === 0 || totalDef === 0) return null;
     return {
