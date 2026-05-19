@@ -24,9 +24,25 @@ type ToastContextType = {
 
 const ToastContext = createContext<ToastContextType | null>(null);
 
-export function useToast() {
+// Funções no-op pra quando o provider ainda não montou (SSR/build)
+const noop = () => 0;
+const noopUpdate = () => {};
+
+export function useToast(): ToastContextType {
   const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error('useToast must be used within ToastProvider');
+  // 🎯 Em vez de jogar erro (que quebra SSR), retorna funções no-op
+  // Quando o componente realmente renderizar no cliente, o ctx existirá
+  if (!ctx) {
+    return {
+      show: noop,
+      dismiss: noopUpdate,
+      success: noop,
+      error: noop,
+      info: noop,
+      loading: noop,
+      update: noopUpdate,
+    };
+  }
   return ctx;
 }
 
