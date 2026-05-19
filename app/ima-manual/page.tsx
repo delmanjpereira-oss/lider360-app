@@ -75,30 +75,51 @@ function extrairLinhasOcr(texto: string): LinhaOcr[] {
 
   blocos.forEach((linha, idx) => {
     const limpa = linha.trim();
-    if (!limpa || limpa.length < 5) return;
+    if (!limpa || limpa.length < 3) return;
 
-    const numerosMatches = Array.from(limpa.matchAll(/[\d]{1,3}(?:[.,][\d]{3})*(?:[.,][\d]+)?|\d+/g));
-    if (numerosMatches.length === 0) return;
+    // 🎯 Pega todos os números (com ou sem separador de milhar)
+    // Aceita: 1.567, 1567, 1,567.50, 12345, 1.500.000
+    const regexNumero = /\b\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?\b|\b\d+\b/g;
+    const matches = Array.from(limpa.matchAll(regexNumero));
+    
+    if (matches.length === 0) return;
 
-    const ultimoMatch = numerosMatches[numerosMatches.length - 1];
-    const numStr = ultimoMatch[0].replace(/[.,]/g, '');
+    // 🎯 Pega o ÚLTIMO número que seja "razoável" pra IMA (entre 10 e 100k)
+    let ultimoNumValido: RegExpMatchArray | null = null;
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const m = matches[i];
+      const numStr = m[0].replace(/[.,]/g, '');
+      const num = parseInt(numStr);
+      if (!isNaN(num) && num >= 10 && num <= 100000) {
+        ultimoNumValido = m;
+        break;
+      }
+    }
+    
+    if (!ultimoNumValido) return;
+
+    const numStr = ultimoNumValido[0].replace(/[.,]/g, '');
     const num = parseInt(numStr);
-    if (isNaN(num) || num < 1 || num > 100000) return;
+    const posicaoUltimo = ultimoNumValido.index || 0;
 
-    const posicaoUltimo = ultimoMatch.index || 0;
+    // 🎯 Tudo ANTES do último número = NOME
     let nome = limpa.substring(0, posicaoUltimo).trim();
-    // Remove números intermediários sobressalentes
-    nome = nome.replace(/\s+[\d.,]+\s*$/g, '').trim();
+    
+    // Remove caracteres não-alfa do final/início (pontuação, lixo)
+    nome = nome.replace(/^[^a-zA-ZÀ-ú]+|[^a-zA-ZÀ-ú\s]+$/g, '').trim();
+    // Tira números intermediários
+    nome = nome.replace(/\b\d+[.,]?\d*\b/g, '').replace(/\s+/g, ' ').trim();
 
     if (nome.length < 3) return;
     if (!/[a-zA-ZÀ-ú]/.test(nome)) return;
 
-    if (idx < 5) {
-      console.log(`📝 Linha "${limpa}" → Nome: "${nome}" | IMA: ${num}`);
+    if (idx < 10) {
+      console.log(`📝 Linha ${idx}: "${limpa}" → Nome: "${nome}" | IMA: ${num}`);
     }
     linhas.push({ nomeOcr: nome, imaOcr: num });
   });
 
+  console.log(`📊 Total extraído: ${linhas.length} linhas`);
   return linhas;
 }
 
@@ -114,6 +135,7 @@ export default function ImaManualPage() {
   
   const [imagem, setImagem] = useState<string | null>(null);
   const [linhasOcr, setLinhasOcr] = useState<LinhaOcr[]>([]);
+  const [textoBrutoOcr, setTextoBrutoOcr] = useState<string>('');
   const [processandoOcr, setProcessandoOcr] = useState(false);
   const [progressoOcr, setProgressoOcr] = useState(0);
   const [statusOcr, setStatusOcr] = useState('');
@@ -290,7 +312,11 @@ export default function ImaManualPage() {
       });
 
       const texto = resultado.data.text;
-      console.log('📝 OCR:', texto);
+      console.log('📝 OCR TEXTO BRUTO:');
+      console.log(texto);
+      console.log('📝 ---FIM---');
+      
+      setTextoBrutoOcr(texto);
 
       const linhas = extrairLinhasOcr(texto);
       const vinculadas = vincularLinhasOcr(linhas);
@@ -389,9 +415,18 @@ export default function ImaManualPage() {
     }
   }
 
+  function reextrairDoTexto() {
+    const linhas = extrairLinhasOcr(textoBrutoOcr);
+    const vinculadas = vincularLinhasOcr(linhas);
+    setLinhasOcr(vinculadas);
+    const vinc = vinculadas.filter((l) => l.cadastroVinculado).length;
+    setMensagem(`✅ Re-processado: ${vinculadas.length} linhas, ${vinc} vinculadas`);
+  }
+
   function cancelarOcr() {
     setImagem(null);
     setLinhasOcr([]);
+    setTextoBrutoOcr('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -617,6 +652,32 @@ export default function ImaManualPage() {
                 </div>
               )}
             </div>
+
+            {textoBrutoOcr && !processandoOcr && (
+              <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-orange-500/40 rounded-2xl p-6 mb-4">
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                  <h2 className="text-lg font-bold text-orange-300">🐛 Texto bruto do OCR (DEBUG)</h2>
+                  <button
+                    onClick={reextrairDoTexto}
+                    className="bg-orange-500 hover:bg-orange-400 text-white font-bold py-2 px-4 rounded-lg text-sm"
+                  >
+                    🔄 Re-processar texto
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mb-2">
+                  Esse é o texto que o OCR extraiu da imagem. Você pode editar manualmente e clicar em "Re-processar texto" pra extrair de novo.
+                </p>
+                <textarea
+                  value={textoBrutoOcr}
+                  onChange={(e) => setTextoBrutoOcr(e.target.value)}
+                  className="w-full h-48 bg-[#0a0a0a] border border-orange-500/30 rounded-lg p-3 text-xs text-orange-100 font-mono"
+                  placeholder="(vazio - OCR não conseguiu ler nada)"
+                />
+                <p className="text-[10px] text-gray-500 mt-2">
+                  💡 Se o texto tá errado, tira o print novamente com mais zoom/contraste, ou edite aqui no formato "Nome Sobrenome   123"
+                </p>
+              </div>
+            )}
 
             {linhasOcr.length > 0 && !processandoOcr && (
               <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
