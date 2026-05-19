@@ -151,6 +151,14 @@ export default function MeuTimePage() {
           </Link>
 
           <Link
+            href="/ima-manual"
+            title="Editar IMA Manual (preencher meses passados)"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-yellow-500/20 to-yellow-600/10 hover:from-yellow-500/40 hover:to-yellow-600/30 text-yellow-300 rounded-xl transition-all text-2xl border border-yellow-500/30 hover:border-yellow-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-yellow-500/20 active:translate-y-0"
+          >
+            ✏️
+          </Link>
+
+          <Link
             href="/meu-time/importar"
             title="Importar colaboradores em massa (CSV)"
             className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-green-500/20 to-green-600/10 hover:from-green-500/40 hover:to-green-600/30 text-green-300 rounded-xl transition-all text-2xl border border-green-500/30 hover:border-green-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-500/20 active:translate-y-0"
@@ -389,13 +397,6 @@ export default function MeuTimePage() {
                   className="flex-1 text-center text-xs bg-[#FFD700]/10 text-[#FFD700] hover:bg-[#FFD700]/20 font-bold py-2 rounded-lg transition-all active:scale-95"
                 >
                   ✏️ Editar
-                </Link>
-                <Link
-                  href={`/colaborador/${c.id_groot}/perfil`}
-                  className="text-base bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 font-bold py-2 px-3 rounded-lg transition-all active:scale-95"
-                  title="Perfil Comportamental"
-                >
-                  🧠
                 </Link>
                 <button
                   onClick={() => excluir(c)}
