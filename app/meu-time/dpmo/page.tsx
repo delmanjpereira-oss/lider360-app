@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
+import { useToast } from '../../components/ToastProvider';
 
 type Colaborador = {
   id_groot: string;
@@ -227,6 +228,7 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
 }
 
 export default function DpmoPage() {
+  const toast = useToast();
   const [montado, setMontado] = useState(false);
   const [mesSelecionado, setMesSelecionado] = useState(5);
   const [anoSelecionado, setAnoSelecionado] = useState(2026);
@@ -238,8 +240,6 @@ export default function DpmoPage() {
   const [semanasDetectadas, setSemanasDetectadas] = useState<number[]>([]);
   
   const [salvando, setSalvando] = useState(false);
-  const [mensagem, setMensagem] = useState<string | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const mesAtual = MESES.find((m) => m.num === mesSelecionado);
@@ -281,10 +281,10 @@ export default function DpmoPage() {
 
   function adicionarPrint(file: File) {
     if (prints.length >= 3) {
-      setErro('Máximo 3 prints por upload');
+      toast.error('Limite atingido', 'Máximo 3 prints por upload');
       return;
     }
-    setErro(null);
+    
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -332,7 +332,7 @@ export default function DpmoPage() {
         return novo;
       });
     } catch (e: any) {
-      setErro('Erro no OCR: ' + e.message);
+      toast.error('Erro no OCR', e.message);
       setPrints((prev) => {
         const novo = [...prev];
         if (novo[idx]) novo[idx].processando = false;
@@ -417,7 +417,7 @@ export default function DpmoPage() {
     setLinhas(vinculadas);
     
     const vinc = vinculadas.filter((l) => l.cadastroVinculado).length;
-    setMensagem(`✅ ${vinculadas.length} colabs detectados, ${vinc} vinculados`);
+    toast.info(`${vinculadas.length} colabs detectados`, `${vinc} vinculados ao cadastro`);
   }
 
   function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
@@ -558,12 +558,12 @@ export default function DpmoPage() {
   async function salvarTudo() {
     const vinculadas = linhas.filter((l) => l.cadastroVinculado && l.totalGeral > 0);
     if (vinculadas.length === 0) {
-      setErro('Nenhuma linha vinculada com Total Geral');
+      toast.error('Nada pra salvar', 'Nenhum colab vinculado');
       return;
     }
 
     setSalvando(true);
-    setErro(null);
+    
 
     console.log('💾 INICIANDO SALVAMENTO');
     console.log(`📊 ${vinculadas.length} colabs vinculados`);
@@ -644,11 +644,25 @@ export default function DpmoPage() {
         console.warn('⚠️ Nenhum registro semanal pra salvar (semanas vazias)');
       }
 
-      setMensagem(`✅ Salvo! ${vinculadas.length} IMAs + ${registrosDpmo.length} registros semanais. Imagens descartadas.`);
+      // 🎯 Registra na tabela uploads (pra aparecer no histórico de Configurações)
+      try {
+        await supabase.from('uploads').insert({
+          arquivo: `Print OCR - ${prints.length} imagem(ns) - ${MESES.find((m) => m.num === mesSelecionado)?.label}/${anoSelecionado}`,
+          tabela: 'ima_manual + dpmo_agregado',
+          linhas: registrosIma.length + registrosDpmo.length,
+          data: new Date().toISOString(),
+          modelo_csv: 'print_ocr',
+        });
+        console.log(`📋 Upload registrado no histórico`);
+      } catch (uploadErr) {
+        console.warn('⚠️ Não conseguiu registrar upload (não crítico):', uploadErr);
+      }
+
+      toast.success(`${vinculadas.length} colabs salvos!`, `${registrosDpmo.length} registros semanais atualizados`);
       descartarTudo();
     } catch (e: any) {
       console.error('❌ Erro geral:', e);
-      setErro('Erro ao salvar: ' + e.message);
+      toast.error('Erro ao salvar', e.message);
     } finally {
       setSalvando(false);
     }
@@ -685,7 +699,6 @@ export default function DpmoPage() {
           <h1 className="text-3xl font-black mt-2 mb-1">
             📊 <span className="text-[#FFD700]">DPMO via Print</span>
           </h1>
-          <p className="text-gray-400 text-sm">Sobe até 3 prints do Looker → app extrai Nome + Semanas + Total Geral.</p>
         </div>
 
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
@@ -726,17 +739,6 @@ export default function DpmoPage() {
             )}
           </div>
         </div>
-
-        {mensagem && (
-          <div className="bg-green-500/10 border border-green-500/40 rounded-xl p-4 mb-4">
-            <p className="text-green-300 text-sm font-bold">{mensagem}</p>
-          </div>
-        )}
-        {erro && (
-          <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 mb-4">
-            <p className="text-red-300 text-sm font-bold">{erro}</p>
-          </div>
-        )}
 
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
           <div className="flex items-center justify-between mb-4">
@@ -785,8 +787,6 @@ export default function DpmoPage() {
               </div>
             )}
           </div>
-
-          <p className="text-xs text-pink-300 mt-3">🔒 As imagens não vão pro banco - são descartadas após salvar.</p>
         </div>
 
         {linhas.length > 0 && todosProcessados && (
@@ -884,19 +884,6 @@ export default function DpmoPage() {
             </div>
           </details>
         )}
-
-        <div className="bg-blue-500/10 border border-blue-500/40 rounded-xl p-4">
-          <h3 className="text-blue-300 font-black text-base mb-2">💡 Como funciona:</h3>
-          <ul className="text-xs text-blue-200/80 space-y-1 list-disc pl-5">
-            <li>Tira até <strong>3 prints</strong> do Looker cobrindo todos os colabs</li>
-            <li>Sobe via clique, drag&drop ou Ctrl+V</li>
-            <li>OCR detecta: nome, valores das semanas e total geral</li>
-            <li>Você revisa, ajusta se necessário e salva</li>
-            <li>Salva: <strong>Total → ima_manual</strong> · <strong>Semanas → dpmo_agregado</strong></li>
-            <li>Novo upload <strong>substitui</strong> os valores existentes</li>
-            <li>🔒 Imagens descartadas após salvar</li>
-          </ul>
-        </div>
       </div>
     </div>
   );
