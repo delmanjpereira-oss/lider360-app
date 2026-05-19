@@ -350,27 +350,84 @@ export default function ImaManualPage() {
   }
 
   function vincularLinhasOcr(linhas: LinhaOcr[]): LinhaOcr[] {
-    return linhas.map((linha) => {
-      let melhorMatch: Colaborador | undefined;
-      let melhorScore = 0;
-      let metodo: 'exato' | 'fuzzy' | 'nao_vinculou' = 'nao_vinculou';
+    // 🎯 Quebra o nome em partes normalizadas (sem acento, sem preposições)
+    function partesNome(nome: string): string[] {
+      return normalizarNome(nome)
+        .split(' ')
+        .filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p));
+    }
 
-      for (const colab of colaboradores) {
-        const { igual, score } = nomesIguais(linha.nomeOcr, colab.nome);
-        if (score > melhorScore) {
-          melhorScore = score;
-          if (score === 1) {
-            melhorMatch = colab;
-            metodo = 'exato';
-            break;
-          } else if (igual) {
-            melhorMatch = colab;
-            metodo = 'fuzzy';
-          }
-        }
+    return linhas.map((linha) => {
+      const partesOcr = partesNome(linha.nomeOcr);
+      
+      if (partesOcr.length === 0) {
+        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const, scoreMatch: 0 };
       }
 
-      return { ...linha, cadastroVinculado: melhorMatch, metodo: melhorMatch ? metodo : 'nao_vinculou', scoreMatch: melhorScore };
+      // 🎯 ETAPA 1: Procura COMBINAÇÃO EXATA (todos os nomes do OCR batem com todos do cadastro)
+      const matchExato = colaboradores.find((c) => {
+        const partesColab = partesNome(c.nome);
+        if (partesColab.length === 0) return false;
+        // Todos os nomes do OCR devem estar no cadastro
+        return partesOcr.every((p) => partesColab.includes(p)) && 
+               partesColab.every((p) => partesOcr.includes(p));
+      });
+      
+      if (matchExato) {
+        console.log(`✅ EXATO: "${linha.nomeOcr}" → ${matchExato.nome}`);
+        return { ...linha, cadastroVinculado: matchExato, metodo: 'exato' as const, scoreMatch: 1 };
+      }
+
+      // 🎯 ETAPA 2: NOME + SOBRENOME (dois primeiros nomes batem)
+      // Pega os DOIS primeiros nomes do OCR
+      if (partesOcr.length < 2) {
+        console.log(`❌ "${linha.nomeOcr}" só tem 1 nome, não dá pra vincular`);
+        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const, scoreMatch: 0 };
+      }
+
+      const primeiroOcr = partesOcr[0];
+      const segundoOcr = partesOcr[1];
+
+      // Procura todos colabs cujos 2 primeiros nomes batem
+      const candidatos = colaboradores.filter((c) => {
+        const partesColab = partesNome(c.nome);
+        if (partesColab.length < 2) return false;
+        return partesColab[0] === primeiroOcr && partesColab[1] === segundoOcr;
+      });
+
+      if (candidatos.length === 1) {
+        // Único match, vincula
+        console.log(`✅ NOME+SOB: "${linha.nomeOcr}" → ${candidatos[0].nome}`);
+        return { ...linha, cadastroVinculado: candidatos[0], metodo: 'fuzzy' as const, scoreMatch: 0.85 };
+      }
+
+      if (candidatos.length > 1) {
+        // 🎯 DESEMPATE pelo INÍCIO do TERCEIRO nome
+        if (partesOcr.length >= 3) {
+          const terceiroOcr = partesOcr[2];
+          
+          // Procura candidato cujo 3º nome começa igual ao 3º do OCR
+          const desempate = candidatos.find((c) => {
+            const partesColab = partesNome(c.nome);
+            const terceiroColab = partesColab[2] || '';
+            // Começa igual (prefixo) ou é igual
+            return terceiroColab.startsWith(terceiroOcr) || terceiroOcr.startsWith(terceiroColab);
+          });
+
+          if (desempate) {
+            console.log(`✅ DESEMPATE 3º: "${linha.nomeOcr}" → ${desempate.nome}`);
+            return { ...linha, cadastroVinculado: desempate, metodo: 'fuzzy' as const, scoreMatch: 0.75 };
+          }
+        }
+
+        // Múltiplos candidatos sem como desempatar
+        console.log(`⚠️ AMBÍGUO: "${linha.nomeOcr}" → ${candidatos.length} candidatos sem desempate`);
+        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const, scoreMatch: 0 };
+      }
+
+      // Nenhum candidato com nome+sobrenome
+      console.log(`❌ NÃO VINCULOU: "${linha.nomeOcr}"`);
+      return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const, scoreMatch: 0 };
     });
   }
 
