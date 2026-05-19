@@ -216,22 +216,43 @@ export default function ConfiguracoesBancoPage() {
 
   async function buscarDuplicatas() {
     setBuscandoDup(true);
-    const loadingId = toast.loading('Buscando duplicatas...');
+    const loadingId = toast.loading('Buscando duplicatas...', 'Verificando histórico de produtividade');
     
     try {
-      const { data } = await supabase
-        .from('historico')
-        .select('id_groot, data_referencia, processo, unidades, criado_em')
-        .order('criado_em', { ascending: false })
-        .limit(5000);
+      // Paginação manual pra pegar TODOS (Supabase limita 1000)
+      const todos: any[] = [];
+      let offset = 0;
+      const pageSize = 1000;
       
-      if (!data) {
-        toast.update(loadingId, { type: 'info', title: 'Nada encontrado' });
+      while (true) {
+        const { data, error } = await supabase
+          .from('historico')
+          .select('id_groot, data_referencia, processo, unidades, criado_em')
+          .range(offset, offset + pageSize - 1)
+          .order('criado_em', { ascending: false });
+        
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) break;
+        
+        todos.push(...data);
+        if (data.length < pageSize) break;
+        offset += pageSize;
+      }
+      
+      console.log(`🔍 Verificando ${todos.length} registros do histórico`);
+      
+      if (todos.length === 0) {
+        toast.update(loadingId, { 
+          type: 'info', 
+          title: 'Histórico vazio', 
+          description: 'Não há registros para verificar' 
+        });
+        setDuplicatas([]);
         return;
       }
       
       const grupos: Record<string, any[]> = {};
-      data.forEach((r: any) => {
+      todos.forEach((r: any) => {
         const k = `${r.id_groot}|${r.data_referencia}|${r.processo}`;
         if (!grupos[k]) grupos[k] = [];
         grupos[k].push(r);
@@ -243,13 +264,28 @@ export default function ConfiguracoesBancoPage() {
       
       setDuplicatas(dups);
       
+      // 🎯 Feedback CLARO em qualquer cenário
       if (dups.length === 0) {
-        toast.update(loadingId, { type: 'success', title: 'Banco limpo!', description: 'Nenhuma duplicata encontrada' });
+        toast.update(loadingId, { 
+          type: 'success', 
+          title: '✨ Banco limpo!', 
+          description: `${todos.length} registros verificados, nenhuma duplicata encontrada` 
+        });
       } else {
-        toast.update(loadingId, { type: 'info', title: `${dups.length} duplicatas`, description: 'Veja a lista abaixo' });
+        const totalCopias = dups.reduce((s, d) => s + d.registros.length - 1, 0);
+        toast.update(loadingId, { 
+          type: 'info', 
+          title: `${dups.length} duplicatas encontradas`, 
+          description: `${totalCopias} cópias extras podem ser removidas` 
+        });
       }
     } catch (e: any) {
-      toast.update(loadingId, { type: 'error', title: 'Erro', description: e.message });
+      console.error('Erro buscando duplicatas:', e);
+      toast.update(loadingId, { 
+        type: 'error', 
+        title: 'Erro ao buscar', 
+        description: e.message 
+      });
     } finally {
       setBuscandoDup(false);
     }
@@ -404,22 +440,29 @@ export default function ConfiguracoesBancoPage() {
         </div>
 
         {/* 📥 Histórico de Uploads - Collapse */}
-        <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4">
-          <summary className="cursor-pointer p-4 flex items-center justify-between hover:bg-[#222] transition-all rounded-xl">
-            <span className="text-sm font-bold text-gray-300 flex items-center gap-2">📥 Histórico de Uploads</span>
-            <span className="text-xs text-gray-500">{uploads.length}</span>
+        <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4 group">
+          <summary className="cursor-pointer p-5 flex items-center justify-between hover:bg-[#1e1e1e] transition-all rounded-xl list-none">
+            <span className="text-sm font-bold text-gray-300 flex items-center gap-2">
+              📥 Histórico de Uploads
+            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs bg-[#0a0a0a] text-gray-400 px-2.5 py-1 rounded-full">{uploads.length}</span>
+              <span className="text-gray-500 group-open:rotate-180 transition-transform">▼</span>
+            </div>
           </summary>
-          <div className="px-4 pb-4 space-y-2">
+          <div className="px-5 pb-5 pt-2 space-y-2 border-t border-[#2a2a2a]">
             {uploads.length === 0 ? (
-              <p className="text-xs text-gray-500 py-2">Nenhum upload registrado</p>
+              <p className="text-xs text-gray-500 py-3 italic">Nenhum upload registrado ainda.</p>
             ) : (
               uploads.map((u) => (
-                <div key={u.id} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3 text-xs flex items-center justify-between flex-wrap gap-2">
-                  <div>
+                <div key={u.id} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3 text-xs flex items-center justify-between flex-wrap gap-3 hover:border-[#3a3a3a] transition-all">
+                  <div className="flex-1 min-w-0">
                     <p className="text-white font-bold truncate">{u.arquivo}</p>
-                    <p className="text-gray-500">{u.tabela} · {u.linhas} linhas</p>
+                    <p className="text-gray-500 mt-0.5">
+                      <span className="text-yellow-500/80">{u.tabela}</span> · {u.linhas} linhas
+                    </p>
                   </div>
-                  <p className="text-gray-500">{formatarData(u.data)}</p>
+                  <p className="text-gray-500 text-[10px] font-mono">{formatarData(u.data)}</p>
                 </div>
               ))
             )}
@@ -427,31 +470,46 @@ export default function ConfiguracoesBancoPage() {
         </details>
 
         {/* 🔧 Duplicatas - Collapse */}
-        <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4">
-          <summary className="cursor-pointer p-4 flex items-center justify-between hover:bg-[#222] transition-all rounded-xl">
-            <span className="text-sm font-bold text-gray-300 flex items-center gap-2">🔧 Detectar Duplicatas no Histórico</span>
-            <span className="text-xs text-gray-500">{duplicatas.length > 0 ? `${duplicatas.length} grupos` : 'verificar'}</span>
+        <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4 group">
+          <summary className="cursor-pointer p-5 flex items-center justify-between hover:bg-[#1e1e1e] transition-all rounded-xl list-none">
+            <span className="text-sm font-bold text-gray-300 flex items-center gap-2">
+              🔧 Detectar Duplicatas
+            </span>
+            <div className="flex items-center gap-3">
+              {duplicatas.length > 0 && (
+                <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2.5 py-1 rounded-full">{duplicatas.length} grupos</span>
+              )}
+              <span className="text-gray-500 group-open:rotate-180 transition-transform">▼</span>
+            </div>
           </summary>
-          <div className="px-4 pb-4">
+          <div className="px-5 pb-5 pt-2 border-t border-[#2a2a2a]">
+            <p className="text-xs text-gray-400 mb-3 mt-2">
+              Verifica registros duplicados no histórico de produtividade (mesmo colab + dia + processo).
+            </p>
             <div className="flex gap-2 mb-3 flex-wrap">
               <button onClick={buscarDuplicatas} disabled={buscandoDup}
-                className="bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 font-bold py-2 px-4 rounded-lg text-sm transition-all disabled:opacity-50">
-                {buscandoDup ? '⏳ Buscando...' : '🔍 Verificar'}
+                className="bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 font-bold py-2.5 px-5 rounded-lg text-sm transition-all disabled:opacity-50 flex items-center gap-2">
+                {buscandoDup ? <><span className="inline-block animate-spin">⏳</span> Verificando...</> : '🔍 Verificar agora'}
               </button>
               {duplicatas.length > 0 && (
                 <button onClick={limparDuplicatas} disabled={limpandoDup}
-                  className="bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-bold py-2 px-4 rounded-lg text-sm transition-all disabled:opacity-50">
-                  {limpandoDup ? '⏳ Limpando...' : `🗑️ Apagar duplicatas`}
+                  className="bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-bold py-2.5 px-5 rounded-lg text-sm transition-all disabled:opacity-50 flex items-center gap-2">
+                  {limpandoDup ? <><span className="inline-block animate-spin">⏳</span> Limpando...</> : `🗑️ Apagar ${duplicatas.length} duplicatas`}
                 </button>
               )}
             </div>
-            {duplicatas.slice(0, 10).map((d, i) => (
-              <div key={i} className="text-xs bg-[#0a0a0a] border border-[#2a2a2a] rounded p-2 mb-1 font-mono text-gray-400">
-                {d.chave} → {d.registros.length} cópias
+            {duplicatas.length > 0 && (
+              <div className="mt-3 space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                {duplicatas.slice(0, 15).map((d, i) => (
+                  <div key={i} className="text-xs bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 font-mono text-gray-400 flex items-center justify-between">
+                    <span className="truncate">{d.chave}</span>
+                    <span className="text-yellow-500/80 ml-2 flex-shrink-0">×{d.registros.length}</span>
+                  </div>
+                ))}
+                {duplicatas.length > 15 && (
+                  <p className="text-xs text-gray-500 italic pt-2">Mostrando 15 de {duplicatas.length}. O botão remove todas.</p>
+                )}
               </div>
-            ))}
-            {duplicatas.length > 10 && (
-              <p className="text-xs text-gray-500 mt-2">Mostrando 10 de {duplicatas.length}. Limpar resolve todas.</p>
             )}
           </div>
         </details>
