@@ -949,9 +949,6 @@ export default function CalibracaoPage() {
                 🎯 QUALIDADE
               </th>
             ` : ''}
-            <th style="padding: 14px 18px; text-align: center; background: #047857; color: #ffffff; font-weight: 900; font-size: 14px; border: 2px solid #10b981; min-width: 160px;">
-              🏆 TRIMESTRE
-            </th>
           </tr>
           <!-- Linha 2: SUB-CABEÇALHOS -->
           <tr style="background: #1a1a1a;">
@@ -967,9 +964,6 @@ export default function CalibracaoPage() {
             ${temOcup ? `
               <th style="padding: 8px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #c084fc; font-size: 10px; font-weight: bold;">Ocupação</th>
             ` : ''}
-            <th style="padding: 8px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #888; font-size: 10px; font-weight: bold;">
-              &nbsp;
-            </th>
           </tr>
         </thead>
         <tbody>
@@ -1025,7 +1019,6 @@ export default function CalibracaoPage() {
                 ${mesesCells}
                 ${imaHtml}
                 ${ocupHtml}
-                <td style="padding: 10px 8px; text-align: center; background: rgba(16, 185, 129, 0.08); color: ${corTrim}; font-family: monospace; font-weight: 900; font-size: 14px;">${liqTrim}</td>
               </tr>
             `;
           }).join('')}
@@ -1176,10 +1169,6 @@ export default function CalibracaoPage() {
                         {mesesComDados.map((m) => (
                           <th key={m} colSpan={proc === 'Checkin' ? 2 : 3} className="py-3 px-2 text-center border-l border-[#2a2a2a]">{NOMES_MESES[m]}</th>
                         ))}
-                        {/* 🏆 TRIMESTRE — Líq + IMA + (Oc% se P2M) */}
-                        <th colSpan={proc === 'Checkin' ? 2 : 3} className="py-3 px-2 text-center bg-[#0a0a0a] border-l-2 border-green-500/40 text-green-400 font-bold">
-                          🏆 Trim.
-                        </th>
                         <th className="py-3 px-2 text-center border-l border-[#2a2a2a]" rowSpan={2}>QUE</th>
                         <th className="py-3 px-2 text-center" rowSpan={2}>COMO</th>
                         <th className="py-3 px-2 text-center" rowSpan={2}>APTIDÃO</th>
@@ -1192,10 +1181,6 @@ export default function CalibracaoPage() {
                             {proc !== 'Checkin' && <th key={`${m}-o`} className="py-1 text-center text-emerald-400">Oc%</th>}
                           </>
                         ))}
-                        {/* Sub-cabeçalhos do TRIMESTRE */}
-                        <th className="py-1 text-center bg-[#0a0a0a] border-l-2 border-green-500/40">Líq</th>
-                        <th className="py-1 text-center bg-[#0a0a0a] text-purple-400">IMA</th>
-                        {proc !== 'Checkin' && <th className="py-1 text-center bg-[#0a0a0a] text-emerald-400">Oc%</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -1225,23 +1210,6 @@ export default function CalibracaoPage() {
                               )}
                             </>
                           ))}
-
-                          {/* 🏆 TRIMESTRE — Líq + IMA + Oc% (se P2M) */}
-                          <td className="py-2 px-2 text-center bg-[#0a0a0a] text-white font-bold font-mono border-l-2 border-green-500/40">
-                            {l.liqTrim || '-'}
-                          </td>
-                          <td className="py-2 px-2 text-center bg-[#0a0a0a] font-mono">
-                            {l.imaOrigem === 'aguardando' ? (
-                              <span className="text-blue-400 font-bold">⏳</span>
-                            ) : (
-                              <span className="text-purple-300 font-bold">{l.ima || '0'}</span>
-                            )}
-                          </td>
-                          {proc !== 'Checkin' && (
-                            <td className="py-2 px-2 text-center bg-[#0a0a0a] text-emerald-300 font-bold font-mono">
-                              {l.ocupTrim ? l.ocupTrim + '%' : '-'}
-                            </td>
-                          )}
 
                           <td className="py-2 px-2 text-center border-l border-[#2a2a2a]">
                             <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${corNota(l.que)}`}>{l.que}</span>
