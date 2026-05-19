@@ -68,54 +68,70 @@ function nomesIguais(a: string, b: string): { igual: boolean; score: number } {
   return { igual: score >= 0.6, score };
 }
 
-// 🎯 Extrai linhas do OCR pegando ÚLTIMO número da linha (canto direito)
+// 🎯 Extrai linhas do OCR pegando ÚLTIMO número da linha (canto direito = Total Geral)
 function extrairLinhasOcr(texto: string): LinhaOcr[] {
   const linhas: LinhaOcr[] = [];
   const blocos = texto.split('\n');
 
-  blocos.forEach((linha, idx) => {
-    const limpa = linha.trim();
-    if (!limpa || limpa.length < 3) return;
+  // Palavras-chave que indicam CABEÇALHO (a linha é ignorada se contém)
+  const PALAVRAS_CABECALHO = [
+    'SEMANA', 'TOTAL', 'GERAL', 'COMPLETO', 'NOVE', 'NUMERO',
+    'CK', 'P2M', 'CHECK', 'NOME', 'REP', 'IMA', 'DPMO',
+    'PROCESSO', 'COLUNA', 'LIN', 'PÁGINA', 'PAGINA',
+  ];
 
-    // 🎯 Pega todos os números (com ou sem separador de milhar)
-    // Aceita: 1.567, 1567, 1,567.50, 12345, 1.500.000
-    const regexNumero = /\b\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?\b|\b\d+\b/g;
+  blocos.forEach((linha, idx) => {
+    let limpa = linha.trim();
+    if (!limpa || limpa.length < 5) return;
+
+    // 🎯 IGNORA linhas de cabeçalho (que contêm palavras tipo SEMANA, TOTAL, etc)
+    const limpaUpper = limpa.toUpperCase();
+    const ehCabecalho = PALAVRAS_CABECALHO.some((p) => limpaUpper.includes(p));
+    if (ehCabecalho) {
+      console.log(`⏭️ Linha ${idx} (cabeçalho): "${limpa}"`);
+      return;
+    }
+
+    // 🎯 Pega TODOS os números da linha (com ou sem separador)
+    // Aceita: 1.567, 1567, 12.345, 2.864, 100
+    const regexNumero = /\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/g;
     const matches = Array.from(limpa.matchAll(regexNumero));
     
     if (matches.length === 0) return;
 
-    // 🎯 Pega o ÚLTIMO número que seja "razoável" pra IMA (entre 10 e 100k)
-    let ultimoNumValido: RegExpMatchArray | null = null;
-    for (let i = matches.length - 1; i >= 0; i--) {
-      const m = matches[i];
-      const numStr = m[0].replace(/[.,]/g, '');
-      const num = parseInt(numStr);
-      if (!isNaN(num) && num >= 10 && num <= 100000) {
-        ultimoNumValido = m;
-        break;
-      }
-    }
-    
-    if (!ultimoNumValido) return;
-
-    const numStr = ultimoNumValido[0].replace(/[.,]/g, '');
+    // 🎯 Pega o ÚLTIMO número da linha (que é o TOTAL GERAL no canto direito)
+    const ultimoMatch = matches[matches.length - 1];
+    const numStr = ultimoMatch[0].replace(/[.,]/g, '');
     const num = parseInt(numStr);
-    const posicaoUltimo = ultimoNumValido.index || 0;
+
+    // Filtra ruído: IMA razoável é entre 100 e 100k
+    if (isNaN(num) || num < 100 || num > 100000) {
+      console.log(`⏭️ Linha ${idx} (número fora da faixa): "${limpa}" → ${num}`);
+      return;
+    }
+
+    const posicaoUltimo = ultimoMatch.index || 0;
 
     // 🎯 Tudo ANTES do último número = NOME
     let nome = limpa.substring(0, posicaoUltimo).trim();
     
-    // Remove caracteres não-alfa do final/início (pontuação, lixo)
-    nome = nome.replace(/^[^a-zA-ZÀ-ú]+|[^a-zA-ZÀ-ú\s]+$/g, '').trim();
-    // Tira números intermediários
-    nome = nome.replace(/\b\d+[.,]?\d*\b/g, '').replace(/\s+/g, ' ').trim();
+    // Remove números intermediários do nome (deixa só letras e espaços)
+    nome = nome.replace(/\b\d+[.,]?\d*\b/g, '').trim();
+    // Remove caracteres especiais sobressalentes
+    nome = nome.replace(/[^a-zA-ZÀ-ú\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    // Remove sufixos comuns que o OCR confunde (sm, em, etc)
+    nome = nome.replace(/\b(sm|em|eos|amo|asso|sm)\b/gi, '').replace(/\s+/g, ' ').trim();
 
-    if (nome.length < 3) return;
-    if (!/[a-zA-ZÀ-ú]/.test(nome)) return;
-
-    if (idx < 10) {
-      console.log(`📝 Linha ${idx}: "${limpa}" → Nome: "${nome}" | IMA: ${num}`);
+    if (nome.length < 3) {
+      console.log(`⏭️ Linha ${idx} (nome curto): "${limpa}" → nome="${nome}"`);
+      return;
     }
+    if (!/[a-zA-ZÀ-ú]{3,}/.test(nome)) {
+      console.log(`⏭️ Linha ${idx} (sem letras): "${limpa}"`);
+      return;
+    }
+
+    console.log(`✅ Linha ${idx}: "${limpa.substring(0, 60)}..." → Nome: "${nome}" | IMA: ${num}`);
     linhas.push({ nomeOcr: nome, imaOcr: num });
   });
 
