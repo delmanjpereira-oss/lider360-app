@@ -396,10 +396,20 @@ export default function CalibracaoPage() {
       }
     });
     
+    // 🎯 6. IMA Manual (vem do print) - garante que o mês aparece
+    imaManual.forEach((m) => {
+      const mAno = Number(m.ano);
+      const mTrim = String(m.trimestre || '').trim().toUpperCase();
+      const trimSel = String(quarterSel || '').toUpperCase();
+      if (mAno === anoNum && mTrim === trimSel && m.mes) {
+        set.add(Number(m.mes));
+      }
+    });
+    
     const meses = mesesPossiveis.filter((m) => set.has(m)).sort();
     console.log('📊 Meses com dados:', meses, '| Trimestre:', quarterSel);
     return meses;
-  }, [historico, produtividadeMensal, dpmoEventos, dpmoAgregado, ocupacaoP2M, anoNum, quarterSel, mesesPossiveis]);
+  }, [historico, produtividadeMensal, dpmoEventos, dpmoAgregado, ocupacaoP2M, imaManual, anoNum, quarterSel, mesesPossiveis]);
 
   const linhasCalibracao: LinhaCalib[] = useMemo(() => {
     if (!quarterSel) return [];
@@ -629,15 +639,35 @@ export default function CalibracaoPage() {
 
         // 🎯 CÁLCULO IMA POR MÊS — Looker style ponderado
         mesesPossiveis.forEach((mes) => {
-          // Defeitos só do mês X (compara como número pra evitar bug string/number)
+          // Defeitos só do mês X
           const eventosMes = eventosTrim.filter((e) => Number(e.mes) === Number(mes));
           
           if (idx < 3 && eventosTrim.length > 0) {
             console.log(`📅 [${c.nome}] Mês ${mes}: ${eventosMes.length} eventos DPMO de ${eventosTrim.length} total`);
           }
           
+          // 🎯 FALLBACK: Se NÃO tem eventos detalhados, usa o DPMO agregado direto
+          // (Esse é o caso do print: dpmo_agregado tem o valor, mas dpmo_eventos não)
           if (eventosMes.length === 0) {
-            medMes[mes].ima = 0;
+            const agrColab = dpmoAgregado.filter((d) => {
+              if (String(d.id_groot) !== String(c.id_groot)) return false;
+              if (!processosIguais(d.processo, c.processo)) return false;
+              if (Number(d.ano) !== anoNum) return false;
+              if (!d.semana) return false;
+              // Deduz mês da semana ISO
+              const dataRef = new Date(anoNum, 0, 4 + (Number(d.semana) - 1) * 7);
+              return dataRef.getMonth() + 1 === mes;
+            });
+            
+            if (agrColab.length > 0) {
+              const somaDpmo = agrColab.reduce((s, d) => s + (Number(d.dpmo) || 0), 0);
+              medMes[mes].ima = Math.round(somaDpmo / agrColab.length);
+              if (idx < 3) {
+                console.log(`✅ [${c.nome}] IMA Mês ${mes} via AGREGADO: ${medMes[mes].ima} (${agrColab.length} semanas)`);
+              }
+            } else {
+              medMes[mes].ima = 0;
+            }
             return;
           }
 
