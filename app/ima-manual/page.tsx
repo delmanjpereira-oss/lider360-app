@@ -81,7 +81,20 @@ export default function ImaManualPage() {
         .order('nome');
 
       if (errColab) throw new Error(errColab.message);
-      setColaboradores(colabs || []);
+      
+      // 🎯 DEDUPE: tira colaboradores duplicados (mesmo id_groot)
+      const vistos = new Set<string>();
+      const colabsUnicos: Colaborador[] = [];
+      (colabs || []).forEach((c: any) => {
+        const chave = c.id_groot || c.nome;
+        if (!vistos.has(chave)) {
+          vistos.add(chave);
+          colabsUnicos.push(c);
+        }
+      });
+      
+      setColaboradores(colabsUnicos);
+      console.log(`👥 ${colabsUnicos.length} colabs únicos (de ${colabs?.length || 0} total)`);
 
       // 2. Busca IMAs já salvos pro mês/ano/processo
       const { data: imas, error: errImas } = await supabase
@@ -116,7 +129,89 @@ export default function ImaManualPage() {
   }
 
   function handleChangeIma(idGroot: string, valor: string) {
-    setImasEditando({ ...imasEditando, [idGroot]: valor });
+    // Só permite números
+    const limpo = valor.replace(/\D/g, '');
+    setImasEditando({ ...imasEditando, [idGroot]: limpo });
+  }
+  
+  // 🎯 Formata número com pontos de milhar pra exibição
+  function formatarMilhar(valor: string | number): string {
+    if (!valor) return '';
+    const num = typeof valor === 'string' ? parseInt(valor.replace(/\D/g, '')) : valor;
+    if (isNaN(num)) return '';
+    return num.toLocaleString('pt-BR');
+  }
+
+  // 🎯 Salvar INDIVIDUAL ao sair do campo (onBlur)
+  async function salvarIndividual(idGroot: string) {
+    const valor = imasEditando[idGroot]?.trim();
+    const colab = colaboradores.find((c) => c.id_groot === idGroot);
+    if (!colab) return;
+    
+    // Se valor vazio, apaga o registro
+    if (!valor) {
+      const salvo = imasSalvos[idGroot];
+      if (salvo) {
+        // Tinha salvo, agora apaga
+        await supabase
+          .from('ima_manual')
+          .delete()
+          .eq('id_groot', idGroot)
+          .eq('mes', mesSelecionado)
+          .eq('ano', anoSelecionado)
+          .eq('processo', processoSelecionado);
+        
+        const novoSalvos = { ...imasSalvos };
+        delete novoSalvos[idGroot];
+        setImasSalvos(novoSalvos);
+      }
+      return;
+    }
+    
+    const imaNum = parseInt(valor.replace(/\D/g, ''));
+    if (isNaN(imaNum) || imaNum < 0) return;
+    
+    // Se o valor não mudou, não salva
+    const salvo = imasSalvos[idGroot];
+    if (salvo && Number(salvo.ima) === imaNum) return;
+    
+    try {
+      const { error } = await supabase
+        .from('ima_manual')
+        .upsert({
+          id_groot: idGroot,
+          nome: colab.nome,
+          processo: processoSelecionado,
+          mes: mesSelecionado,
+          ano: anoSelecionado,
+          trimestre,
+          ima: imaNum,
+          atualizado_em: new Date().toISOString(),
+          atualizado_por: 'delman.jpereira@mercadolivre.com',
+        }, {
+          onConflict: 'id_groot,mes,ano,processo',
+          ignoreDuplicates: false,
+        });
+      
+      if (error) throw new Error(error.message);
+      
+      // Atualiza estado local
+      setImasSalvos({
+        ...imasSalvos,
+        [idGroot]: {
+          id_groot: idGroot,
+          ima: imaNum,
+          atualizado_em: new Date().toISOString(),
+        },
+      });
+      
+      // Feedback rápido
+      setMensagem(`✅ ${colab.nome}: ${imaNum.toLocaleString('pt-BR')} salvo!`);
+      setTimeout(() => setMensagem(null), 2000);
+    } catch (e: any) {
+      setErro(`Erro ao salvar ${colab.nome}: ${e.message}`);
+      setTimeout(() => setErro(null), 4000);
+    }
   }
 
   async function salvarTudo() {
@@ -372,8 +467,14 @@ export default function ImaManualPage() {
                           type="text"
                           inputMode="numeric"
                           placeholder="0"
-                          value={valorAtual}
-                          onChange={(e) => handleChangeIma(c.id_groot, e.target.value.replace(/\D/g, ''))}
+                          value={formatarMilhar(valorAtual)}
+                          onChange={(e) => handleChangeIma(c.id_groot, e.target.value)}
+                          onBlur={() => salvarIndividual(c.id_groot)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
                           className={`w-28 text-right font-mono font-bold rounded-lg px-3 py-2 ${
                             temValor && !valorMudou
                               ? 'bg-green-500/10 border border-green-500/40 text-green-300'
@@ -381,6 +482,7 @@ export default function ImaManualPage() {
                               ? 'bg-yellow-500/10 border border-yellow-500/40 text-yellow-300'
                               : 'bg-[#1a1a1a] border border-[#2a2a2a] text-white'
                           }`}
+                          title="Digite o IMA. Salva ao sair do campo ou pressionar Enter"
                         />
 
                         {salvo && (
@@ -401,19 +503,14 @@ export default function ImaManualPage() {
               {/* Botões */}
               <div className="mt-6 flex gap-3">
                 <button
-                  onClick={salvarTudo}
-                  disabled={salvando}
-                  className="bg-[#FFD700] hover:bg-yellow-400 text-black font-bold py-3 px-6 rounded-lg transition-all disabled:opacity-50"
-                >
-                  {salvando ? '💾 Salvando...' : '💾 Salvar tudo'}
-                </button>
-
-                <button
                   onClick={() => carregar()}
                   className="bg-[#0a0a0a] hover:bg-[#2a2a2a] border border-[#2a2a2a] text-white font-bold py-3 px-6 rounded-lg transition-all"
                 >
                   🔄 Recarregar
                 </button>
+                <p className="text-xs text-gray-500 self-center">
+                  💡 Os valores são salvos automaticamente ao sair do campo ou pressionar Enter
+                </p>
               </div>
             </>
           )}
@@ -423,11 +520,12 @@ export default function ImaManualPage() {
         <div className="bg-blue-500/10 border border-blue-500/40 rounded-xl p-4">
           <h3 className="text-blue-300 font-black text-base mb-2">💡 Como funciona:</h3>
           <ul className="text-xs text-blue-200/80 space-y-1 list-disc pl-5">
-            <li>Você preenche o IMA dos colaboradores pra um mês específico</li>
-            <li>O app detecta automaticamente o trimestre (Q1, Q2, Q3, Q4)</li>
-            <li>Os valores salvos refletem na <strong>Calibração</strong> e nos detalhes</li>
+            <li>Digite o IMA e <strong>pressione Tab ou Enter</strong> — salva automático!</li>
+            <li>Pode digitar com ou sem pontos (ex: <code className="bg-blue-500/20 px-1 rounded">1567</code> ou <code className="bg-blue-500/20 px-1 rounded">1.567</code>)</li>
+            <li>App detecta automaticamente o trimestre (Q1, Q2, Q3, Q4)</li>
+            <li>Valores salvos refletem na <strong>Calibração</strong> imediatamente</li>
             <li>Pode voltar e editar quando quiser - cada salvar atualiza o registro</li>
-            <li>Se o mês tem dados automáticos (DPMO completo), o manual sobrescreve</li>
+            <li>Apaga o valor (deixa vazio) pra remover o IMA daquele mês</li>
           </ul>
         </div>
       </div>
