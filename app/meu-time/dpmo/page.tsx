@@ -136,43 +136,92 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
     if (/SEMANA\s*\d/i.test(limpa) && limpa.length < 80) return;
     if (/TOTAL\s*GERAL/i.test(limpa)) return;
 
-    const regexNumero = /\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/g;
-    const matches = Array.from(limpa.matchAll(regexNumero));
-    if (matches.length === 0) return;
-
-    const numeros: number[] = [];
-    const posicoes: number[] = [];
-    matches.forEach((m) => {
-      const numStr = m[0].replace(/[.,]/g, '');
-      const num = parseInt(numStr);
-      if (!isNaN(num) && num >= 10 && num <= 100000) {
-        numeros.push(num);
-        posicoes.push(m.index || 0);
-      }
-    });
-    if (numeros.length === 0) return;
-
-    const totalGeral = numeros[numeros.length - 1];
-    const posicaoPrimeiro = posicoes[0];
-
+    // 🎯 NOVA LÓGICA POSICIONAL:
+    // Captura TOKENS válidos em ordem: números, "-", "o" solto (zero do OCR)
+    // Ex: "VITORIA o 10.014 - 10.578 - 25e" → tokens: [o, 10014, -, 10578, -, 25e]
+    
+    // Acha posição do PRIMEIRO número válido (>= 100) pra cortar o nome
+    const regexNumeroValido = /\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{3,6}\b/g;
+    const primeirosNumeros = Array.from(limpa.matchAll(regexNumeroValido));
+    if (primeirosNumeros.length === 0) return;
+    
+    const posicaoPrimeiro = primeirosNumeros[0].index || 0;
+    
+    // 🎯 Extrai o nome (tudo antes do primeiro número)
     let nome = limpa.substring(0, posicaoPrimeiro).trim();
-    nome = nome.replace(/\.+/g, ''); // remove "..." e ".."
+    nome = nome.replace(/\.+/g, '');
     nome = nome.replace(/[^a-zA-ZÀ-ú\s]/g, ' ').replace(/\s+/g, ' ').trim();
     nome = nome.replace(/\b(sm|em|eos|amo|asso)\b/gi, '').replace(/\s+/g, ' ').trim();
-    // 🎯 Remove letras soltas (1 caractere) que são lixo do OCR
     nome = nome.split(' ').filter((p) => p.length >= 2).join(' ').trim();
-
+    
     if (nome.length < 3) return;
     if (!/[a-zA-ZÀ-ú]{3,}/.test(nome)) return;
-
-    const valoresSemanas = numeros.slice(0, -1);
+    
+    // 🎯 Pega o RESTO da linha (depois do nome) e quebra em TOKENS posicionais
+    const restoLinha = limpa.substring(posicaoPrimeiro);
+    
+    // Tokens válidos:
+    // - Número: "10.014", "1.290", "25", etc
+    // - Vazio: "-", "—", "o" (zero do OCR), "O", "0"
+    const tokens: (number | null)[] = [];
+    
+    // Quebra por espaços e tabs
+    const partes = restoLinha.split(/\s+/).filter((p) => p.length > 0);
+    
+    partes.forEach((parte) => {
+      // É um separador/vazio? (-, —, o, O, 0)
+      if (parte === '-' || parte === '—' || parte === 'o' || parte === 'O' || parte === '0') {
+        tokens.push(null); // posição vazia
+        return;
+      }
+      
+      // Tenta extrair número
+      const matchNum = parte.match(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/);
+      if (matchNum) {
+        const num = parseInt(matchNum[0].replace(/[.,]/g, ''));
+        if (!isNaN(num) && num >= 1 && num <= 100000) {
+          tokens.push(num);
+          return;
+        }
+      }
+      
+      // Caractere lixo do OCR (ex: "sm", "em", letras soltas) - IGNORA (não consome posição)
+    });
+    
+    if (tokens.length === 0) return;
+    
+    // 🎯 Total Geral = ÚLTIMO token NÃO NULO
+    let totalGeral = 0;
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      if (tokens[i] !== null) {
+        totalGeral = tokens[i]!;
+        break;
+      }
+    }
+    
+    if (totalGeral === 0) return;
+    
+    // 🎯 Valores das semanas = todos os tokens EXCETO o último (que é o total)
+    // Mas precisamos achar qual é o "último" (que é o total)
+    const idxUltimoNaoNulo = (() => {
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        if (tokens[i] !== null) return i;
+      }
+      return -1;
+    })();
+    
+    const valoresSemanas = tokens.slice(0, idxUltimoNaoNulo);
+    
+    // 🎯 Mapeia POSICIONALMENTE com as semanas
     const semanasMap: Record<number, number> = {};
     valoresSemanas.forEach((valor, i) => {
       const semanaNum = semanas[i];
-      if (semanaNum) semanasMap[semanaNum] = valor;
+      if (semanaNum && valor !== null && valor > 0) {
+        semanasMap[semanaNum] = valor;
+      }
     });
 
-    console.log(`✅ Print ${printNum}: "${nome}" | Sem: ${JSON.stringify(semanasMap)} | Total: ${totalGeral}`);
+    console.log(`✅ Print ${printNum}: "${nome}" | Tokens: [${tokens.join(', ')}] | Sem: ${JSON.stringify(semanasMap)} | Total: ${totalGeral}`);
     linhas.push({ nomeOcr: nome, totalGeral, semanas: semanasMap, printNum });
   });
 
