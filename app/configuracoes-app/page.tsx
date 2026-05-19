@@ -424,18 +424,23 @@ export default function ConfiguracoesBancoPage() {
           </button>
         </div>
 
-        {/* 🗑️ LIMPAR HISTÓRICO DE PRODUTIVIDADE (CSV legado) */}
+        {/* 🗑️ LIMPAR DADOS BRUTOS (produtividade diária + ocupação) */}
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-12 h-12 rounded-xl bg-rose-500/20 flex items-center justify-center text-2xl">📥</div>
+            <div className="w-12 h-12 rounded-xl bg-rose-500/20 flex items-center justify-center text-2xl">📊</div>
             <div>
-              <h2 className="text-lg font-bold text-white">Limpar Histórico de CSV</h2>
-              <p className="text-xs text-gray-500">{status.totalHistorico} registros · Produtividade + Ocupação</p>
+              <h2 className="text-lg font-bold text-white">Limpar Dados Brutos</h2>
+              <p className="text-xs text-gray-500">
+                {status.totalHistorico.toLocaleString('pt-BR')} registros de produtividade diária + ocupação P2M
+              </p>
             </div>
           </div>
+          <p className="text-xs text-gray-400 mb-3 leading-relaxed">
+            Remove dados diários (vindos dos CSVs antigos). Os IMAs salvos via print continuam intactos.
+          </p>
           <button onClick={limparHistoricoProdutividade} disabled={limpandoHist}
-            className="bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-bold py-2 px-5 rounded-xl transition-all disabled:opacity-50">
-            {limpandoHist ? '⏳ Apagando...' : '🗑️ Apagar histórico de CSV'}
+            className="bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-bold py-2.5 px-5 rounded-xl transition-all disabled:opacity-50 flex items-center gap-2">
+            {limpandoHist ? <><span className="inline-block animate-spin">⏳</span> Apagando...</> : '🗑️ Apagar produtividade + ocupação'}
           </button>
         </div>
 
@@ -443,7 +448,7 @@ export default function ConfiguracoesBancoPage() {
         <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4 group">
           <summary className="cursor-pointer p-5 flex items-center justify-between hover:bg-[#1e1e1e] transition-all rounded-xl list-none">
             <span className="text-sm font-bold text-gray-300 flex items-center gap-2">
-              📥 Histórico de Uploads
+              📋 Histórico de Envios (CSVs e Prints)
             </span>
             <div className="flex items-center gap-3">
               <span className="text-xs bg-[#0a0a0a] text-gray-400 px-2.5 py-1 rounded-full">{uploads.length}</span>
@@ -451,8 +456,13 @@ export default function ConfiguracoesBancoPage() {
             </div>
           </summary>
           <div className="px-5 pb-5 pt-2 space-y-2 border-t border-[#2a2a2a]">
+            <p className="text-xs text-gray-500 italic mt-2 mb-3">
+              Registro dos últimos uploads (arquivos CSV e prints OCR processados)
+            </p>
             {uploads.length === 0 ? (
-              <p className="text-xs text-gray-500 py-3 italic">Nenhum upload registrado ainda.</p>
+              <p className="text-xs text-gray-500 py-3 italic text-center">
+                ✨ Nenhum upload registrado ainda. Quando você subir um print ou CSV, vai aparecer aqui.
+              </p>
             ) : (
               uploads.map((u) => (
                 <div key={u.id} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3 text-xs flex items-center justify-between flex-wrap gap-3 hover:border-[#3a3a3a] transition-all">
