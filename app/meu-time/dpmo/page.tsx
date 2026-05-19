@@ -86,17 +86,39 @@ function partesNome(nome: string): string[] {
 function detectarSemanas(texto: string): number[] {
   const semanas: number[] = [];
   const linhas = texto.split('\n');
+  
   for (const linha of linhas) {
-    const matches = Array.from(linha.matchAll(/[Ss]emana\s*(\d{1,2})/g));
+    // 🎯 Regex flexível: "Semana 18", "Semana18", "semana 1a" (OCR ruim - "a" = 4)
+    // Captura número de 1-2 dígitos OU dígito+letra (OCR confunde)
+    const matches = Array.from(linha.matchAll(/[Ss]emana\s*(\d{1,2}[a-z]?)/g));
+    
     if (matches.length >= 2) {
+      console.log(`📅 Linha de cabeçalho encontrada: "${linha}"`);
+      console.log(`📅 Matches brutos:`, matches.map((m) => m[1]));
+      
       matches.forEach((m) => {
-        const num = parseInt(m[1]);
-        if (num >= 1 && num <= 53 && !semanas.includes(num)) semanas.push(num);
+        // Tira letras (OCR às vezes confunde 4→a, 1→i, 0→o)
+        let numStr = m[1].replace(/[a-z]/gi, (c) => {
+          // Conversões comuns do OCR
+          const mapa: Record<string, string> = {
+            'a': '4', 'i': '1', 'o': '0', 'l': '1', 's': '5', 'z': '2'
+          };
+          return mapa[c.toLowerCase()] || '';
+        });
+        
+        const num = parseInt(numStr);
+        if (num >= 1 && num <= 53 && !semanas.includes(num)) {
+          semanas.push(num);
+        }
       });
+      
       if (semanas.length > 0) break;
     }
   }
-  console.log(`📅 Semanas detectadas: ${semanas.join(', ')}`);
+  
+  // Ordena crescente
+  semanas.sort((a, b) => a - b);
+  console.log(`📅 Semanas detectadas (final): ${semanas.join(', ')}`);
   return semanas;
 }
 
@@ -282,13 +304,53 @@ export default function DpmoPage() {
         break;
       }
     }
+    
+    // 🎯 FALLBACK: Se NÃO detectou semanas no cabeçalho,
+    // deduz pelo numero de colunas das linhas de colab
+    if (semanas.length === 0) {
+      console.warn('⚠️ Não detectou semanas no cabeçalho - tentando inferir pela quantidade de números nas linhas');
+      
+      // Conta quantos números cada linha tem
+      const contagens: number[] = [];
+      printsAtuais.forEach((p) => {
+        if (!p.textoBruto) return;
+        p.textoBruto.split('\n').forEach((linha) => {
+          const matches = Array.from(linha.matchAll(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/g));
+          if (matches.length >= 2 && /[a-zA-ZÀ-ú]{3}/.test(linha)) {
+            contagens.push(matches.length);
+          }
+        });
+      });
+      
+      // Pega a quantidade MAIS COMUM de números por linha
+      if (contagens.length > 0) {
+        const freq: Record<number, number> = {};
+        contagens.forEach((c) => { freq[c] = (freq[c] || 0) + 1; });
+        const totalCols = parseInt(Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]);
+        const numSemanas = totalCols - 1; // último é Total Geral
+        
+        // 🎯 Gera semanas baseadas no mês selecionado
+        // Pega a semana ISO do dia 1º do mês e vai pra trás
+        const dataRef = new Date(anoSelecionado, mesSelecionado - 1, 28);
+        const utc = new Date(Date.UTC(dataRef.getFullYear(), dataRef.getMonth(), dataRef.getDate()));
+        const dow = utc.getUTCDay() || 7;
+        utc.setUTCDate(utc.getUTCDate() + 4 - dow);
+        const inicio = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+        const semanaUltimo = Math.ceil((((utc.getTime() - inicio.getTime()) / 86400000) + 1) / 7);
+        
+        for (let i = 0; i < numSemanas; i++) {
+          semanas.push(semanaUltimo - (numSemanas - 1 - i));
+        }
+        console.log(`🎯 Inferido: ${numSemanas} colunas de semana → ${semanas.join(', ')}`);
+      }
+    }
+    
     setSemanasDetectadas(semanas);
 
     const todasLinhas: LinhaPrint[] = [];
     printsAtuais.forEach((p, i) => {
       if (!p.textoBruto) return;
-      const semanasUsar = semanas.length > 0 ? semanas : detectarSemanas(p.textoBruto);
-      const linhasPrint = extrairLinhasOcr(p.textoBruto, semanasUsar, i + 1);
+      const linhasPrint = extrairLinhasOcr(p.textoBruto, semanas, i + 1);
       todasLinhas.push(...linhasPrint);
     });
 
