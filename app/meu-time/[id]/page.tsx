@@ -405,29 +405,26 @@ export default function DetalheColaboradorPage() {
     }
   }
 
-  // 🎯 ESTRATÉGIA HÍBRIDA — Melhor dos 2 mundos:
-  // Por semana: usa DPMO AGREGADO (já calculado pelo Looker) ✅ 100%
-  // Total Geral: cruza DETALHADO (defeitos) com PRODUTIVIDADE (unidades) ✅ 100%
+  // 🎯 ESTRATÉGIA HÍBRIDA — Funciona com:
+  // - dpmo_agregado APENAS (vindo de print/OCR) ✅
+  // - dpmo_eventos APENAS (vindo do CSV legado) ✅
+  // - Os dois juntos (agregado prevalece) ✅
   function calcularDpmoPorSemana(): DpmoSemana[] {
     const resultado: Record<string, DpmoSemana> = {};
 
-    // 🎯 PROCESSO PRINCIPAL — só pega dados desse processo
     const procPrincipal = colaborador?.processo === 'Checkin' ? 'CK' : colaborador?.processo === 'P2M' ? 'P2M' : null;
     if (!procPrincipal) return [];
 
-    // Filtra eventos só do processo principal
     const eventosPrincipal = dpmoEventos.filter((e) => e.processo === procPrincipal);
     const agregadoPrincipal = dpmoAgregado.filter((d) => d.processo === procPrincipal);
 
-    // Acha data máxima do inventário (pra filtrar produtividade)
+    // Data máxima do inventário (eventos detalhados) - usado pra cortar produtividade
     let dataMaximaInventario = '';
     eventosPrincipal.forEach((e) => {
-      if (e.checkin_data > dataMaximaInventario) {
-        dataMaximaInventario = e.checkin_data;
-      }
+      if (e.checkin_data > dataMaximaInventario) dataMaximaInventario = e.checkin_data;
     });
 
-    // 1. Pega DPMO POR SEMANA do AGREGADO (oficial Looker)
+    // 🎯 1. DPMO POR SEMANA do AGREGADO (fonte primária - vem do print)
     agregadoPrincipal.forEach((d) => {
       const chave = `${d.ano}-S${d.semana}`;
       if (!resultado[chave]) {
@@ -446,7 +443,7 @@ export default function DetalheColaboradorPage() {
       }
     });
 
-    // 2. Cruza com DETALHADO pra mostrar defeitos/unidades (informativo)
+    // 2. Cruza com DETALHADO pra mostrar defeitos/dias auditados (informativo)
     eventosPrincipal.forEach((e) => {
       const chave = `${e.ano}-S${e.semana}`;
       if (!resultado[chave]) {
@@ -466,14 +463,13 @@ export default function DetalheColaboradorPage() {
       }
     });
 
-    // 3. Soma unidades de TODAS as semanas (mesmo as que não estão no map ainda)
+    // 3. Soma unidades das semanas
     historico.forEach((h) => {
+      // Se tem inventário detalhado, corta na data máxima. Senão soma todas.
       if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return;
       const { ano, semana } = getSemanaIso(h.data_referencia);
       const chave = `${ano}-S${semana}`;
       
-      // 🎯 Se a semana não existe no resultado, CRIA ela
-      // Antes só somava em semanas com DPMO, agora soma em todas
       if (!resultado[chave]) {
         resultado[chave] = {
           ano,
@@ -521,9 +517,44 @@ export default function DetalheColaboradorPage() {
   const semanasCompletas = dpmoPorSemana.filter((s) => s.statusCalculo === 'completo');
   const semanasFaltando = dpmoPorSemana.filter((s) => s.statusCalculo !== 'completo');
 
-  // 🎯 DPMO TOTAL GERAL — cruza DETALHADO (defeitos) + PRODUTIVIDADE (unidades)
-  // Soma todos os defeitos e divide pelas unidades das semanas auditadas até data máx
+  // 🎯 DPMO TOTAL GERAL — Prioridade:
+  // 1. IMA Manual (vem do print) - é o valor oficial salvo pelo TL
+  // 2. Média do DPMO agregado (semanas)
+  // 3. Cálculo via eventos detalhados + produtividade (legado CSV)
   const dpmoTotal = (() => {
+    // 🎯 PRIORIDADE 1: IMA Manual (Total Geral salvo via print)
+    if (imaManual.length > 0) {
+      const totalIma = imaManual.reduce((s, m) => s + (Number(m.ima) || 0), 0);
+      const mediaIma = Math.round(totalIma / imaManual.length);
+      
+      // Tenta calcular defeitos/unidades pra info adicional
+      const totalDef = dpmoEventos.reduce((s, e) => s + (e.qtd_dif || 0), 0);
+      const totalUnid = historico.reduce((s, h) => s + (h.unidades || 0), 0);
+      
+      return {
+        defeitos: totalDef,
+        unidades: totalUnid,
+        dpmo: mediaIma,
+      };
+    }
+
+    // 🎯 PRIORIDADE 2: DPMO agregado (média das semanas)
+    if (dpmoAgregado.length > 0) {
+      const procPrincipal = colaborador?.processo === 'Checkin' ? 'CK' : colaborador?.processo === 'P2M' ? 'P2M' : null;
+      const agrPrincipal = dpmoAgregado.filter((d) => d.processo === procPrincipal);
+      
+      if (agrPrincipal.length > 0) {
+        const somaDpmo = agrPrincipal.reduce((s, d) => s + (d.dpmo || 0), 0);
+        const mediaDpmo = Math.round(somaDpmo / agrPrincipal.length);
+        return {
+          defeitos: 0,
+          unidades: 0,
+          dpmo: mediaDpmo,
+        };
+      }
+    }
+
+    // 🎯 PRIORIDADE 3: Cálculo legado via eventos detalhados (CSV)
     let dataMax = '';
     dpmoEventos.forEach((e) => {
       if (e.checkin_data > dataMax) dataMax = e.checkin_data;
@@ -543,18 +574,6 @@ export default function DetalheColaboradorPage() {
         return semanasComInventario.has(`${ano}-S${semana}`);
       })
       .reduce((s, h) => s + (h.unidades || 0), 0);
-
-    // 🎯 SE TEM IMA MANUAL, faz a média dos meses preenchidos
-    // Isso permite que o "Total Geral" reflita os IMAs editados manualmente
-    if (imaManual.length > 0) {
-      const totalIma = imaManual.reduce((s, m) => s + (Number(m.ima) || 0), 0);
-      const mediaIma = Math.round(totalIma / imaManual.length);
-      return {
-        defeitos: totalDef,
-        unidades: totalUnid,
-        dpmo: mediaIma, // ← usa a média dos IMAs manuais
-      };
-    }
 
     if (totalUnid === 0 || totalDef === 0) return null;
     return {
