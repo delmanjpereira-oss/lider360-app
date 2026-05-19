@@ -89,17 +89,14 @@ function detectarSemanas(texto: string): number[] {
   
   for (const linha of linhas) {
     // 🎯 Regex flexível: "Semana 18", "Semana18", "semana 1a" (OCR ruim - "a" = 4)
-    // Captura número de 1-2 dígitos OU dígito+letra (OCR confunde)
     const matches = Array.from(linha.matchAll(/[Ss]emana\s*(\d{1,2}[a-z]?)/g));
     
     if (matches.length >= 2) {
       console.log(`📅 Linha de cabeçalho encontrada: "${linha}"`);
-      console.log(`📅 Matches brutos:`, matches.map((m) => m[1]));
+      console.log(`📅 Matches brutos (ordem original do print):`, matches.map((m) => m[1]));
       
       matches.forEach((m) => {
-        // Tira letras (OCR às vezes confunde 4→a, 1→i, 0→o)
         let numStr = m[1].replace(/[a-z]/gi, (c) => {
-          // Conversões comuns do OCR
           const mapa: Record<string, string> = {
             'a': '4', 'i': '1', 'o': '0', 'l': '1', 's': '5', 'z': '2'
           };
@@ -116,9 +113,10 @@ function detectarSemanas(texto: string): number[] {
     }
   }
   
-  // Ordena crescente
-  semanas.sort((a, b) => a - b);
-  console.log(`📅 Semanas detectadas (final): ${semanas.join(', ')}`);
+  // 🎯 IMPORTANTE: NÃO ordenar! Mantém a ordem ORIGINAL do print
+  // O Looker exibe da MAIS RECENTE pra MAIS ANTIGA (ex: S20, S19, S18, S17, S16)
+  // Os valores na linha do colab seguem essa mesma ordem
+  console.log(`📅 Semanas detectadas (ordem do print - mais recente primeiro): ${semanas.join(', ')}`);
   return semanas;
 }
 
@@ -378,8 +376,8 @@ export default function DpmoPage() {
         const totalCols = parseInt(Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]);
         const numSemanas = totalCols - 1; // último é Total Geral
         
-        // 🎯 Gera semanas baseadas no mês selecionado
-        // Pega a semana ISO do dia 1º do mês e vai pra trás
+        // 🎯 Gera semanas DECRESCENTES (mais recente primeiro, como no Looker)
+        // Ex: Maio/2026 com 5 colunas → [22, 21, 20, 19, 18]
         const dataRef = new Date(anoSelecionado, mesSelecionado - 1, 28);
         const utc = new Date(Date.UTC(dataRef.getFullYear(), dataRef.getMonth(), dataRef.getDate()));
         const dow = utc.getUTCDay() || 7;
@@ -387,10 +385,11 @@ export default function DpmoPage() {
         const inicio = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
         const semanaUltimo = Math.ceil((((utc.getTime() - inicio.getTime()) / 86400000) + 1) / 7);
         
+        // Decrescente: começa da mais recente
         for (let i = 0; i < numSemanas; i++) {
-          semanas.push(semanaUltimo - (numSemanas - 1 - i));
+          semanas.push(semanaUltimo - i);
         }
-        console.log(`🎯 Inferido: ${numSemanas} colunas de semana → ${semanas.join(', ')}`);
+        console.log(`🎯 Inferido (decrescente, igual Looker): ${numSemanas} colunas → ${semanas.join(', ')}`);
       }
     }
     
