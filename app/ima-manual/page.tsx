@@ -295,9 +295,17 @@ export default function ImaManualPage() {
     }
   }
 
-  const colabsFiltrados = colaboradores.filter((c) =>
-    !filtro || c.nome.toLowerCase().includes(filtro.toLowerCase())
-  );
+  const colabsFiltrados = colaboradores.filter((c) => {
+    if (!filtro) return true;
+    const termo = filtro.toLowerCase().trim();
+    if (!termo) return true;
+    
+    // 🎯 Busca pelo PRIMEIRO NOME que começa com o termo
+    // "vi" → mostra "Vitoria", "Vinicius", "Vivian"
+    // "vi" → NÃO mostra "Gabriela Vitoria"
+    const primeiroNome = c.nome.toLowerCase().split(' ')[0] || '';
+    return primeiroNome.startsWith(termo);
+  });
 
   const totalPreenchidos = Object.values(imasSalvos).length;
   const totalColabs = colaboradores.length;
