@@ -455,6 +455,10 @@ export default function DpmoPage() {
     setSalvando(true);
     setErro(null);
 
+    console.log('💾 INICIANDO SALVAMENTO');
+    console.log(`📊 ${vinculadas.length} colabs vinculados`);
+    console.log(`📅 Mês ${mesSelecionado}/${anoSelecionado} - Processo ${processoSelecionado}`);
+
     try {
       const procDpmo = processoSelecionado === 'Checkin' ? 'CK' : 'P2M';
 
@@ -471,56 +475,69 @@ export default function DpmoPage() {
         atualizado_por: 'delman.jpereira@mercadolivre.com',
       }));
 
-      const { error: errIma } = await supabase.from('ima_manual').upsert(registrosIma, {
+      console.log(`📝 Salvando ${registrosIma.length} IMAs em ima_manual...`);
+      const { error: errIma, data: dataIma } = await supabase.from('ima_manual').upsert(registrosIma, {
         onConflict: 'id_groot,mes,ano,processo',
         ignoreDuplicates: false,
-      });
-      if (errIma) throw new Error('ima_manual: ' + errIma.message);
-
-      // 2) dpmo_agregado (Semanas) - APAGA e RECRIA
-      const idsColabs = vinculadas.map((l) => l.cadastroVinculado!.id_groot);
-      const semanasUsadas = new Set<number>();
-      vinculadas.forEach((l) => {
-        Object.keys(l.semanas).forEach((s) => semanasUsadas.add(Number(s)));
-      });
-
-      if (semanasUsadas.size > 0) {
-        const { error: errDel } = await supabase
-          .from('dpmo_agregado')
-          .delete()
-          .in('id_groot', idsColabs)
-          .in('semana', Array.from(semanasUsadas))
-          .eq('ano', anoSelecionado)
-          .eq('processo', procDpmo);
-        if (errDel) console.warn('Erro apagando antigo:', errDel);
+      }).select();
+      
+      if (errIma) {
+        console.error('❌ Erro ima_manual:', errIma);
+        throw new Error('ima_manual: ' + errIma.message);
       }
+      console.log(`✅ ima_manual salvo: ${dataIma?.length || 0} registros`);
+
+      // 2) dpmo_agregado (Semanas) - UPSERT por chave_unica
+      // O UPSERT abaixo já substitui valores existentes da mesma chave
 
       const registrosDpmo: any[] = [];
       vinculadas.forEach((l) => {
         Object.entries(l.semanas).forEach(([semStr, valor]) => {
           const semana = Number(semStr);
           if (valor > 0) {
+            // 🎯 chave_unica é OBRIGATÓRIA - formato: nome|processo|semana|ano
+            const chaveUnica = `${l.cadastroVinculado!.nome}|${procDpmo}|${semana}|${anoSelecionado}`;
             registrosDpmo.push({
+              chave_unica: chaveUnica,
               id_groot: l.cadastroVinculado!.id_groot,
               representante: l.cadastroVinculado!.nome,
               processo: procDpmo,
               semana,
               ano: anoSelecionado,
+              mes: mesSelecionado,
               trimestre,
               dpmo: valor,
+              arquivo_origem: 'print_ocr',
             });
           }
         });
       });
 
+      console.log(`📝 Inserindo ${registrosDpmo.length} registros em dpmo_agregado...`);
+      console.log('Sample:', registrosDpmo[0]);
+      
       if (registrosDpmo.length > 0) {
-        const { error: errDpmo } = await supabase.from('dpmo_agregado').insert(registrosDpmo);
-        if (errDpmo) throw new Error('dpmo_agregado: ' + errDpmo.message);
+        // 🎯 UPSERT por chave_unica (substitui se já existir)
+        const { error: errDpmo, data: dataDpmo } = await supabase
+          .from('dpmo_agregado')
+          .upsert(registrosDpmo, {
+            onConflict: 'chave_unica',
+            ignoreDuplicates: false,
+          })
+          .select();
+        if (errDpmo) {
+          console.error('❌ Erro dpmo_agregado:', errDpmo);
+          throw new Error('dpmo_agregado: ' + errDpmo.message);
+        }
+        console.log(`✅ dpmo_agregado inserido: ${dataDpmo?.length || 0} registros`);
+      } else {
+        console.warn('⚠️ Nenhum registro semanal pra salvar (semanas vazias)');
       }
 
-      setMensagem(`✅ Salvo! ${vinculadas.length} IMAs + ${registrosDpmo.length} semanais. Imagens descartadas.`);
+      setMensagem(`✅ Salvo! ${vinculadas.length} IMAs + ${registrosDpmo.length} registros semanais. Imagens descartadas.`);
       descartarTudo();
     } catch (e: any) {
+      console.error('❌ Erro geral:', e);
       setErro('Erro ao salvar: ' + e.message);
     } finally {
       setSalvando(false);
