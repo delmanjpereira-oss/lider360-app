@@ -70,6 +70,13 @@ export default function ConfiguracoesAppPage() {
   const [buscandoDup, setBuscandoDup] = useState(false);
   const [limpandoDup, setLimpandoDup] = useState(false);
   const [mensagemDup, setMensagemDup] = useState<string | null>(null);
+  
+  // 🎯 Limpeza de IMA/DPMO por mês
+  const [mesLimpeza, setMesLimpeza] = useState(5);
+  const [anoLimpeza, setAnoLimpeza] = useState(2026);
+  const [processoLimpeza, setProcessoLimpeza] = useState<'Checkin' | 'P2M' | 'Ambos'>('Ambos');
+  const [limpandoMes, setLimpandoMes] = useState(false);
+  const [mensagemLimpeza, setMensagemLimpeza] = useState<string | null>(null);
 
   useEffect(() => {
     carregar();
@@ -195,6 +202,65 @@ export default function ConfiguracoesAppPage() {
       setMensagemDup('❌ Erro: ' + e.message);
     } finally {
       setLimpandoDup(false);
+    }
+  }
+
+  // 🎯 Limpa IMA/DPMO de um mês específico
+  async function limparMes() {
+    const nomeProc = processoLimpeza === 'Ambos' ? 'AMBOS os processos' : processoLimpeza;
+    if (!confirm(`Apagar TODOS dados IMA + DPMO de ${mesLimpeza}/${anoLimpeza} - ${nomeProc}?`)) return;
+    
+    setLimpandoMes(true);
+    setMensagemLimpeza(null);
+    
+    try {
+      let totalImaApagados = 0;
+      let totalDpmoApagados = 0;
+      
+      // 1) Apaga ima_manual do mês/ano
+      const processosIma = processoLimpeza === 'Ambos' ? ['Checkin', 'P2M'] : [processoLimpeza];
+      for (const proc of processosIma) {
+        const { count } = await supabase
+          .from('ima_manual')
+          .delete({ count: 'exact' })
+          .eq('mes', mesLimpeza)
+          .eq('ano', anoLimpeza)
+          .eq('processo', proc);
+        totalImaApagados += count || 0;
+      }
+      
+      // 2) Apaga dpmo_agregado das semanas desse mês
+      // Calcula quais semanas pertencem ao mês selecionado
+      const semanasDoMes: number[] = [];
+      for (let dia = 1; dia <= 31; dia++) {
+        const data = new Date(anoLimpeza, mesLimpeza - 1, dia);
+        if (data.getMonth() + 1 !== mesLimpeza) break;
+        // Calcula semana ISO
+        const utc = new Date(Date.UTC(data.getFullYear(), data.getMonth(), data.getDate()));
+        const dow = utc.getUTCDay() || 7;
+        utc.setUTCDate(utc.getUTCDate() + 4 - dow);
+        const inicio = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+        const semana = Math.ceil((((utc.getTime() - inicio.getTime()) / 86400000) + 1) / 7);
+        if (!semanasDoMes.includes(semana)) semanasDoMes.push(semana);
+      }
+      
+      const processosDpmo = processoLimpeza === 'Ambos' ? ['CK', 'P2M'] : [processoLimpeza === 'Checkin' ? 'CK' : 'P2M'];
+      for (const proc of processosDpmo) {
+        const { count } = await supabase
+          .from('dpmo_agregado')
+          .delete({ count: 'exact' })
+          .in('semana', semanasDoMes)
+          .eq('ano', anoLimpeza)
+          .eq('processo', proc);
+        totalDpmoApagados += count || 0;
+      }
+      
+      setMensagemLimpeza(`✅ Apagados: ${totalImaApagados} IMAs + ${totalDpmoApagados} DPMOs (semanas ${semanasDoMes.join(', ')})`);
+      carregar();
+    } catch (e: any) {
+      setMensagemLimpeza('❌ Erro: ' + e.message);
+    } finally {
+      setLimpandoMes(false);
     }
   }
 
@@ -577,6 +643,78 @@ export default function ConfiguracoesAppPage() {
             )}
           </div>
         )}
+      </div>
+
+      {/* 🧹 Limpar IMA/DPMO por mês */}
+      <div className="bg-gradient-to-br from-orange-500/10 to-orange-700/5 border-2 border-orange-500/30 rounded-2xl p-6">
+        <h2 className="text-lg font-bold text-orange-300 mb-2 flex items-center gap-2">
+          🧹 Limpar IMA + DPMO por Mês
+        </h2>
+        <p className="text-sm text-gray-400 mb-4">
+          Apaga tudo que foi salvo via print (IMA Manual + DPMO Agregado) de um mês específico. Útil se subiu print errado.
+        </p>
+        
+        <div className="bg-[#0a0a0a] border border-orange-500/30 rounded-xl p-4 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 uppercase mb-1 block">Mês</label>
+              <select 
+                value={mesLimpeza} 
+                onChange={(e) => setMesLimpeza(Number(e.target.value))}
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white"
+              >
+                {[
+                  { num: 1, label: 'Janeiro' }, { num: 2, label: 'Fevereiro' },
+                  { num: 3, label: 'Março' }, { num: 4, label: 'Abril' },
+                  { num: 5, label: 'Maio' }, { num: 6, label: 'Junho' },
+                  { num: 7, label: 'Julho' }, { num: 8, label: 'Agosto' },
+                  { num: 9, label: 'Setembro' }, { num: 10, label: 'Outubro' },
+                  { num: 11, label: 'Novembro' }, { num: 12, label: 'Dezembro' },
+                ].map((m) => <option key={m.num} value={m.num}>{m.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 uppercase mb-1 block">Ano</label>
+              <select 
+                value={anoLimpeza} 
+                onChange={(e) => setAnoLimpeza(Number(e.target.value))}
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white"
+              >
+                {[2024, 2025, 2026, 2027].map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 uppercase mb-1 block">Processo</label>
+              <select 
+                value={processoLimpeza} 
+                onChange={(e) => setProcessoLimpeza(e.target.value as any)}
+                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white"
+              >
+                <option value="Ambos">Ambos (Checkin + P2M)</option>
+                <option value="Checkin">Apenas Checkin</option>
+                <option value="P2M">Apenas P2M</option>
+              </select>
+            </div>
+          </div>
+          
+          <button
+            onClick={limparMes}
+            disabled={limpandoMes}
+            className="bg-orange-500 hover:bg-orange-400 text-white font-bold py-3 px-6 rounded-lg transition-all disabled:opacity-50"
+          >
+            {limpandoMes ? '🗑️ Apagando...' : `🗑️ Apagar IMA + DPMO de ${mesLimpeza}/${anoLimpeza}`}
+          </button>
+          
+          {mensagemLimpeza && (
+            <div className={`p-3 rounded-lg text-sm font-bold ${
+              mensagemLimpeza.startsWith('✅') 
+                ? 'bg-green-500/10 text-green-300 border border-green-500/30' 
+                : 'bg-red-500/10 text-red-300 border border-red-500/30'
+            }`}>
+              {mensagemLimpeza}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Zona de Perigo */}
