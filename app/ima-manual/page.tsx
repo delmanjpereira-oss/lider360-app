@@ -68,6 +68,40 @@ function nomesIguais(a: string, b: string): { igual: boolean; score: number } {
   return { igual: score >= 0.6, score };
 }
 
+// 🎯 Extrai linhas do OCR pegando ÚLTIMO número da linha (canto direito)
+function extrairLinhasOcr(texto: string): LinhaOcr[] {
+  const linhas: LinhaOcr[] = [];
+  const blocos = texto.split('\n');
+
+  blocos.forEach((linha, idx) => {
+    const limpa = linha.trim();
+    if (!limpa || limpa.length < 5) return;
+
+    const numerosMatches = Array.from(limpa.matchAll(/[\d]{1,3}(?:[.,][\d]{3})*(?:[.,][\d]+)?|\d+/g));
+    if (numerosMatches.length === 0) return;
+
+    const ultimoMatch = numerosMatches[numerosMatches.length - 1];
+    const numStr = ultimoMatch[0].replace(/[.,]/g, '');
+    const num = parseInt(numStr);
+    if (isNaN(num) || num < 1 || num > 100000) return;
+
+    const posicaoUltimo = ultimoMatch.index || 0;
+    let nome = limpa.substring(0, posicaoUltimo).trim();
+    // Remove números intermediários sobressalentes
+    nome = nome.replace(/\s+[\d.,]+\s*$/g, '').trim();
+
+    if (nome.length < 3) return;
+    if (!/[a-zA-ZÀ-ú]/.test(nome)) return;
+
+    if (idx < 5) {
+      console.log(`📝 Linha "${limpa}" → Nome: "${nome}" | IMA: ${num}`);
+    }
+    linhas.push({ nomeOcr: nome, imaOcr: num });
+  });
+
+  return linhas;
+}
+
 export default function ImaManualPage() {
   const [modo, setModo] = useState<'manual' | 'print'>('manual');
   const [mesSelecionado, setMesSelecionado] = useState(5);
@@ -104,6 +138,7 @@ export default function ImaManualPage() {
 
   useEffect(() => {
     if (montado) carregar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesSelecionado, anoSelecionado, processoSelecionado, montado]);
 
   async function carregar() {
@@ -168,7 +203,7 @@ export default function ImaManualPage() {
     const valor = imasEditando[idGroot]?.trim();
     const colab = colaboradores.find((c) => c.id_groot === idGroot);
     if (!colab) return;
-    
+
     if (!valor) {
       const salvo = imasSalvos[idGroot];
       if (salvo) {
@@ -181,13 +216,13 @@ export default function ImaManualPage() {
       }
       return;
     }
-    
+
     const imaNum = parseInt(valor.replace(/\D/g, ''));
     if (isNaN(imaNum) || imaNum < 0) return;
-    
+
     const salvo = imasSalvos[idGroot];
     if (salvo && Number(salvo.ima) === imaNum) return;
-    
+
     try {
       const { error } = await supabase.from('ima_manual').upsert({
         id_groot: idGroot, nome: colab.nome, processo: processoSelecionado,
@@ -195,14 +230,14 @@ export default function ImaManualPage() {
         atualizado_em: new Date().toISOString(),
         atualizado_por: 'delman.jpereira@mercadolivre.com',
       }, { onConflict: 'id_groot,mes,ano,processo', ignoreDuplicates: false });
-      
+
       if (error) throw new Error(error.message);
-      
+
       setImasSalvos({
         ...imasSalvos,
         [idGroot]: { id_groot: idGroot, ima: imaNum, atualizado_em: new Date().toISOString() },
       });
-      
+
       setMensagem(`✅ ${colab.nome}: ${imaNum.toLocaleString('pt-BR')} salvo!`);
       setTimeout(() => setMensagem(null), 2000);
     } catch (e: any) {
@@ -246,7 +281,7 @@ export default function ImaManualPage() {
     try {
       const Tesseract = (await import('tesseract.js')).default;
       setStatusOcr('Reconhecendo texto...');
-      
+
       const resultado = await Tesseract.recognize(imgBase64, 'por', {
         logger: (m: any) => {
           if (m.status === 'recognizing text') setProgressoOcr(Math.round(m.progress * 100));
@@ -256,13 +291,13 @@ export default function ImaManualPage() {
 
       const texto = resultado.data.text;
       console.log('📝 OCR:', texto);
-      
+
       const linhas = extrairLinhasOcr(texto);
       const vinculadas = vincularLinhasOcr(linhas);
-      
+
       setLinhasOcr(vinculadas);
       setStatusOcr('');
-      
+
       const vinc = vinculadas.filter((l) => l.cadastroVinculado).length;
       setMensagem(`✅ ${vinculadas.length} linhas detectadas, ${vinc} vinculadas`);
     } catch (e: any) {
@@ -270,53 +305,6 @@ export default function ImaManualPage() {
     } finally {
       setProcessandoOcr(false);
     }
-  }
-
-  function extrairLinhasOcr(texto: string): LinhaOcr[] {
-    const linhas: LinhaOcr[] = [];
-    const blocos = texto.split('\n');
-
-    blocos.forEach((linha, idx) => {
-      const limpa = linha.trim();
-      if (!limpa || limpa.length < 5) return;
-
-      // 🎯 Acha TODOS os números da linha
-      // Padrão aceita: 1.567, 1567, 1,567.50, 12.345
-      const numerosMatches = Array.from(limpa.matchAll(/[\d]{1,3}(?:[.,][\d]{3})*(?:[.,][\d]+)?|\d+/g));
-      
-      if (numerosMatches.length === 0) return;
-      
-      // 🎯 Pega o ÚLTIMO número (que tá no canto direito da linha)
-      const ultimoMatch = numerosMatches[numerosMatches.length - 1];
-      const numStr = ultimoMatch[0].replace(/[.,]/g, '');
-      const num = parseInt(numStr);
-      
-      // Valida o número
-      if (isNaN(num) || num < 1 || num > 100000) return;
-      
-      // 🎯 Tudo ANTES do último número é considerado o NOME
-      const posicaoUltimo = ultimoMatch.index || 0;
-      const nome = limpa.substring(0, posicaoUltimo).trim()
-        // Remove números intermediários que sobraram (deixa só letras)
-        .replace(/\s+\d[\d.,]*\s*$/g, '')
-        .trim();
-      
-      // Valida o nome
-      if (nome.length < 3) return;
-      if (!/[a-zA-ZÀ-ú]/.test(nome)) return;
-      
-      // Logs pra debug
-      if (idx < 5) {
-        console.log(`📝 Linha "${limpa}" → Nome: "${nome}" | IMA: ${num}`);
-      }
-      
-      linhas.push({ nomeOcr: nome, imaOcr: num });
-    });
-
-    return linhas;
-  }
-
-    return linhas;
   }
 
   function vincularLinhasOcr(linhas: LinhaOcr[]): LinhaOcr[] {
@@ -425,6 +413,7 @@ export default function ImaManualPage() {
     }
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modo, colaboradores]);
 
   function formatarTempo(iso: string): string {
@@ -458,7 +447,6 @@ export default function ImaManualPage() {
           <p className="text-gray-400 text-sm">Preencha manualmente ou via print do Looker.</p>
         </div>
 
-        {/* Tabs */}
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-3 mb-4">
           <div className="flex gap-2">
             <button
@@ -480,7 +468,6 @@ export default function ImaManualPage() {
           </div>
         </div>
 
-        {/* Período */}
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
           <h2 className="text-lg font-bold mb-3">📅 Período</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
@@ -528,7 +515,6 @@ export default function ImaManualPage() {
           </div>
         )}
 
-        {/* MODO MANUAL */}
         {modo === 'manual' && (
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
             <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
@@ -545,13 +531,13 @@ export default function ImaManualPage() {
             ) : colaboradores.length === 0 ? (
               <div className="text-center py-8 text-gray-400">Nenhum colaborador cadastrado</div>
             ) : (
-              <>
+              <div>
                 <div className="space-y-2">
                   {colabsFiltrados.map((c) => {
                     const salvo = imasSalvos[c.id_groot];
                     const valorAtual = imasEditando[c.id_groot] || '';
                     const temValor = !!salvo;
-                    const valorMudou = salvo && String(salvo.ima) !== valorAtual;
+                    const valorMudou = !!(salvo && String(salvo.ima) !== valorAtual);
                     
                     return (
                       <div key={c.id_groot}
@@ -588,14 +574,13 @@ export default function ImaManualPage() {
                   <button onClick={() => carregar()} className="bg-[#0a0a0a] hover:bg-[#2a2a2a] border border-[#2a2a2a] text-white font-bold py-3 px-6 rounded-lg">🔄 Recarregar</button>
                   <p className="text-xs text-gray-500 self-center">💡 Salva ao sair do campo ou pressionar Enter</p>
                 </div>
-              </>
+              </div>
             )}
           </div>
         )}
 
-        {/* MODO PRINT */}
         {modo === 'print' && (
-          <>
+          <div>
             <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
               <h2 className="text-lg font-bold mb-3">📸 Subir Print do Looker</h2>
               {!imagem ? (
@@ -689,7 +674,7 @@ export default function ImaManualPage() {
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
 
         <div className="bg-blue-500/10 border border-blue-500/40 rounded-xl p-4">
@@ -697,6 +682,7 @@ export default function ImaManualPage() {
           <ul className="text-xs text-blue-200/80 space-y-1 list-disc pl-5">
             <li><strong>Manual:</strong> digite o IMA, Tab/Enter salva automático</li>
             <li><strong>Via Print:</strong> sobe imagem, OCR extrai, você revisa e salva</li>
+            <li>OCR pega o <strong>último número de cada linha</strong> (canto direito)</li>
             <li>Vinculação: ✅ exato · 🔶 parcial · ❌ você seleciona</li>
             <li>🔒 Imagem processada local, <strong>nunca vai pro banco</strong></li>
             <li>Valores refletem na Calibração imediatamente</li>
