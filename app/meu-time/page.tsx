@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
-import ApolloBadge from '../components/ApolloBadge';
+import { useToast } from '../components/ToastProvider';
 
 type Colaborador = {
   id: number;
@@ -19,16 +19,16 @@ type Colaborador = {
 };
 
 const corCarreira: Record<string, string> = {
-  'REP 1': 'bg-blue-500/15 text-blue-300 border-blue-500/30',
-  'REP 2': 'bg-purple-500/15 text-purple-300 border-purple-500/30',
-  'REP 3': 'bg-pink-500/15 text-pink-300 border-pink-500/30',
-  MULTIPLICADOR: 'bg-[#FFD700]/15 text-[#FFD700] border-[#FFD700]/30',
+  'REP 1': 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  'REP 2': 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  'REP 3': 'bg-pink-500/20 text-pink-300 border-pink-500/30',
+  MULTIPLICADOR: 'bg-[#FFD700]/20 text-[#FFD700] border-[#FFD700]/30',
 };
 
 const corProcesso: Record<string, string> = {
-  Checkin: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
-  P2M: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
-  Sorting: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  Checkin: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+  P2M: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  Sorting: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
 };
 
 function iniciais(nome: string): string {
@@ -46,242 +46,347 @@ function isAniversarioHoje(aniversario: string | null): boolean {
 
 export default function MeuTimePage() {
   const router = useRouter();
+  const toast = useToast();
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [filtroProcesso, setFiltroProcesso] = useState('todos');
-  const [filtroStatus, setFiltroStatus] = useState('Ativo');
+  const [filtroStatus, setFiltroStatus] = useState('todos');
+  const [versao, setVersao] = useState(0);
 
   const carregar = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('colaboradores')
-      .select('*')
-      .order('nome');
-    if (data) setColaboradores(data as Colaborador[]);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { carregar(); }, [carregar]);
-
-  // 🎯 Filtros
-  const filtrados = colaboradores.filter((c) => {
-    if (filtroStatus !== 'todos' && c.status !== filtroStatus) return false;
-    if (filtroProcesso !== 'todos' && c.processo !== filtroProcesso) return false;
-    if (busca) {
-      const termo = busca.toLowerCase().trim();
-      if (!c.nome.toLowerCase().includes(termo) && !String(c.id_groot).includes(termo)) return false;
+    try {
+      const { data, error } = await supabase
+        .from('colaboradores')
+        .select('*')
+        .order('nome');
+      if (error) {
+        toast.error('Erro ao carregar', error.message);
+      } else {
+        setColaboradores(data || []);
+      }
+    } finally {
+      setLoading(false);
     }
+  }, [toast]);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar, versao]);
+
+  async function excluir(colab: Colaborador) {
+    const ok = confirm(`Excluir ${colab.nome}? Essa ação não pode ser desfeita.`);
+    if (!ok) return;
+
+    const { error } = await supabase.from('colaboradores').delete().eq('id', colab.id);
+    if (error) {
+      toast.error('Erro ao excluir', error.message);
+    } else {
+      toast.success('Colaborador removido', `${colab.nome} foi excluído`);
+      setVersao((v) => v + 1);
+    }
+  }
+
+  const filtrados = colaboradores.filter((c) => {
+    if (busca && !c.nome.toLowerCase().includes(busca.toLowerCase())) return false;
+    if (filtroProcesso !== 'todos' && c.processo !== filtroProcesso) return false;
+    if (filtroStatus !== 'todos' && c.status !== filtroStatus) return false;
     return true;
   });
 
-  // 📊 Stats
-  const totalAtivos = colaboradores.filter((c) => c.status === 'Ativo').length;
-  const totalCheckin = colaboradores.filter((c) => c.status === 'Ativo' && c.processo === 'Checkin').length;
-  const totalP2M = colaboradores.filter((c) => c.status === 'Ativo' && c.processo === 'P2M').length;
-  const aniversariantes = colaboradores.filter((c) => isAniversarioHoje(c.aniversario)).length;
-
-  // 🤖 Apollo - análise contextual
-  const apolloMsg = (() => {
-    if (loading) return null;
-    if (aniversariantes > 0) {
-      return {
-        mood: 'warning' as const,
-        message: `${aniversariantes} aniversariante${aniversariantes > 1 ? 's' : ''} hoje!`,
-        detail: 'Não esqueça de parabenizar seu time',
-      };
-    }
-    if (totalAtivos === 0) {
-      return {
-        mood: 'alert' as const,
-        message: 'Nenhum colaborador ativo',
-        detail: 'Comece importando seu time',
-        action: { label: 'Importar', href: '/meu-time/importar' },
-      };
-    }
-    return {
-      mood: 'info' as const,
-      message: `${totalAtivos} colaboradores ativos`,
-      detail: `${totalCheckin} Checkin · ${totalP2M} P2M`,
-    };
-  })();
+  const stats = {
+    total: colaboradores.length,
+    ativos: colaboradores.filter((c) => c.status === 'Ativo').length,
+    ferias: colaboradores.filter((c) => c.status === 'Férias').length,
+    aniversariantes: colaboradores.filter((c) => isAniversarioHoje(c.aniversario)).length,
+  };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* HEADER */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
-            <div>
-              <Link href="/configuracoes-app" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
-                ← Voltar
-              </Link>
-              <h1 className="text-3xl md:text-4xl font-black mt-2">
-                Meu Time
-              </h1>
-              <p className="text-sm text-gray-500 mt-1">Gestão de colaboradores e dados</p>
-            </div>
-
-            {/* Ações primárias */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <Link
-                href="/meu-time/dpmo"
-                className="bg-[#FFD700] hover:bg-yellow-400 text-black font-bold py-2.5 px-5 rounded-lg text-sm transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-[#FFD700]/20 flex items-center gap-2"
-              >
-                📸 Subir Print
-              </Link>
-              <Link
-                href="/meu-time/importar"
-                className="bg-[#1a1a1a] hover:bg-[#222] border border-[#2a2a2a] text-white font-bold py-2.5 px-5 rounded-lg text-sm transition-all flex items-center gap-2"
-              >
-                📥 Importar Time
-              </Link>
-            </div>
-          </div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-4xl font-black mb-2">
+            👥 Meu <span className="text-[#FFD700]">Time</span>
+          </h1>
         </div>
 
-        {/* APOLLO BADGE */}
-        {apolloMsg && (
-          <ApolloBadge
-            mood={apolloMsg.mood}
-            message={apolloMsg.message}
-            detail={apolloMsg.detail}
-            action={apolloMsg.action}
+        {/* Botões de ação rápida */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link
+            href="/meu-time/upload"
+            title="Upload CSV de Produtividade"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-blue-600/10 hover:from-blue-500/40 hover:to-blue-600/30 text-blue-300 rounded-xl transition-all text-2xl border border-blue-500/30 hover:border-blue-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-500/20 active:translate-y-0"
+          >
+            📤
+          </Link>
+
+          <Link
+            href="/meu-time/dpmo"
+            title="Upload DPMO"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-purple-500/20 to-purple-600/10 hover:from-purple-500/40 hover:to-purple-600/30 text-purple-300 rounded-xl transition-all text-2xl border border-purple-500/30 hover:border-purple-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-purple-500/20 active:translate-y-0"
+          >
+            📊
+          </Link>
+
+          <Link
+            href="/meu-time/ocupacao"
+            title="Upload Ocupação P2M"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 hover:from-emerald-500/40 hover:to-emerald-600/30 text-emerald-300 rounded-xl transition-all text-2xl border border-emerald-500/30 hover:border-emerald-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20 active:translate-y-0"
+          >
+            📦
+          </Link>
+
+          <Link
+            href="/meu-time/importar"
+            title="Importar colaboradores em massa (CSV)"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-green-500/20 to-green-600/10 hover:from-green-500/40 hover:to-green-600/30 text-green-300 rounded-xl transition-all text-2xl border border-green-500/30 hover:border-green-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-500/20 active:translate-y-0"
+          >
+            📥
+          </Link>
+
+          <Link
+            href="/configuracoes-app"
+            title="Configurações do Banco"
+            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] hover:from-[#3a3a3a] hover:to-[#2a2a2a] text-gray-400 hover:text-white rounded-xl transition-all text-2xl border border-[#3a3a3a] hover:border-[#FFD700] hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0"
+          >
+            ⚙️
+          </Link>
+
+          <div className="w-px h-12 bg-[#2a2a2a] mx-1"></div>
+
+          <Link
+            href="/meu-time/cadastrar"
+            className="bg-gradient-to-br from-[#FFD700] to-yellow-500 text-black font-bold px-6 py-3 rounded-xl hover:from-yellow-300 hover:to-yellow-400 transition-all flex items-center gap-2 shadow-lg shadow-yellow-500/30 hover:shadow-xl hover:shadow-yellow-500/40 hover:-translate-y-0.5 active:translate-y-0"
+          >
+            <span className="text-xl">+</span> Novo
+          </Link>
+        </div>
+      </div>
+
+      {/* Estatísticas */}
+      {!loading && colaboradores.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div
+            className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50"
+            style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">👥</span>
+              <span className="text-3xl font-black text-white">{stats.total}</span>
+            </div>
+            <p className="text-xs text-gray-400">Total</p>
+          </div>
+
+          <div
+            className="bg-gradient-to-br from-green-500/10 to-green-700/5 border border-green-500/30 rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-green-500/20"
+            style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">✅</span>
+              <span className="text-3xl font-black text-green-400">{stats.ativos}</span>
+            </div>
+            <p className="text-xs text-green-300">Ativos</p>
+          </div>
+
+          <div
+            className="bg-gradient-to-br from-blue-500/10 to-blue-700/5 border border-blue-500/30 rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/20"
+            style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">🌴</span>
+              <span className="text-3xl font-black text-blue-400">{stats.ferias}</span>
+            </div>
+            <p className="text-xs text-blue-300">Em férias</p>
+          </div>
+
+          <div
+            className="bg-gradient-to-br from-pink-500/10 to-pink-700/5 border border-pink-500/30 rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-pink-500/20"
+            style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-2xl">🎂</span>
+              <span className="text-3xl font-black text-pink-400">
+                {stats.aniversariantes}
+              </span>
+            </div>
+            <p className="text-xs text-pink-300">Aniversariantes hoje</p>
+          </div>
+        </div>
+      )}
+
+      {/* Filtros */}
+      {!loading && colaboradores.length > 0 && (
+        <div
+          className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4 flex items-center gap-3 flex-wrap"
+          style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+        >
+          <input
+            type="text"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="🔍 Buscar por nome..."
+            className="flex-1 min-w-[200px] bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:border-[#FFD700] focus:outline-none transition-colors"
           />
-        )}
-
-        {/* STATUS CARDS */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <StatusCard label="Ativos" valor={totalAtivos} accent="text-white" />
-          <StatusCard label="Checkin" valor={totalCheckin} accent="text-cyan-300" />
-          <StatusCard label="P2M" valor={totalP2M} accent="text-orange-300" />
-          <StatusCard label="Filtrados" valor={filtrados.length} accent="text-[#FFD700]" />
+          <select
+            value={filtroProcesso}
+            onChange={(e) => setFiltroProcesso(e.target.value)}
+            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:border-[#FFD700] focus:outline-none transition-colors"
+          >
+            <option value="todos">Todos os processos</option>
+            <option value="Checkin">📦 Checkin</option>
+            <option value="P2M">🚚 P2M</option>
+            <option value="Sorting">📋 Sorting</option>
+          </select>
+          <select
+            value={filtroStatus}
+            onChange={(e) => setFiltroStatus(e.target.value)}
+            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:border-[#FFD700] focus:outline-none transition-colors"
+          >
+            <option value="todos">Todos os status</option>
+            <option value="Ativo">Ativo</option>
+            <option value="Férias">Férias</option>
+            <option value="Afastado">Afastado</option>
+            <option value="Inativo">Inativo</option>
+          </select>
         </div>
+      )}
 
-        {/* FILTROS */}
-        <div className="bg-[#141414] border border-[#2a2a2a] rounded-xl p-4 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="md:col-span-1">
-              <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5 block font-semibold">Buscar</label>
-              <input
-                type="text"
-                placeholder="Nome ou ID..."
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] hover:border-[#3a3a3a] focus:border-[#FFD700]/50 rounded-lg px-3 py-2 text-sm text-white transition-all outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5 block font-semibold">Processo</label>
-              <select
-                value={filtroProcesso}
-                onChange={(e) => setFiltroProcesso(e.target.value)}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] hover:border-[#3a3a3a] focus:border-[#FFD700]/50 rounded-lg px-3 py-2 text-sm text-white transition-all outline-none"
-              >
-                <option value="todos">Todos os processos</option>
-                <option value="Checkin">Checkin</option>
-                <option value="P2M">P2M</option>
-                <option value="Sorting">Sorting</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5 block font-semibold">Status</label>
-              <select
-                value={filtroStatus}
-                onChange={(e) => setFiltroStatus(e.target.value)}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] hover:border-[#3a3a3a] focus:border-[#FFD700]/50 rounded-lg px-3 py-2 text-sm text-white transition-all outline-none"
-              >
-                <option value="todos">Todos</option>
-                <option value="Ativo">Ativos</option>
-                <option value="Inativo">Inativos</option>
-                <option value="Afastado">Afastados</option>
-              </select>
-            </div>
+      {/* Loading */}
+      {loading && (
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-12 text-center">
+          <span className="text-6xl block mb-4 animate-pulse">⏳</span>
+          <p className="text-gray-400">Carregando colaboradores...</p>
+        </div>
+      )}
+
+      {/* Vazio total */}
+      {!loading && colaboradores.length === 0 && (
+        <div
+          className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center"
+          style={{ boxShadow: '0 15px 35px -10px rgba(0,0,0,0.5)' }}
+        >
+          <span className="text-6xl block mb-4">📭</span>
+          <h3 className="text-xl font-bold text-white mb-2">
+            Nenhum colaborador cadastrado
+          </h3>
+          <div className="flex justify-center gap-3 flex-wrap mt-6">
+            <Link
+              href="/meu-time/cadastrar"
+              className="bg-gradient-to-br from-[#FFD700] to-yellow-500 text-black font-bold px-6 py-3 rounded-xl hover:from-yellow-300 hover:to-yellow-400 transition-all shadow-lg shadow-yellow-500/30"
+            >
+              + Adicionar um por um
+            </Link>
+            <Link
+              href="/meu-time/importar"
+              className="bg-gradient-to-br from-green-500/30 to-green-600/20 text-green-300 font-bold px-6 py-3 rounded-xl hover:from-green-500/40 transition-all border border-green-500/30"
+            >
+              📥 Importar CSV
+            </Link>
           </div>
         </div>
+      )}
 
-        {/* AÇÕES SECUNDÁRIAS (Upload, Ocupação) - barra horizontal discreta */}
-        <div className="flex gap-2 mb-6 flex-wrap">
-          <SecondaryAction icon="📤" label="Upload CSV" href="/meu-time/upload" />
-          <SecondaryAction icon="📦" label="Ocupação P2M" href="/meu-time/ocupacao" />
-          <SecondaryAction icon="➕" label="Adicionar Colab" href="/meu-time/novo" />
+      {/* Sem resultados com filtro */}
+      {!loading && colaboradores.length > 0 && filtrados.length === 0 && (
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-8 text-center">
+          <span className="text-4xl block mb-3">🔍</span>
+          <p className="text-gray-400">Nenhum colaborador encontrado com esses filtros</p>
         </div>
+      )}
 
-        {/* LISTA DE COLABS */}
-        {loading ? (
-          <div className="text-center py-16 text-gray-500 text-sm">Carregando colaboradores...</div>
-        ) : filtrados.length === 0 ? (
-          <div className="text-center py-16 text-gray-500 text-sm">
-            Nenhum colaborador encontrado{busca && ` com "${busca}"`}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filtrados.map((c) => {
-              const aniversario = isAniversarioHoje(c.aniversario);
-              return (
-                <Link
-                  key={c.id}
-                  href={`/meu-time/${c.id}`}
-                  className="bg-[#141414] hover:bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#3a3a3a] rounded-xl p-4 transition-all hover:-translate-y-0.5 group relative"
-                >
-                  {aniversario && (
-                    <span className="absolute -top-2 -right-2 bg-[#FFD700] text-black text-xs font-black px-2 py-1 rounded-full shadow-lg shadow-[#FFD700]/20">
-                      🎉 BDay
+      {/* Grid de cards */}
+      {!loading && filtrados.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtrados.map((c) => (
+            <div
+              key={c.id}
+              className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-5 transition-all hover:-translate-y-1 hover:border-[#FFD700]/30 group"
+              style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}
+            >
+              <Link href={`/meu-time/${c.id}`} className="block">
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-lg flex-shrink-0 shadow-lg shadow-yellow-500/30 group-hover:scale-105 transition-transform">
+                    {iniciais(c.nome)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-white font-bold text-base truncate group-hover:text-[#FFD700] transition-colors">
+                      {c.nome}
+                    </h3>
+                    <p className="text-xs text-gray-500 font-mono">{c.id_groot}</p>
+                    {c.cargo && (
+                      <p className="text-xs text-gray-400 mt-0.5">{c.cargo}</p>
+                    )}
+                  </div>
+                  {isAniversarioHoje(c.aniversario) && (
+                    <span className="text-2xl animate-bounce" title="Aniversário hoje!">
+                      🎂
                     </span>
                   )}
-                  <div className="flex items-start gap-3">
-                    <div className="w-11 h-11 bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg flex items-center justify-center text-white font-bold text-sm flex-shrink-0 border border-[#2a2a2a] group-hover:border-[#FFD700]/30 transition-all">
-                      {iniciais(c.nome)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-bold text-sm truncate group-hover:text-[#FFD700] transition-colors">{c.nome}</p>
-                      <p className="text-gray-500 text-[11px] font-mono">{c.id_groot}</p>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {c.processo && (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${corProcesso[c.processo] || 'bg-gray-500/15 text-gray-300 border-gray-500/30'}`}>
-                            {c.processo}
-                          </span>
-                        )}
-                        {c.carreira && (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${corCarreira[c.carreira] || 'bg-gray-500/15 text-gray-300 border-gray-500/30'}`}>
-                            {c.carreira}
-                          </span>
-                        )}
-                        {c.status !== 'Ativo' && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-gray-500/15 text-gray-400 border-gray-500/30">
-                            {c.status}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                      c.status === 'Ativo'
+                        ? 'bg-green-500/20 text-green-300 border border-green-500/30'
+                        : c.status === 'Férias'
+                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                        : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                    }`}
+                  >
+                    {c.status}
+                  </span>
+                  {c.processo && (
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-bold border ${
+                        corProcesso[c.processo] ||
+                        'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                      }`}
+                    >
+                      {c.processo}
+                    </span>
+                  )}
+                  {c.carreira && (
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-bold border ${
+                        corCarreira[c.carreira] ||
+                        'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                      }`}
+                    >
+                      {c.carreira}
+                    </span>
+                  )}
+                </div>
+              </Link>
+
+              {/* Ações */}
+              <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a2a2a]">
+                <Link
+                  href={`/meu-time/${c.id}/feedbacks`}
+                  className="flex-1 text-center text-xs bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 font-bold py-2 rounded-lg transition-all active:scale-95"
+                >
+                  💬 Feedback
                 </Link>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                <Link
+                  href={`/meu-time/${c.id}/editar`}
+                  className="flex-1 text-center text-xs bg-[#FFD700]/10 text-[#FFD700] hover:bg-[#FFD700]/20 font-bold py-2 rounded-lg transition-all active:scale-95"
+                >
+                  ✏️ Editar
+                </Link>
+                <button
+                  onClick={() => excluir(c)}
+                  className="text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20 font-bold py-2 px-3 rounded-lg transition-all active:scale-95"
+                  title="Excluir"
+                >
+                  🗑️
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
-  );
-}
-
-function StatusCard({ label, valor, accent }: { label: string; valor: number; accent: string }) {
-  return (
-    <div className="bg-[#141414] border border-[#2a2a2a] rounded-xl p-4 hover:border-[#3a3a3a] transition-all">
-      <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{label}</p>
-      <p className={`text-3xl font-black ${accent}`}>{valor}</p>
-    </div>
-  );
-}
-
-function SecondaryAction({ icon, label, href }: { icon: string; label: string; href: string }) {
-  return (
-    <Link
-      href={href}
-      className="bg-[#141414] hover:bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#3a3a3a] rounded-lg px-4 py-2 text-xs font-semibold text-gray-300 hover:text-white transition-all flex items-center gap-2"
-    >
-      <span>{icon}</span>
-      <span>{label}</span>
-    </Link>
   );
 }
