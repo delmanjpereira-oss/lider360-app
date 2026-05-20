@@ -1,287 +1,898 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { supabase } from '../../lib/supabase';
-import ApolloBadge from '../components/ApolloBadge';
+import { useToast } from '../../components/ToastProvider';
+import ApolloBadge from '../../components/ApolloBadge';
 
 type Colaborador = {
-  id: number;
   id_groot: string;
   nome: string;
-  cargo: string | null;
-  processo: string | null;
+  processo: string;
   status: string;
-  carreira: string | null;
-  data_admissao: string | null;
-  aniversario: string | null;
 };
 
-const corCarreira: Record<string, string> = {
-  'REP 1': 'bg-blue-500/15 text-blue-300 border-blue-500/30',
-  'REP 2': 'bg-purple-500/15 text-purple-300 border-purple-500/30',
-  'REP 3': 'bg-pink-500/15 text-pink-300 border-pink-500/30',
-  MULTIPLICADOR: 'bg-[#FFD700]/15 text-[#FFD700] border-[#FFD700]/30',
+type LinhaPrint = {
+  nomeOcr: string;
+  totalGeral: number;
+  semanas: Record<number, number>;
+  cadastroVinculado?: Colaborador;
+  metodo?: 'exato' | 'fuzzy' | 'nao_vinculou';
+  printNum: number;
 };
 
-const corProcesso: Record<string, string> = {
-  Checkin: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
-  P2M: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
-  Sorting: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+type PrintInfo = {
+  base64: string;
+  textoBruto: string;
+  processando: boolean;
+  progresso: number;
+  status: string;
 };
 
-function iniciais(nome: string): string {
-  const partes = nome.trim().split(' ');
-  if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
-  return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
+const MESES = [
+  { num: 1, label: 'Janeiro', trim: 'Q1' },
+  { num: 2, label: 'Fevereiro', trim: 'Q1' },
+  { num: 3, label: 'Março', trim: 'Q1' },
+  { num: 4, label: 'Abril', trim: 'Q2' },
+  { num: 5, label: 'Maio', trim: 'Q2' },
+  { num: 6, label: 'Junho', trim: 'Q2' },
+  { num: 7, label: 'Julho', trim: 'Q3' },
+  { num: 8, label: 'Agosto', trim: 'Q3' },
+  { num: 9, label: 'Setembro', trim: 'Q3' },
+  { num: 10, label: 'Outubro', trim: 'Q4' },
+  { num: 11, label: 'Novembro', trim: 'Q4' },
+  { num: 12, label: 'Dezembro', trim: 'Q4' },
+];
+
+const PALAVRAS_CABECALHO = [
+  'COMPLETO', 'NOVE', 'NUMERO',
+  'CK', 'P2M', 'CHECK', 'NOME', 'REP', 'DPMO',
+  'PROCESSO', 'COLUNA', 'LIN', 'PÁGINA', 'PAGINA',
+];
+
+function normalizarNome(nome: string): string {
+  return String(nome || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
-function isAniversarioHoje(aniversario: string | null): boolean {
-  if (!aniversario) return false;
-  const hoje = new Date();
-  const data = new Date(aniversario);
-  return hoje.getMonth() === data.getMonth() && hoje.getDate() === data.getDate();
+function nomesIguais(a: string, b: string): { igual: boolean; score: number } {
+  const na = normalizarNome(a);
+  const nb = normalizarNome(b);
+  if (!na || !nb) return { igual: false, score: 0 };
+  if (na === nb) return { igual: true, score: 1 };
+
+  const limpar = (s: string) =>
+    s.split(' ').filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p));
+  const partesA = limpar(na);
+  const partesB = limpar(nb);
+  if (partesA.length === 0 || partesB.length === 0) return { igual: false, score: 0 };
+
+  let comuns = 0;
+  partesA.forEach((p) => { if (partesB.includes(p)) comuns++; });
+  const minTamanho = Math.min(partesA.length, partesB.length);
+  const score = comuns / minTamanho;
+  return { igual: score >= 0.6, score };
 }
 
-export default function MeuTimePage() {
-  const router = useRouter();
-  const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busca, setBusca] = useState('');
-  const [filtroProcesso, setFiltroProcesso] = useState('todos');
-  const [filtroStatus, setFiltroStatus] = useState('Ativo');
+function partesNome(nome: string): string[] {
+  return normalizarNome(nome)
+    .split(' ')
+    .filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p));
+}
 
-  const carregar = useCallback(async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from('colaboradores')
-      .select('*')
-      .order('nome');
-    if (data) setColaboradores(data as Colaborador[]);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { carregar(); }, [carregar]);
-
-  // 🎯 Filtros
-  const filtrados = colaboradores.filter((c) => {
-    if (filtroStatus !== 'todos' && c.status !== filtroStatus) return false;
-    if (filtroProcesso !== 'todos' && c.processo !== filtroProcesso) return false;
-    if (busca) {
-      const termo = busca.toLowerCase().trim();
-      if (!c.nome.toLowerCase().includes(termo) && !String(c.id_groot).includes(termo)) return false;
+function detectarSemanas(texto: string): number[] {
+  const semanas: number[] = [];
+  const linhas = texto.split('\n');
+  
+  for (const linha of linhas) {
+    // 🎯 Regex flexível: "Semana 18", "Semana18", "semana 1a" (OCR ruim - "a" = 4)
+    const matches = Array.from(linha.matchAll(/[Ss]emana\s*(\d{1,2}[a-z]?)/g));
+    
+    if (matches.length >= 2) {
+      console.log(`📅 Linha de cabeçalho encontrada: "${linha}"`);
+      console.log(`📅 Matches brutos (ordem original do print):`, matches.map((m) => m[1]));
+      
+      matches.forEach((m) => {
+        let numStr = m[1].replace(/[a-z]/gi, (c) => {
+          const mapa: Record<string, string> = {
+            'a': '4', 'i': '1', 'o': '0', 'l': '1', 's': '5', 'z': '2'
+          };
+          return mapa[c.toLowerCase()] || '';
+        });
+        
+        const num = parseInt(numStr);
+        if (num >= 1 && num <= 53 && !semanas.includes(num)) {
+          semanas.push(num);
+        }
+      });
+      
+      if (semanas.length > 0) break;
     }
-    return true;
+  }
+  
+  // 🎯 IMPORTANTE: NÃO ordenar! Mantém a ordem ORIGINAL do print
+  // O Looker exibe da MAIS RECENTE pra MAIS ANTIGA (ex: S20, S19, S18, S17, S16)
+  // Os valores na linha do colab seguem essa mesma ordem
+  console.log(`📅 Semanas detectadas (ordem do print - mais recente primeiro): ${semanas.join(', ')}`);
+  return semanas;
+}
+
+function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): LinhaPrint[] {
+  const linhas: LinhaPrint[] = [];
+  const blocos = texto.split('\n');
+
+  blocos.forEach((linha, idx) => {
+    let limpa = linha.trim();
+    if (!limpa || limpa.length < 5) return;
+
+    const limpaUpper = limpa.toUpperCase();
+    const ehCabecalho = PALAVRAS_CABECALHO.some((p) => limpaUpper.includes(p));
+    if (ehCabecalho) return;
+    if (/SEMANA\s*\d/i.test(limpa) && limpa.length < 80) return;
+    if (/TOTAL\s*GERAL/i.test(limpa)) return;
+
+    // 🎯 NOVA LÓGICA POSICIONAL:
+    // Captura TOKENS válidos em ordem: números, "-", "o" solto (zero do OCR)
+    // Ex: "VITORIA o 10.014 - 10.578 - 25e" → tokens: [o, 10014, -, 10578, -, 25e]
+    
+    // Acha posição do PRIMEIRO número válido (>= 100) pra cortar o nome
+    const regexNumeroValido = /\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{3,6}\b/g;
+    const primeirosNumeros = Array.from(limpa.matchAll(regexNumeroValido));
+    if (primeirosNumeros.length === 0) return;
+    
+    const posicaoPrimeiro = primeirosNumeros[0].index || 0;
+    
+    // 🎯 Extrai o nome (tudo antes do primeiro número)
+    let nome = limpa.substring(0, posicaoPrimeiro).trim();
+    nome = nome.replace(/\.+/g, '');
+    nome = nome.replace(/[^a-zA-ZÀ-ú\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    nome = nome.replace(/\b(sm|em|eos|amo|asso)\b/gi, '').replace(/\s+/g, ' ').trim();
+    nome = nome.split(' ').filter((p) => p.length >= 2).join(' ').trim();
+    
+    if (nome.length < 3) return;
+    if (!/[a-zA-ZÀ-ú]{3,}/.test(nome)) return;
+    
+    // 🎯 Pega o RESTO da linha (depois do nome) e quebra em TOKENS posicionais
+    const restoLinha = limpa.substring(posicaoPrimeiro);
+    
+    // Tokens válidos:
+    // - Número: "10.014", "1.290", "25", etc
+    // - Vazio: "-", "—", "o" (zero do OCR), "O", "0"
+    const tokens: (number | null)[] = [];
+    
+    // Quebra por espaços e tabs
+    const partes = restoLinha.split(/\s+/).filter((p) => p.length > 0);
+    
+    partes.forEach((parte) => {
+      // É um separador/vazio? (-, —, o, O, 0)
+      if (parte === '-' || parte === '—' || parte === 'o' || parte === 'O' || parte === '0') {
+        tokens.push(null); // posição vazia
+        return;
+      }
+      
+      // Tenta extrair número
+      const matchNum = parte.match(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/);
+      if (matchNum) {
+        const num = parseInt(matchNum[0].replace(/[.,]/g, ''));
+        if (!isNaN(num) && num >= 1 && num <= 100000) {
+          tokens.push(num);
+          return;
+        }
+      }
+      
+      // Caractere lixo do OCR (ex: "sm", "em", letras soltas) - IGNORA (não consome posição)
+    });
+    
+    if (tokens.length === 0) return;
+    
+    // 🎯 Total Geral = ÚLTIMO token NÃO NULO
+    let totalGeral = 0;
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      if (tokens[i] !== null) {
+        totalGeral = tokens[i]!;
+        break;
+      }
+    }
+    
+    if (totalGeral === 0) return;
+    
+    // 🎯 Valores das semanas = todos os tokens EXCETO o último (que é o total)
+    // Mas precisamos achar qual é o "último" (que é o total)
+    const idxUltimoNaoNulo = (() => {
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        if (tokens[i] !== null) return i;
+      }
+      return -1;
+    })();
+    
+    const valoresSemanas = tokens.slice(0, idxUltimoNaoNulo);
+    
+    // 🎯 Mapeia POSICIONALMENTE com as semanas
+    const semanasMap: Record<number, number> = {};
+    valoresSemanas.forEach((valor, i) => {
+      const semanaNum = semanas[i];
+      if (semanaNum && valor !== null && valor > 0) {
+        semanasMap[semanaNum] = valor;
+      }
+    });
+
+    console.log(`✅ Print ${printNum}: "${nome}" | Tokens: [${tokens.join(', ')}] | Sem: ${JSON.stringify(semanasMap)} | Total: ${totalGeral}`);
+    linhas.push({ nomeOcr: nome, totalGeral, semanas: semanasMap, printNum });
   });
 
-  // 📊 Stats
-  const totalAtivos = colaboradores.filter((c) => c.status === 'Ativo').length;
-  const totalCheckin = colaboradores.filter((c) => c.status === 'Ativo' && c.processo === 'Checkin').length;
-  const totalP2M = colaboradores.filter((c) => c.status === 'Ativo' && c.processo === 'P2M').length;
-  const aniversariantes = colaboradores.filter((c) => isAniversarioHoje(c.aniversario)).length;
+  return linhas;
+}
 
-  // 🤖 Apollo - análise contextual
-  const apolloMsg = (() => {
-    if (loading) return null;
-    if (aniversariantes > 0) {
-      return {
-        mood: 'warning' as const,
-        message: `${aniversariantes} aniversariante${aniversariantes > 1 ? 's' : ''} hoje!`,
-        detail: 'Não esqueça de parabenizar seu time',
-      };
+export default function DpmoPage() {
+  const toast = useToast();
+  const [montado, setMontado] = useState(false);
+  const [mesSelecionado, setMesSelecionado] = useState(5);
+  const [anoSelecionado, setAnoSelecionado] = useState(2026);
+  const [processoSelecionado, setProcessoSelecionado] = useState<'Checkin' | 'P2M'>('Checkin');
+  
+  const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
+  const [prints, setPrints] = useState<PrintInfo[]>([]);
+  const [linhas, setLinhas] = useState<LinhaPrint[]>([]);
+  const [semanasDetectadas, setSemanasDetectadas] = useState<number[]>([]);
+  
+  const [salvando, setSalvando] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const mesAtual = MESES.find((m) => m.num === mesSelecionado);
+  const trimestre = mesAtual?.trim || 'Q1';
+
+  useEffect(() => {
+    const hoje = new Date();
+    setMesSelecionado(hoje.getMonth() + 1);
+    setAnoSelecionado(hoje.getFullYear());
+    setMontado(true);
+  }, []);
+
+  useEffect(() => {
+    if (montado) carregarColabs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processoSelecionado, montado]);
+
+  async function carregarColabs() {
+    const { data } = await supabase
+      .from('colaboradores')
+      .select('id_groot, nome, processo, status')
+      .eq('status', 'Ativo')
+      .eq('processo', processoSelecionado)
+      .order('nome');
+    
+    if (data) {
+      const vistos = new Set<string>();
+      const unicos: Colaborador[] = [];
+      data.forEach((c: any) => {
+        if (!vistos.has(c.id_groot)) {
+          vistos.add(c.id_groot);
+          unicos.push(c);
+        }
+      });
+      setColaboradores(unicos);
+      console.log(`👥 ${unicos.length} colabs ${processoSelecionado} carregados:`, unicos.map((c) => c.nome));
     }
-    if (totalAtivos === 0) {
-      return {
-        mood: 'alert' as const,
-        message: 'Nenhum colaborador ativo',
-        detail: 'Comece importando seu time',
-        action: { label: 'Importar', href: '/meu-time/importar' },
-      };
+  }
+
+  function adicionarPrint(file: File) {
+    if (prints.length >= 3) {
+      toast.error('Limite atingido', 'Máximo 3 prints por upload');
+      return;
     }
-    return {
-      mood: 'info' as const,
-      message: `${totalAtivos} colaboradores ativos`,
-      detail: `${totalCheckin} Checkin · ${totalP2M} P2M`,
+    
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target?.result as string;
+      const idx = prints.length;
+      setPrints((prev) => [...prev, {
+        base64, textoBruto: '', processando: true, progresso: 0, status: 'Iniciando...',
+      }]);
+      processarOcr(base64, idx);
     };
-  })();
+    reader.readAsDataURL(file);
+  }
+
+  async function processarOcr(base64: string, idx: number) {
+    try {
+      const Tesseract = (await import('tesseract.js')).default;
+      const resultado = await Tesseract.recognize(base64, 'por', {
+        logger: (m: any) => {
+          if (m.status === 'recognizing text') {
+            setPrints((prev) => {
+              const novo = [...prev];
+              if (novo[idx]) {
+                novo[idx].progresso = Math.round(m.progress * 100);
+                novo[idx].status = m.status;
+              }
+              return novo;
+            });
+          }
+        },
+      });
+
+      const texto = resultado.data.text;
+      console.log(`📝 OCR Print ${idx + 1}:`, texto);
+
+      setPrints((prev) => {
+        const novo = [...prev];
+        if (novo[idx]) {
+          novo[idx].textoBruto = texto;
+          novo[idx].processando = false;
+          novo[idx].progresso = 100;
+          novo[idx].status = 'concluído';
+        }
+        // Re-processa todos os prints
+        setTimeout(() => processarTodos(novo), 100);
+        return novo;
+      });
+    } catch (e: any) {
+      toast.error('Erro no OCR', e.message);
+      setPrints((prev) => {
+        const novo = [...prev];
+        if (novo[idx]) novo[idx].processando = false;
+        return novo;
+      });
+    }
+  }
+
+  function processarTodos(printsAtuais: PrintInfo[]) {
+    let semanas: number[] = [];
+    for (const p of printsAtuais) {
+      if (!p.textoBruto) continue;
+      const s = detectarSemanas(p.textoBruto);
+      if (s.length > 0) {
+        semanas = s;
+        break;
+      }
+    }
+    
+    // 🎯 FALLBACK: Se NÃO detectou semanas no cabeçalho,
+    // deduz pelo numero de colunas das linhas de colab
+    if (semanas.length === 0) {
+      console.warn('⚠️ Não detectou semanas no cabeçalho - tentando inferir pela quantidade de números nas linhas');
+      
+      // Conta quantos números cada linha tem
+      const contagens: number[] = [];
+      printsAtuais.forEach((p) => {
+        if (!p.textoBruto) return;
+        p.textoBruto.split('\n').forEach((linha) => {
+          const matches = Array.from(linha.matchAll(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/g));
+          if (matches.length >= 2 && /[a-zA-ZÀ-ú]{3}/.test(linha)) {
+            contagens.push(matches.length);
+          }
+        });
+      });
+      
+      // Pega a quantidade MAIS COMUM de números por linha
+      if (contagens.length > 0) {
+        const freq: Record<number, number> = {};
+        contagens.forEach((c) => { freq[c] = (freq[c] || 0) + 1; });
+        const totalCols = parseInt(Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]);
+        const numSemanas = totalCols - 1; // último é Total Geral
+        
+        // 🎯 Gera semanas DECRESCENTES (mais recente primeiro, como no Looker)
+        // Ex: Maio/2026 com 5 colunas → [22, 21, 20, 19, 18]
+        const dataRef = new Date(anoSelecionado, mesSelecionado - 1, 28);
+        const utc = new Date(Date.UTC(dataRef.getFullYear(), dataRef.getMonth(), dataRef.getDate()));
+        const dow = utc.getUTCDay() || 7;
+        utc.setUTCDate(utc.getUTCDate() + 4 - dow);
+        const inicio = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+        const semanaUltimo = Math.ceil((((utc.getTime() - inicio.getTime()) / 86400000) + 1) / 7);
+        
+        // Decrescente: começa da mais recente
+        for (let i = 0; i < numSemanas; i++) {
+          semanas.push(semanaUltimo - i);
+        }
+        console.log(`🎯 Inferido (decrescente, igual Looker): ${numSemanas} colunas → ${semanas.join(', ')}`);
+      }
+    }
+    
+    setSemanasDetectadas(semanas);
+
+    const todasLinhas: LinhaPrint[] = [];
+    printsAtuais.forEach((p, i) => {
+      if (!p.textoBruto) return;
+      const linhasPrint = extrairLinhasOcr(p.textoBruto, semanas, i + 1);
+      todasLinhas.push(...linhasPrint);
+    });
+
+    // Dedupe por nome
+    const linhasUnicas: LinhaPrint[] = [];
+    const nomesVistos = new Set<string>();
+    todasLinhas.forEach((l) => {
+      const chave = normalizarNome(l.nomeOcr);
+      if (!nomesVistos.has(chave)) {
+        nomesVistos.add(chave);
+        linhasUnicas.push(l);
+      }
+    });
+
+    const vinculadas = vincular(linhasUnicas);
+    setLinhas(vinculadas);
+    
+    const vinc = vinculadas.filter((l) => l.cadastroVinculado).length;
+    toast.info(`${vinculadas.length} colabs detectados`, `${vinc} vinculados ao cadastro`);
+  }
+
+  function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
+    return linhasInput.map((linha) => {
+      // Remove reticências e pontos do final dos nomes
+      const nomeLimpo = linha.nomeOcr.replace(/\.+/g, '').trim();
+      const partesOcr = partesNome(nomeLimpo);
+      
+      if (partesOcr.length === 0) {
+        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+      }
+
+      // 🎯 Helper: parte do OCR "casa" com parte do cadastro (aceita prefixo)
+      function parteCasa(ocr: string, cadastro: string): boolean {
+        if (ocr === cadastro) return true;
+        if (ocr.length >= 3 && cadastro.startsWith(ocr)) return true;
+        if (cadastro.length >= 3 && ocr.startsWith(cadastro)) return true;
+        return false;
+      }
+
+      // 🎯 REGRA OBRIGATÓRIA: PRIMEIRO NOME do OCR TEM que bater com o PRIMEIRO do cadastro
+      // Isso evita que "GABRIEL HENRIQUE" match com "HENRIQUE SILVA"
+      const primeiroOcr = partesOcr[0];
+
+      // Filtra colabs cujo PRIMEIRO nome bate com o primeiro do OCR
+      const colabsComPrimeiroIgual = colaboradores.filter((c) => {
+        const partesColab = partesNome(c.nome);
+        if (partesColab.length === 0) return false;
+        return parteCasa(primeiroOcr, partesColab[0]);
+      });
+
+      if (colabsComPrimeiroIgual.length === 0) {
+        console.log(`❌ Primeiro nome "${primeiroOcr}" não existe: "${linha.nomeOcr}"`);
+        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+      }
+
+      // 🎯 ETAPA 1: Match perfeito - todas as partes do OCR batem com alguma do cadastro
+      const matchExato = colabsComPrimeiroIgual.find((c) => {
+        const partesColab = partesNome(c.nome);
+        const todasOcrCasam = partesOcr.every((po) =>
+          partesColab.some((pc) => parteCasa(po, pc))
+        );
+        const todasCadastroCasam = partesColab.every((pc) =>
+          partesOcr.some((po) => parteCasa(po, pc))
+        );
+        return todasOcrCasam && todasCadastroCasam;
+      });
+      
+      if (matchExato) {
+        console.log(`✅ EXATO: "${linha.nomeOcr}" → ${matchExato.nome}`);
+        return { ...linha, cadastroVinculado: matchExato, metodo: 'exato' as const };
+      }
+
+      // 🎯 ETAPA 2: Nome+Sobrenome (2 primeiros batem)
+      if (partesOcr.length < 2) {
+        console.log(`❌ "${linha.nomeOcr}" só tem 1 nome - ambíguo`);
+        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+      }
+
+      const segundoOcr = partesOcr[1];
+      const candidatos = colabsComPrimeiroIgual.filter((c) => {
+        const partesColab = partesNome(c.nome);
+        if (partesColab.length < 2) return false;
+        return parteCasa(segundoOcr, partesColab[1]);
+      });
+
+      if (candidatos.length === 1) {
+        console.log(`✅ NOME+SOB: "${linha.nomeOcr}" → ${candidatos[0].nome}`);
+        return { ...linha, cadastroVinculado: candidatos[0], metodo: 'fuzzy' as const };
+      }
+
+      // 🎯 ETAPA 3: Desempate pelo 3º nome
+      if (candidatos.length > 1 && partesOcr.length >= 3) {
+        const terceiroOcr = partesOcr[2];
+        const desempate = candidatos.find((c) => {
+          const partesColab = partesNome(c.nome);
+          const t = partesColab[2] || '';
+          return parteCasa(terceiroOcr, t);
+        });
+        if (desempate) {
+          console.log(`✅ DESEMPATE: "${linha.nomeOcr}" → ${desempate.nome}`);
+          return { ...linha, cadastroVinculado: desempate, metodo: 'fuzzy' as const };
+        }
+      }
+
+      if (candidatos.length > 1) {
+        console.log(`⚠️ AMBÍGUO: "${linha.nomeOcr}" → ${candidatos.length} candidatos com nome+sob`);
+      } else {
+        console.log(`❌ NÃO VINCULOU: "${linha.nomeOcr}"`);
+      }
+      return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+    });
+  }
+
+  function trocarVinculo(idx: number, idGroot: string) {
+    const colab = colaboradores.find((c) => c.id_groot === idGroot);
+    const novas = [...linhas];
+    novas[idx].cadastroVinculado = colab;
+    novas[idx].metodo = colab ? 'fuzzy' : 'nao_vinculou';
+    setLinhas(novas);
+  }
+
+  function editarSemana(linhaIdx: number, semana: number, valor: string) {
+    const num = parseInt(valor.replace(/\D/g, ''));
+    const novas = [...linhas];
+    if (isNaN(num) || num === 0) {
+      delete novas[linhaIdx].semanas[semana];
+    } else {
+      novas[linhaIdx].semanas[semana] = num;
+    }
+    setLinhas(novas);
+  }
+
+  function editarTotal(linhaIdx: number, valor: string) {
+    const num = parseInt(valor.replace(/\D/g, ''));
+    const novas = [...linhas];
+    novas[linhaIdx].totalGeral = isNaN(num) ? 0 : num;
+    setLinhas(novas);
+  }
+
+  function removerLinha(idx: number) {
+    setLinhas(linhas.filter((_, i) => i !== idx));
+  }
+
+  function removerPrint(idx: number) {
+    const novos = prints.filter((_, i) => i !== idx);
+    setPrints(novos);
+    setTimeout(() => processarTodos(novos), 100);
+  }
+
+  function descartarTudo() {
+    setPrints([]);
+    setLinhas([]);
+    setSemanasDetectadas([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  async function salvarTudo() {
+    const vinculadas = linhas.filter((l) => l.cadastroVinculado && l.totalGeral > 0);
+    if (vinculadas.length === 0) {
+      toast.error('Nada pra salvar', 'Nenhum colab vinculado');
+      return;
+    }
+
+    setSalvando(true);
+    
+
+    console.log('💾 INICIANDO SALVAMENTO');
+    console.log(`📊 ${vinculadas.length} colabs vinculados`);
+    console.log(`📅 Mês ${mesSelecionado}/${anoSelecionado} - Processo ${processoSelecionado}`);
+
+    try {
+      const procDpmo = processoSelecionado === 'Checkin' ? 'CK' : 'P2M';
+
+      // 1) ima_manual (Total Geral)
+      const registrosIma = vinculadas.map((l) => ({
+        id_groot: l.cadastroVinculado!.id_groot,
+        nome: l.cadastroVinculado!.nome,
+        processo: processoSelecionado,
+        mes: mesSelecionado,
+        ano: anoSelecionado,
+        trimestre,
+        ima: l.totalGeral,
+        atualizado_em: new Date().toISOString(),
+        atualizado_por: 'delman.jpereira@mercadolivre.com',
+      }));
+
+      console.log(`📝 Salvando ${registrosIma.length} IMAs em ima_manual...`);
+      const { error: errIma, data: dataIma } = await supabase.from('ima_manual').upsert(registrosIma, {
+        onConflict: 'id_groot,mes,ano,processo',
+        ignoreDuplicates: false,
+      }).select();
+      
+      if (errIma) {
+        console.error('❌ Erro ima_manual:', errIma);
+        throw new Error('ima_manual: ' + errIma.message);
+      }
+      console.log(`✅ ima_manual salvo: ${dataIma?.length || 0} registros`);
+
+      // 2) dpmo_agregado (Semanas) - UPSERT por chave_unica
+      // O UPSERT abaixo já substitui valores existentes da mesma chave
+
+      const registrosDpmo: any[] = [];
+      vinculadas.forEach((l) => {
+        Object.entries(l.semanas).forEach(([semStr, valor]) => {
+          const semana = Number(semStr);
+          if (valor > 0) {
+            // 🎯 chave_unica é OBRIGATÓRIA - formato: nome|processo|semana|ano
+            const chaveUnica = `${l.cadastroVinculado!.nome}|${procDpmo}|${semana}|${anoSelecionado}`;
+            registrosDpmo.push({
+              chave_unica: chaveUnica,
+              id_groot: l.cadastroVinculado!.id_groot,
+              representante: l.cadastroVinculado!.nome,
+              processo: procDpmo,
+              semana,
+              ano: anoSelecionado,
+              mes: mesSelecionado,
+              trimestre,
+              dpmo: valor,
+              arquivo_origem: 'print_ocr',
+            });
+          }
+        });
+      });
+
+      console.log(`📝 Inserindo ${registrosDpmo.length} registros em dpmo_agregado...`);
+      console.log('Sample:', registrosDpmo[0]);
+      
+      if (registrosDpmo.length > 0) {
+        // 🎯 UPSERT por chave_unica (substitui se já existir)
+        const { error: errDpmo, data: dataDpmo } = await supabase
+          .from('dpmo_agregado')
+          .upsert(registrosDpmo, {
+            onConflict: 'chave_unica',
+            ignoreDuplicates: false,
+          })
+          .select();
+        if (errDpmo) {
+          console.error('❌ Erro dpmo_agregado:', errDpmo);
+          throw new Error('dpmo_agregado: ' + errDpmo.message);
+        }
+        console.log(`✅ dpmo_agregado inserido: ${dataDpmo?.length || 0} registros`);
+      } else {
+        console.warn('⚠️ Nenhum registro semanal pra salvar (semanas vazias)');
+      }
+
+      // 🎯 Registra na tabela uploads (pra aparecer no histórico de Configurações)
+      try {
+        await supabase.from('uploads').insert({
+          arquivo: `Print OCR - ${prints.length} imagem(ns) - ${MESES.find((m) => m.num === mesSelecionado)?.label}/${anoSelecionado}`,
+          tabela: 'ima_manual + dpmo_agregado',
+          linhas: registrosIma.length + registrosDpmo.length,
+          data: new Date().toISOString(),
+          modelo_csv: 'print_ocr',
+        });
+        console.log(`📋 Upload registrado no histórico`);
+      } catch (uploadErr) {
+        console.warn('⚠️ Não conseguiu registrar upload (não crítico):', uploadErr);
+      }
+
+      toast.success(`${vinculadas.length} colabs salvos!`, `${registrosDpmo.length} registros semanais atualizados`);
+      descartarTudo();
+    } catch (e: any) {
+      console.error('❌ Erro geral:', e);
+      toast.error('Erro ao salvar', e.message);
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  useEffect(() => {
+    function handlePaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            adicionarPrint(file);
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+    }
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prints]);
+
+  const totalSalvaveis = linhas.filter((l) => l.cadastroVinculado && l.totalGeral > 0).length;
+  const todosProcessados = prints.length > 0 && prints.every((p) => !p.processando);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* HEADER */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
-            <div>
-              <Link href="/configuracoes-app" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
-                ← Voltar
-              </Link>
-              <h1 className="text-3xl md:text-4xl font-black mt-2">
-                Meu Time
-              </h1>
-              <p className="text-sm text-gray-500 mt-1">Gestão de colaboradores e dados</p>
-            </div>
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        <div className="mb-6">
+          <Link href="/meu-time" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">← Voltar ao Meu Time</Link>
+          <h1 className="text-3xl md:text-4xl font-black mt-2">
+            Upload de <span className="text-[#FFD700]">DPMO</span>
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">Suba até 3 prints do Looker · OCR processa automaticamente</p>
+        </div>
 
-            {/* Ações primárias */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <Link
-                href="/meu-time/dpmo"
-                className="bg-[#FFD700] hover:bg-yellow-400 text-black font-bold py-2.5 px-5 rounded-lg text-sm transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-[#FFD700]/20 flex items-center gap-2"
-              >
-                📸 Subir Print
-              </Link>
-              <Link
-                href="/meu-time/importar"
-                className="bg-[#1a1a1a] hover:bg-[#222] border border-[#2a2a2a] text-white font-bold py-2.5 px-5 rounded-lg text-sm transition-all flex items-center gap-2"
-              >
-                📥 Importar Time
-              </Link>
+        <ApolloBadge
+          mood="info"
+          message="Como funciona"
+          detail="Cole os prints (Ctrl+V) · Eu extraio nomes, semanas e IMA · Você revisa e salva"
+        />
+
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
+          <h2 className="text-lg font-bold mb-3">📅 Período</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="text-xs text-gray-500 uppercase mb-1 block">Mês</label>
+              <select value={mesSelecionado} onChange={(e) => setMesSelecionado(Number(e.target.value))}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white">
+                {MESES.map((m) => <option key={m.num} value={m.num}>{m.label}</option>)}
+              </select>
             </div>
+            <div>
+              <label className="text-xs text-gray-500 uppercase mb-1 block">Ano</label>
+              <select value={anoSelecionado} onChange={(e) => setAnoSelecionado(Number(e.target.value))}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white">
+                {[2024, 2025, 2026, 2027].map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 uppercase mb-1 block">Processo</label>
+              <div className="flex gap-2">
+                <button onClick={() => setProcessoSelecionado('Checkin')}
+                  className={`flex-1 py-2 rounded-lg font-bold text-sm ${
+                    processoSelecionado === 'Checkin' ? 'bg-cyan-500 text-white' : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a]'
+                  }`}>Checkin</button>
+                <button onClick={() => setProcessoSelecionado('P2M')}
+                  className={`flex-1 py-2 rounded-lg font-bold text-sm ${
+                    processoSelecionado === 'P2M' ? 'bg-orange-500 text-white' : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a]'
+                  }`}>P2M</button>
+              </div>
+            </div>
+          </div>
+          <div className="text-xs text-purple-300 bg-purple-500/10 border border-purple-500/40 rounded-lg p-2">
+            📊 Trimestre: <strong>{trimestre} de {anoSelecionado}</strong>
+            {semanasDetectadas.length > 0 && (
+              <span className="ml-3">· Semanas: <strong>{semanasDetectadas.join(', ')}</strong></span>
+            )}
           </div>
         </div>
 
-        {/* APOLLO BADGE */}
-        {apolloMsg && (
-          <ApolloBadge
-            mood={apolloMsg.mood}
-            message={apolloMsg.message}
-            detail={apolloMsg.detail}
-            action={apolloMsg.action}
-          />
-        )}
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold">📸 Prints ({prints.length}/3)</h2>
+            {prints.length > 0 && (
+              <button onClick={descartarTudo} className="text-red-400 hover:text-red-300 text-sm">🗑️ Descartar tudo</button>
+            )}
+          </div>
 
-        {/* STATUS CARDS */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <StatusCard label="Ativos" valor={totalAtivos} accent="text-white" />
-          <StatusCard label="Checkin" valor={totalCheckin} accent="text-cyan-300" />
-          <StatusCard label="P2M" valor={totalP2M} accent="text-orange-300" />
-          <StatusCard label="Filtrados" valor={filtrados.length} accent="text-[#FFD700]" />
-        </div>
-
-        {/* FILTROS */}
-        <div className="bg-[#141414] border border-[#2a2a2a] rounded-xl p-4 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="md:col-span-1">
-              <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5 block font-semibold">Buscar</label>
-              <input
-                type="text"
-                placeholder="Nome ou ID..."
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] hover:border-[#3a3a3a] focus:border-[#FFD700]/50 rounded-lg px-3 py-2 text-sm text-white transition-all outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5 block font-semibold">Processo</label>
-              <select
-                value={filtroProcesso}
-                onChange={(e) => setFiltroProcesso(e.target.value)}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] hover:border-[#3a3a3a] focus:border-[#FFD700]/50 rounded-lg px-3 py-2 text-sm text-white transition-all outline-none"
-              >
-                <option value="todos">Todos os processos</option>
-                <option value="Checkin">Checkin</option>
-                <option value="P2M">P2M</option>
-                <option value="Sorting">Sorting</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5 block font-semibold">Status</label>
-              <select
-                value={filtroStatus}
-                onChange={(e) => setFiltroStatus(e.target.value)}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] hover:border-[#3a3a3a] focus:border-[#FFD700]/50 rounded-lg px-3 py-2 text-sm text-white transition-all outline-none"
-              >
-                <option value="todos">Todos</option>
-                <option value="Ativo">Ativos</option>
-                <option value="Inativo">Inativos</option>
-                <option value="Afastado">Afastados</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* AÇÕES SECUNDÁRIAS (Upload, Ocupação) - barra horizontal discreta */}
-        <div className="flex gap-2 mb-6 flex-wrap">
-          <SecondaryAction icon="📤" label="Upload CSV" href="/meu-time/upload" />
-          <SecondaryAction icon="📦" label="Ocupação P2M" href="/meu-time/ocupacao" />
-          <SecondaryAction icon="➕" label="Adicionar Colab" href="/meu-time/novo" />
-        </div>
-
-        {/* LISTA DE COLABS */}
-        {loading ? (
-          <div className="text-center py-16 text-gray-500 text-sm">Carregando colaboradores...</div>
-        ) : filtrados.length === 0 ? (
-          <div className="text-center py-16 text-gray-500 text-sm">
-            Nenhum colaborador encontrado{busca && ` com "${busca}"`}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filtrados.map((c) => {
-              const aniversario = isAniversarioHoje(c.aniversario);
-              return (
-                <Link
-                  key={c.id}
-                  href={`/meu-time/${c.id}`}
-                  className="bg-[#141414] hover:bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#3a3a3a] rounded-xl p-4 transition-all hover:-translate-y-0.5 group relative"
-                >
-                  {aniversario && (
-                    <span className="absolute -top-2 -right-2 bg-[#FFD700] text-black text-xs font-black px-2 py-1 rounded-full shadow-lg shadow-[#FFD700]/20">
-                      🎉 BDay
-                    </span>
-                  )}
-                  <div className="flex items-start gap-3">
-                    <div className="w-11 h-11 bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg flex items-center justify-center text-white font-bold text-sm flex-shrink-0 border border-[#2a2a2a] group-hover:border-[#FFD700]/30 transition-all">
-                      {iniciais(c.nome)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-bold text-sm truncate group-hover:text-[#FFD700] transition-colors">{c.nome}</p>
-                      <p className="text-gray-500 text-[11px] font-mono">{c.id_groot}</p>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {c.processo && (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${corProcesso[c.processo] || 'bg-gray-500/15 text-gray-300 border-gray-500/30'}`}>
-                            {c.processo}
-                          </span>
-                        )}
-                        {c.carreira && (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${corCarreira[c.carreira] || 'bg-gray-500/15 text-gray-300 border-gray-500/30'}`}>
-                            {c.carreira}
-                          </span>
-                        )}
-                        {c.status !== 'Ativo' && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-gray-500/15 text-gray-400 border-gray-500/30">
-                            {c.status}
-                          </span>
-                        )}
-                      </div>
+            {prints.map((p, i) => (
+              <div key={i} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-gray-400">📸 Print {i + 1}</span>
+                  <button onClick={() => removerPrint(i)} className="text-red-400 hover:text-red-300 text-sm">🗑️</button>
+                </div>
+                <img src={p.base64} alt="" className="w-full h-32 object-cover rounded mb-2" />
+                {p.processando ? (
+                  <div>
+                    <p className="text-xs text-cyan-400">⏳ {p.status} ({p.progresso}%)</p>
+                    <div className="w-full bg-[#1a1a1a] rounded h-1 mt-1 overflow-hidden">
+                      <div className="h-full bg-cyan-500 transition-all" style={{ width: `${p.progresso}%` }} />
                     </div>
                   </div>
-                </Link>
-              );
-            })}
+                ) : (
+                  <p className="text-xs text-green-400">✅ Processado</p>
+                )}
+              </div>
+            ))}
+            
+            {prints.length < 3 && (
+              <div onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files[0];
+                  if (file?.type.startsWith('image/')) adicionarPrint(file);
+                }}
+                className="border-2 border-dashed border-[#2a2a2a] hover:border-pink-400/40 rounded-lg p-6 text-center cursor-pointer bg-[#0a0a0a] flex flex-col items-center justify-center min-h-[150px]">
+                <div className="text-4xl mb-2">📸</div>
+                <p className="text-sm text-white font-bold">Adicionar print</p>
+                <p className="text-xs text-gray-500">ou Ctrl+V</p>
+                <input ref={fileInputRef} type="file" accept="image/*"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) adicionarPrint(f); }}
+                  className="hidden" />
+              </div>
+            )}
           </div>
+        </div>
+
+        {linhas.length > 0 && todosProcessados && (
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h2 className="text-lg font-bold">🔍 Revisar antes de salvar ({linhas.length})</h2>
+              <div className="flex gap-3 text-xs">
+                <span className="text-green-400">✅ {linhas.filter((l) => l.metodo === 'exato').length}</span>
+                <span className="text-yellow-400">🔶 {linhas.filter((l) => l.metodo === 'fuzzy').length}</span>
+                <span className="text-red-400">❌ {linhas.filter((l) => l.metodo === 'nao_vinculou').length}</span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-gray-400 border-b border-[#2a2a2a]">
+                  <tr>
+                    <th className="text-center py-2 px-2">St</th>
+                    <th className="text-left py-2 px-2">Vínculo</th>
+                    {semanasDetectadas.map((s) => (
+                      <th key={s} className="text-center py-2 px-1 min-w-[70px]">S{s}</th>
+                    ))}
+                    <th className="text-center py-2 px-2 bg-green-500/10 min-w-[80px]">Total</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {linhas.map((linha, idx) => {
+                    const cor = linha.metodo === 'exato' ? 'bg-green-500/5' :
+                      linha.metodo === 'fuzzy' ? 'bg-yellow-500/5' :
+                      'bg-red-500/5';
+                    return (
+                      <tr key={idx} className={`border-b border-[#2a2a2a] ${cor}`}>
+                        <td className="py-2 px-2 text-center text-lg">
+                          {linha.metodo === 'exato' ? '✅' : linha.metodo === 'fuzzy' ? '🔶' : '❌'}
+                        </td>
+                        <td className="py-2 px-2 min-w-[200px]">
+                          <p className="text-gray-400 text-[10px] truncate">OCR: {linha.nomeOcr}</p>
+                          <select value={linha.cadastroVinculado?.id_groot || ''}
+                            onChange={(e) => trocarVinculo(idx, e.target.value)}
+                            className={`w-full bg-[#0a0a0a] border rounded px-1 py-1 text-xs ${
+                              linha.cadastroVinculado ? 'border-[#2a2a2a] text-white' : 'border-red-500/40 text-red-300'
+                            }`}>
+                            <option value="">— Não vinculado —</option>
+                            {colaboradores.map((c) => <option key={c.id_groot} value={c.id_groot}>{c.nome}</option>)}
+                          </select>
+                        </td>
+                        {semanasDetectadas.map((s) => (
+                          <td key={s} className="py-2 px-1 text-center">
+                            <input type="text" inputMode="numeric"
+                              value={linha.semanas[s] ? linha.semanas[s].toLocaleString('pt-BR') : ''}
+                              onChange={(e) => editarSemana(idx, s, e.target.value)}
+                              className="w-16 bg-[#0a0a0a] border border-[#2a2a2a] rounded px-1 py-1 text-right font-mono text-xs text-white"
+                              placeholder="-" />
+                          </td>
+                        ))}
+                        <td className="py-2 px-2 text-center bg-green-500/10">
+                          <input type="text" inputMode="numeric"
+                            value={linha.totalGeral ? linha.totalGeral.toLocaleString('pt-BR') : ''}
+                            onChange={(e) => editarTotal(idx, e.target.value)}
+                            className="w-20 bg-[#0a0a0a] border border-green-500/30 rounded px-1 py-1 text-right font-mono text-xs text-green-300 font-bold" />
+                        </td>
+                        <td className="py-2 px-1">
+                          <button onClick={() => removerLinha(idx)} className="text-red-400 hover:text-red-300">🗑️</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex gap-3 flex-wrap mt-4">
+              <button onClick={salvarTudo} disabled={salvando || totalSalvaveis === 0}
+                className="bg-[#FFD700] hover:bg-yellow-400 text-black font-bold py-3 px-6 rounded-lg disabled:opacity-40">
+                {salvando ? '💾 Salvando...' : `💾 Salvar ${totalSalvaveis} colabs (Total + Semanas)`}
+              </button>
+              <button onClick={descartarTudo} className="bg-[#0a0a0a] hover:bg-[#2a2a2a] border border-[#2a2a2a] text-white font-bold py-3 px-6 rounded-lg">
+                ❌ Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {prints.some((p) => p.textoBruto) && (
+          <details className="bg-[#1a1a1a] border border-orange-500/30 rounded-xl p-4 mb-4">
+            <summary className="cursor-pointer text-orange-300 font-bold text-sm">🐛 Debug — texto bruto dos prints</summary>
+            <div className="mt-3 space-y-3">
+              {prints.map((p, i) => p.textoBruto && (
+                <div key={i}>
+                  <p className="text-xs text-orange-300 mb-1">📸 Print {i + 1}:</p>
+                  <pre className="bg-[#0a0a0a] p-2 rounded text-xs text-orange-100 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto">{p.textoBruto}</pre>
+                </div>
+              ))}
+            </div>
+          </details>
         )}
       </div>
     </div>
-  );
-}
-
-function StatusCard({ label, valor, accent }: { label: string; valor: number; accent: string }) {
-  return (
-    <div className="bg-[#141414] border border-[#2a2a2a] rounded-xl p-4 hover:border-[#3a3a3a] transition-all">
-      <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-1">{label}</p>
-      <p className={`text-3xl font-black ${accent}`}>{valor}</p>
-    </div>
-  );
-}
-
-function SecondaryAction({ icon, label, href }: { icon: string; label: string; href: string }) {
-  return (
-    <Link
-      href={href}
-      className="bg-[#141414] hover:bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#3a3a3a] rounded-lg px-4 py-2 text-xs font-semibold text-gray-300 hover:text-white transition-all flex items-center gap-2"
-    >
-      <span>{icon}</span>
-      <span>{label}</span>
-    </Link>
   );
 }
