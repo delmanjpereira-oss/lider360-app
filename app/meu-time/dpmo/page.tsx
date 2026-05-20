@@ -258,6 +258,19 @@ export default function DpmoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processoSelecionado, montado]);
 
+  // 🎯 RE-VINCULA AUTOMATICAMENTE quando colaboradores carregam ou processo muda
+  useEffect(() => {
+    if (colaboradores.length > 0 && linhas.length > 0) {
+      const linhasSemVinculo = linhas.filter((l) => !l.cadastroVinculado).length;
+      if (linhasSemVinculo > 0) {
+        console.log(`🔄 Re-vinculando ${linhas.length} linhas com ${colaboradores.length} colabs (${linhasSemVinculo} sem vinculo antes)`);
+        const revinculadas = vincular(linhas);
+        setLinhas(revinculadas);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colaboradores]);
+
   async function carregarColabs() {
     const { data } = await supabase
       .from('colaboradores')
@@ -422,6 +435,11 @@ export default function DpmoPage() {
   }
 
   function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
+    console.log(`🔗 Vinculando ${linhasInput.length} linhas com ${colaboradores.length} colaboradores ${processoSelecionado} disponíveis`);
+    if (colaboradores.length === 0) {
+      console.warn('⚠️ AVISO: Lista de colaboradores está VAZIA! Aguarde os colabs carregarem.');
+    }
+    
     return linhasInput.map((linha) => {
       // Remove reticências e pontos do final dos nomes
       const nomeLimpo = linha.nomeOcr.replace(/\.+/g, '').trim();
