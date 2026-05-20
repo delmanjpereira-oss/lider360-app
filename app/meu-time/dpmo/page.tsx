@@ -170,17 +170,19 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
     const partes = restoLinha.split(/\s+/).filter((p) => p.length > 0);
     
     partes.forEach((parte) => {
-      // É um separador/vazio? (-, —, o, O, 0)
-      if (parte === '-' || parte === '—' || parte === 'o' || parte === 'O' || parte === '0') {
+      // É um separador/vazio? (-, —, o, O — letra "o" é OCR ruim de "-")
+      // ATENÇÃO: '0' (zero literal) NÃO é null - representa zero erros REAIS!
+      if (parte === '-' || parte === '—' || parte === 'o' || parte === 'O') {
         tokens.push(null); // posição vazia
         return;
       }
       
       // Tenta extrair número (aceita 1+ dígitos - sem limite)
+      // ⚠️ Aceita "0" → vira 0 (representa zero erros, mantém posição)
       const matchNum = parte.match(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{1,7}\b/);
       if (matchNum) {
         const num = parseInt(matchNum[0].replace(/[.,]/g, ''));
-        if (!isNaN(num) && num >= 1) {
+        if (!isNaN(num) && num >= 0) {  // ← Mudou de >= 1 pra >= 0 (aceita zero)
           tokens.push(num);
           return;
         }
@@ -197,16 +199,19 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
     console.log(`   Partes: ${JSON.stringify(partes)}`);
     console.log(`   Tokens: ${JSON.stringify(tokens)}`);
     
-    // 🎯 Total Geral = ÚLTIMO token NÃO NULO
+    // 🎯 Total Geral = ÚLTIMO token NÃO NULO (pode ser 0 = zero erros válido)
     let totalGeral = 0;
+    let achouTotal = false;
     for (let i = tokens.length - 1; i >= 0; i--) {
       if (tokens[i] !== null) {
         totalGeral = tokens[i]!;
+        achouTotal = true;
         break;
       }
     }
     
-    if (totalGeral === 0) return;
+    // Só descarta se NÃO encontrou nenhum token válido (linha vazia)
+    if (!achouTotal) return;
     
     // 🎯 Valores das semanas = todos os tokens EXCETO o último (que é o total)
     // Mas precisamos achar qual é o "último" (que é o total)
@@ -220,10 +225,11 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
     const valoresSemanas = tokens.slice(0, idxUltimoNaoNulo);
     
     // 🎯 Mapeia POSICIONALMENTE com as semanas
+    // Aceita valor 0 (zero erros é uma resposta REAL, não vazio)
     const semanasMap: Record<number, number> = {};
     valoresSemanas.forEach((valor, i) => {
       const semanaNum = semanas[i];
-      if (semanaNum && valor !== null && valor > 0) {
+      if (semanaNum && valor !== null && valor >= 0) {
         semanasMap[semanaNum] = valor;
       }
     });
@@ -458,14 +464,15 @@ export default function DpmoPage() {
         const existente = linhasUnicas[idx];
         Object.entries(l.semanas).forEach(([sem, val]) => {
           const semNum = parseInt(sem);
-          // Se essa semana não existe ainda OU o valor existente é 0, complementa
-          if (!existente.semanas[semNum] || existente.semanas[semNum] === 0) {
+          // Só complementa se a semana NÃO EXISTE na linha original
+          // (zero é um valor REAL - não trate como vazio)
+          if (!(semNum in existente.semanas)) {
             existente.semanas[semNum] = val;
             console.log(`➕ ${existente.nomeOcr} S${semNum}: complementado com ${val} (do print ${l.printNum})`);
           }
         });
-        // Total Geral: completa se vazio
-        if (!existente.totalGeral && l.totalGeral) {
+        // Total Geral: completa se ainda não tem
+        if (existente.totalGeral === undefined || existente.totalGeral === null) {
           existente.totalGeral = l.totalGeral;
         }
       }
