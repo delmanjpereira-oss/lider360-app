@@ -140,8 +140,9 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
     // Captura TOKENS válidos em ordem: números, "-", "o" solto (zero do OCR)
     // Ex: "VITORIA o 10.014 - 10.578 - 25e" → tokens: [o, 10014, -, 10578, -, 25e]
     
-    // Acha posição do PRIMEIRO número válido (>= 100) pra cortar o nome
-    const regexNumeroValido = /\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{3,6}\b/g;
+    // Acha posição do PRIMEIRO número válido (>= 2 dígitos) pra cortar o nome
+    // ANTES exigia 3+ dígitos, agora aceita 2+ pra pegar valores baixos tipo "45"
+    const regexNumeroValido = /\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/g;
     const primeirosNumeros = Array.from(limpa.matchAll(regexNumeroValido));
     if (primeirosNumeros.length === 0) return;
     
@@ -175,7 +176,7 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
         return;
       }
       
-      // Tenta extrair número
+      // Tenta extrair número (aceita 2+ dígitos pra pegar valores baixos tipo "45")
       const matchNum = parte.match(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/);
       if (matchNum) {
         const num = parseInt(matchNum[0].replace(/[.,]/g, ''));
@@ -189,6 +190,12 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
     });
     
     if (tokens.length === 0) return;
+    
+    // 🔍 DEBUG: mostra o que foi capturado
+    console.log(`🔍 Linha: "${limpa.substring(0, 80)}..."`);
+    console.log(`   Nome: "${nome}"`);
+    console.log(`   Partes: ${JSON.stringify(partes)}`);
+    console.log(`   Tokens: ${JSON.stringify(tokens)}`);
     
     // 🎯 Total Geral = ÚLTIMO token NÃO NULO
     let totalGeral = 0;
