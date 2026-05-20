@@ -2,9 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
-import { useToast } from '../components/ToastProvider';
 
 type Colaborador = {
   id: number;
@@ -45,8 +43,6 @@ function isAniversarioHoje(aniversario: string | null): boolean {
 }
 
 export default function MeuTimePage() {
-  const router = useRouter();
-  const toast = useToast();
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
@@ -63,9 +59,13 @@ export default function MeuTimePage() {
         .order('nome');
       if (error) {
         console.error('Erro ao carregar colaboradores:', error);
+        alert('Erro: ' + error.message);
       } else {
+        console.log(`✅ ${data?.length || 0} colaboradores carregados`);
         setColaboradores(data || []);
       }
+    } catch (e: any) {
+      console.error('Exceção:', e);
     } finally {
       setLoading(false);
     }
@@ -81,9 +81,8 @@ export default function MeuTimePage() {
 
     const { error } = await supabase.from('colaboradores').delete().eq('id', colab.id);
     if (error) {
-      toast.error('Erro ao excluir', error.message);
+      alert('Erro ao excluir: ' + error.message);
     } else {
-      toast.success('Colaborador removido', `${colab.nome} foi excluído`);
       setVersao((v) => v + 1);
     }
   }
