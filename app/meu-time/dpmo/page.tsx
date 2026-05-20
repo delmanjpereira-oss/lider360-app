@@ -437,63 +437,47 @@ export default function DpmoPage() {
       todasLinhas.push(...linhasPrint);
     });
 
-    // 🎯 MESCLA MÚLTIPLAS LEITURAS DO MESMO COLAB
-    // Quando o mesmo colab aparece em vários prints, pega o MAIOR valor 
-    // de cada semana entre todas as leituras (autocorreção de OCR ruim)
-    // Ex: Print 1 leu "37" mas Print 2 leu "377" → mantém 377
+    // 🎯 DEDUP POR NOME — Complementa valores (não duplica colab)
+    // Quando mesmo colab aparece em vários prints:
+    // - Mantém o nomeOcr da PRIMEIRA aparição (pra vinculação não quebrar)
+    // - Completa semanas faltantes com valores de outros prints
+    // - Se já tem valor numa semana, mantém (não sobrescreve)
     const linhasUnicas: LinhaPrint[] = [];
-    const mapaUnicos = new Map<string, LinhaPrint>();
-    let autocorrecoes = 0;
+    const mapaUnicos = new Map<string, number>(); // chave → index no array
     
     todasLinhas.forEach((l) => {
       const chave = normalizarNome(l.nomeOcr);
-      const existente = mapaUnicos.get(chave);
+      const idx = mapaUnicos.get(chave);
       
-      if (!existente) {
-        // Primeira ocorrência
-        mapaUnicos.set(chave, { ...l, semanas: { ...l.semanas } });
+      if (idx === undefined) {
+        // Primeira ocorrência - adiciona normalmente
+        linhasUnicas.push({ ...l, semanas: { ...l.semanas } });
+        mapaUnicos.set(chave, linhasUnicas.length - 1);
       } else {
-        // Já vi esse colab antes - mescla pegando o MAIOR valor de cada semana
-        const semanasMescladas: Record<number, number> = { ...existente.semanas };
-        let mudou = false;
-        
+        // Já existe - COMPLEMENTA semanas faltantes (preserva nomeOcr original)
+        const existente = linhasUnicas[idx];
         Object.entries(l.semanas).forEach(([sem, val]) => {
           const semNum = parseInt(sem);
-          const existVal = semanasMescladas[semNum] || 0;
-          // Pega MAIOR valor (autocorrige OCR que leu "37" mas o real era "377")
-          if (val > existVal) {
-            semanasMescladas[semNum] = val;
-            mudou = true;
-            console.log(`🔄 ${l.nomeOcr} S${semNum}: ${existVal} → ${val} (corrigido com print ${l.printNum})`);
+          // Se essa semana não existe ainda OU o valor existente é 0, complementa
+          if (!existente.semanas[semNum] || existente.semanas[semNum] === 0) {
+            existente.semanas[semNum] = val;
+            console.log(`➕ ${existente.nomeOcr} S${semNum}: complementado com ${val} (do print ${l.printNum})`);
           }
         });
-        
-        // Total Geral: pega o MAIOR também
-        const totalMaior = Math.max(existente.totalGeral, l.totalGeral);
-        if (totalMaior !== existente.totalGeral) {
-          console.log(`🔄 ${l.nomeOcr} Total: ${existente.totalGeral} → ${totalMaior}`);
-          mudou = true;
+        // Total Geral: completa se vazio
+        if (!existente.totalGeral && l.totalGeral) {
+          existente.totalGeral = l.totalGeral;
         }
-        
-        if (mudou) autocorrecoes++;
-        
-        mapaUnicos.set(chave, {
-          ...existente,
-          semanas: semanasMescladas,
-          totalGeral: totalMaior,
-        });
       }
     });
     
-    linhasUnicas.push(...Array.from(mapaUnicos.values()));
-    console.log(`📊 ${todasLinhas.length} leituras → ${linhasUnicas.length} colabs únicos (${autocorrecoes} autocorrigidos)`);
+    console.log(`📊 ${todasLinhas.length} leituras → ${linhasUnicas.length} colabs únicos`);
 
     const vinculadas = vincular(linhasUnicas);
     setLinhas(vinculadas);
     
     const vinc = vinculadas.filter((l) => l.cadastroVinculado).length;
-    const msgExtra = autocorrecoes > 0 ? ` · ${autocorrecoes} autocorrigidos por sobreposição` : '';
-    toast.info(`${vinculadas.length} colabs detectados`, `${vinc} vinculados ao cadastro${msgExtra}`);
+    toast.info(`${vinculadas.length} colabs detectados`, `${vinc} vinculados ao cadastro`);
   }
 
   function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
