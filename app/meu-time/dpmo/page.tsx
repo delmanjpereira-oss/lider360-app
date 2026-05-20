@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
 import { useToast } from '../../components/ToastProvider';
+import ApolloBadge from '../../components/ApolloBadge';
 
 type Colaborador = {
   id_groot: string;
@@ -695,11 +696,18 @@ export default function DpmoPage() {
     <div className="min-h-screen bg-[#0a0a0a] text-white">
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="mb-6">
-          <Link href="/meu-time" className="text-yellow-400 hover:underline text-sm">← Voltar</Link>
-          <h1 className="text-3xl font-black mt-2 mb-1">
-            📊 <span className="text-[#FFD700]">DPMO via Print</span>
+          <Link href="/meu-time" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">← Voltar ao Meu Time</Link>
+          <h1 className="text-3xl md:text-4xl font-black mt-2">
+            Upload de <span className="text-[#FFD700]">DPMO</span>
           </h1>
+          <p className="text-sm text-gray-500 mt-1">Suba até 3 prints do Looker · OCR processa automaticamente</p>
         </div>
+
+        <ApolloBadge
+          mood="info"
+          message="Como funciona"
+          detail="Cole os prints (Ctrl+V) · Eu extraio nomes, semanas e IMA · Você revisa e salva"
+        />
 
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
           <h2 className="text-lg font-bold mb-3">📅 Período</h2>
