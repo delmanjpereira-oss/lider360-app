@@ -265,18 +265,32 @@ export default function DpmoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processoSelecionado, montado]);
 
-  // 🎯 RE-VINCULA AUTOMATICAMENTE quando colaboradores carregam ou processo muda
+  // 🎯 RE-VINCULA AUTOMATICAMENTE sempre que colaboradores ou linhas mudam
   useEffect(() => {
-    if (colaboradores.length > 0 && linhas.length > 0) {
-      const linhasSemVinculo = linhas.filter((l) => !l.cadastroVinculado).length;
-      if (linhasSemVinculo > 0) {
-        console.log(`🔄 Re-vinculando ${linhas.length} linhas com ${colaboradores.length} colabs (${linhasSemVinculo} sem vinculo antes)`);
-        const revinculadas = vincular(linhas);
-        setLinhas(revinculadas);
-      }
+    console.log(`👀 useEffect revinc: colabs=${colaboradores.length}, linhas=${linhas.length}`);
+    
+    if (colaboradores.length === 0) {
+      console.warn('⚠️ Sem colabs carregados, não revincula');
+      return;
     }
+    
+    if (linhas.length === 0) {
+      return;
+    }
+    
+    const linhasSemVinculo = linhas.filter((l) => !l.cadastroVinculado).length;
+    if (linhasSemVinculo === 0) {
+      console.log('✅ Todas as linhas já estão vinculadas');
+      return;
+    }
+    
+    console.log(`🔄 Re-vinculando ${linhas.length} linhas (${linhasSemVinculo} sem vinculo) com ${colaboradores.length} colabs`);
+    const revinculadas = vincular(linhas);
+    const vincDepois = revinculadas.filter((l) => l.cadastroVinculado).length;
+    console.log(`✅ Após revinculação: ${vincDepois}/${revinculadas.length} vinculados`);
+    setLinhas(revinculadas);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [colaboradores]);
+  }, [colaboradores.length]);
 
   async function carregarColabs() {
     const { data } = await supabase
