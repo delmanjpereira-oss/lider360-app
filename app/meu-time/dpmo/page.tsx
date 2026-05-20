@@ -497,23 +497,44 @@ export default function DpmoPage() {
   }
 
   function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
-    console.log(`🔗 Vinculando ${linhasInput.length} linhas com ${colaboradores.length} colaboradores ${processoSelecionado} disponíveis`);
+    console.log(`🔗 ============ INICIO VINCULAÇÃO ============`);
+    console.log(`🔗 ${linhasInput.length} linhas | ${colaboradores.length} colabs ${processoSelecionado}`);
+    
     if (colaboradores.length === 0) {
-      console.warn('⚠️ AVISO: Lista de colaboradores está VAZIA! Aguarde os colabs carregarem.');
+      console.warn('⚠️ AVISO: Lista de colaboradores está VAZIA! Não vai vincular nada.');
+      return linhasInput.map(l => ({ ...l, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const }));
     }
+    
+    // Lista todos os colabs disponíveis pra debug
+    console.log(`📋 Colabs disponíveis:`);
+    colaboradores.forEach((c, i) => {
+      console.log(`   ${i+1}. "${c.nome}" → normalizado: "${normalizarNome(c.nome)}"`);
+    });
     
     return linhasInput.map((linha) => {
       // Remove reticências e pontos do final dos nomes
       const nomeLimpo = linha.nomeOcr.replace(/\.+/g, '').trim();
       const partesOcr = partesNome(nomeLimpo);
       
+      console.log(`\n🔍 Tentando vincular: "${linha.nomeOcr}"`);
+      console.log(`   Normalizado: "${normalizarNome(nomeLimpo)}"`);
+      console.log(`   Partes: ${JSON.stringify(partesOcr)}`);
+      
       if (partesOcr.length === 0) {
+        console.log(`   ❌ Sem partes válidas`);
         return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+      }
+
+      // 🎯 ETAPA 0: Match TOTAL normalizado (mais simples e robusto)
+      const normalOcr = normalizarNome(nomeLimpo);
+      const matchTotal = colaboradores.find((c) => normalizarNome(c.nome) === normalOcr);
+      if (matchTotal) {
+        console.log(`   ✅ TOTAL MATCH: "${linha.nomeOcr}" → ${matchTotal.nome}`);
+        return { ...linha, cadastroVinculado: matchTotal, metodo: 'exato' as const };
       }
 
       // 🎯 Helper: parte do OCR "casa" com parte do cadastro (aceita prefixo, case-insensitive)
       function parteCasa(ocr: string, cadastro: string): boolean {
-        // Força UPPERCASE e remove espaços extras pra comparação à prova de bala
         const o = String(ocr || '').toUpperCase().trim();
         const c = String(cadastro || '').toUpperCase().trim();
         if (!o || !c) return false;
