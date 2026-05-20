@@ -140,9 +140,9 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
     // Captura TOKENS válidos em ordem: números, "-", "o" solto (zero do OCR)
     // Ex: "VITORIA o 10.014 - 10.578 - 25e" → tokens: [o, 10014, -, 10578, -, 25e]
     
-    // Acha posição do PRIMEIRO número válido (>= 2 dígitos) pra cortar o nome
-    // ANTES exigia 3+ dígitos, agora aceita 2+ pra pegar valores baixos tipo "45"
-    const regexNumeroValido = /\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/g;
+    // Acha posição do PRIMEIRO número válido (1+ dígitos) pra cortar o nome
+    // SEM LIMITE de dígitos - o OCR pode ter lido qualquer coisa, app salva o que veio
+    const regexNumeroValido = /\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{1,7}\b/g;
     const primeirosNumeros = Array.from(limpa.matchAll(regexNumeroValido));
     if (primeirosNumeros.length === 0) return;
     
@@ -176,11 +176,11 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
         return;
       }
       
-      // Tenta extrair número (aceita 2+ dígitos pra pegar valores baixos tipo "45")
-      const matchNum = parte.match(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/);
+      // Tenta extrair número (aceita 1+ dígitos - sem limite)
+      const matchNum = parte.match(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{1,7}\b/);
       if (matchNum) {
         const num = parseInt(matchNum[0].replace(/[.,]/g, ''));
-        if (!isNaN(num) && num >= 1 && num <= 100000) {
+        if (!isNaN(num) && num >= 1) {
           tokens.push(num);
           return;
         }
