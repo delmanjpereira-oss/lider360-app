@@ -52,16 +52,20 @@ export default function MeuTimePage() {
 
   const carregar = useCallback(async () => {
     setLoading(true);
+    const inicio = performance.now();
     try {
       const { data, error } = await supabase
         .from('colaboradores')
-        .select('*')
+        .select('id, id_groot, nome, cargo, processo, status, carreira, data_admissao, aniversario')
         .order('nome');
+      
+      const tempo = Math.round(performance.now() - inicio);
+      
       if (error) {
-        console.error('Erro ao carregar colaboradores:', error);
+        console.error(`❌ Erro ao carregar colaboradores (${tempo}ms):`, error);
         alert('Erro: ' + error.message);
       } else {
-        console.log(`✅ ${data?.length || 0} colaboradores carregados`);
+        console.log(`✅ ${data?.length || 0} colaboradores carregados em ${tempo}ms`);
         setColaboradores(data || []);
       }
     } catch (e: any) {
@@ -369,10 +373,18 @@ export default function MeuTimePage() {
                   💬 Feedback
                 </Link>
                 <Link
-                  href={`/meu-time/${c.id}/editar`}
-                  className="flex-1 text-center text-xs bg-[#FFD700]/10 text-[#FFD700] hover:bg-[#FFD700]/20 font-bold py-2 rounded-lg transition-all active:scale-95"
+                  href={`/meu-time/${c.id}/analise`}
+                  className="flex-1 text-center text-xs bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 font-bold py-2 rounded-lg transition-all active:scale-95"
+                  title="Análise Comportamental"
                 >
-                  ✏️ Editar
+                  🧠 Análise
+                </Link>
+                <Link
+                  href={`/meu-time/${c.id}/editar`}
+                  className="text-xs bg-[#FFD700]/10 text-[#FFD700] hover:bg-[#FFD700]/20 font-bold py-2 px-3 rounded-lg transition-all active:scale-95"
+                  title="Editar"
+                >
+                  ✏️
                 </Link>
                 <button
                   onClick={() => excluir(c)}
