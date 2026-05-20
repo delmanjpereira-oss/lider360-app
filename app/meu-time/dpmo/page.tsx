@@ -497,11 +497,15 @@ export default function DpmoPage() {
         return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
       }
 
-      // 🎯 Helper: parte do OCR "casa" com parte do cadastro (aceita prefixo)
+      // 🎯 Helper: parte do OCR "casa" com parte do cadastro (aceita prefixo, case-insensitive)
       function parteCasa(ocr: string, cadastro: string): boolean {
-        if (ocr === cadastro) return true;
-        if (ocr.length >= 3 && cadastro.startsWith(ocr)) return true;
-        if (cadastro.length >= 3 && ocr.startsWith(cadastro)) return true;
+        // Força UPPERCASE e remove espaços extras pra comparação à prova de bala
+        const o = String(ocr || '').toUpperCase().trim();
+        const c = String(cadastro || '').toUpperCase().trim();
+        if (!o || !c) return false;
+        if (o === c) return true;
+        if (o.length >= 3 && c.startsWith(o)) return true;
+        if (c.length >= 3 && o.startsWith(c)) return true;
         return false;
       }
 
@@ -572,8 +576,15 @@ export default function DpmoPage() {
 
       if (candidatos.length > 1) {
         console.log(`⚠️ AMBÍGUO: "${linha.nomeOcr}" → ${candidatos.length} candidatos com nome+sob`);
+        console.log(`   OCR partes: ${JSON.stringify(partesOcr)}`);
+        candidatos.forEach((c) => console.log(`   Candidato: "${c.nome}" → ${JSON.stringify(partesNome(c.nome))}`));
       } else {
         console.log(`❌ NÃO VINCULOU: "${linha.nomeOcr}"`);
+        console.log(`   OCR partes: ${JSON.stringify(partesOcr)}`);
+        console.log(`   Colabs com primeiro nome igual: ${colabsComPrimeiroIgual.length}`);
+        colabsComPrimeiroIgual.slice(0, 3).forEach((c) => 
+          console.log(`   → "${c.nome}" → ${JSON.stringify(partesNome(c.nome))}`)
+        );
       }
       return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
     });
