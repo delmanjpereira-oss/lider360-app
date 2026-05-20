@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
+import ApolloBadge from '../components/ApolloBadge';
 
 type Colaborador = {
   id: number;
@@ -1103,9 +1104,20 @@ export default function CalibracaoPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-4xl font-black mb-2">🎯 Calibração <span className="text-[#FFD700]">Trimestral</span></h1>
-        <p className="text-gray-400">IMA = (Σ Defeitos / Σ Unidades das semanas auditadas) × 1M · Bate 100% Looker</p>
+        <Link href="/meu-time" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+          ← Voltar ao Meu Time
+        </Link>
+        <h1 className="text-3xl md:text-4xl font-black mt-2">
+          Calibração <span className="text-[#FFD700]">Trimestral</span>
+        </h1>
+        <p className="text-sm text-gray-500 mt-1">Análise de desempenho · QUE + COMO + Aptidão</p>
       </div>
+      
+      <ApolloBadge
+        mood="info"
+        message="IMA calculado em tempo real"
+        detail="(Σ Defeitos / Σ Unidades das semanas auditadas) × 1M · Bate 100% Looker"
+      />
 
       {trimestresDisponiveis.length === 0 ? (
         <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center">
