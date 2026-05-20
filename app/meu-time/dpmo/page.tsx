@@ -423,16 +423,50 @@ export default function DpmoPage() {
       todasLinhas.push(...linhasPrint);
     });
 
-    // Dedupe por nome
+    // 🎯 MESCLA MÚLTIPLAS LEITURAS DO MESMO COLAB
+    // Quando o mesmo colab aparece em vários prints, pega o MAIOR valor 
+    // de cada semana entre todas as leituras (autocorreção de OCR ruim)
+    // Ex: Print 1 leu "37" mas Print 2 leu "377" → mantém 377
     const linhasUnicas: LinhaPrint[] = [];
-    const nomesVistos = new Set<string>();
+    const mapaUnicos = new Map<string, LinhaPrint>();
+    
     todasLinhas.forEach((l) => {
       const chave = normalizarNome(l.nomeOcr);
-      if (!nomesVistos.has(chave)) {
-        nomesVistos.add(chave);
-        linhasUnicas.push(l);
+      const existente = mapaUnicos.get(chave);
+      
+      if (!existente) {
+        // Primeira ocorrência
+        mapaUnicos.set(chave, { ...l, semanas: { ...l.semanas } });
+      } else {
+        // Já vi esse colab antes - mescla pegando o MAIOR valor de cada semana
+        const semanasMescladas: Record<number, number> = { ...existente.semanas };
+        
+        Object.entries(l.semanas).forEach(([sem, val]) => {
+          const semNum = parseInt(sem);
+          const existVal = semanasMescladas[semNum] || 0;
+          // Pega MAIOR valor (autocorrige OCR que leu "37" mas o real era "377")
+          if (val > existVal) {
+            semanasMescladas[semNum] = val;
+            console.log(`🔄 ${l.nomeOcr} S${semNum}: ${existVal} → ${val} (mesclado de print ${l.printNum})`);
+          }
+        });
+        
+        // Total Geral: pega o MAIOR também
+        const totalMaior = Math.max(existente.totalGeral, l.totalGeral);
+        if (totalMaior !== existente.totalGeral) {
+          console.log(`🔄 ${l.nomeOcr} Total: ${existente.totalGeral} → ${totalMaior}`);
+        }
+        
+        mapaUnicos.set(chave, {
+          ...existente,
+          semanas: semanasMescladas,
+          totalGeral: totalMaior,
+        });
       }
     });
+    
+    linhasUnicas.push(...mapaUnicos.values());
+    console.log(`📊 ${todasLinhas.length} linhas totais → ${linhasUnicas.length} colabs únicos (mesclados)`);
 
     const vinculadas = vincular(linhasUnicas);
     setLinhas(vinculadas);
