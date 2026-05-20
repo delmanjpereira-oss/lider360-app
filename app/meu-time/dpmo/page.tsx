@@ -429,6 +429,7 @@ export default function DpmoPage() {
     // Ex: Print 1 leu "37" mas Print 2 leu "377" → mantém 377
     const linhasUnicas: LinhaPrint[] = [];
     const mapaUnicos = new Map<string, LinhaPrint>();
+    let autocorrecoes = 0;
     
     todasLinhas.forEach((l) => {
       const chave = normalizarNome(l.nomeOcr);
@@ -440,6 +441,7 @@ export default function DpmoPage() {
       } else {
         // Já vi esse colab antes - mescla pegando o MAIOR valor de cada semana
         const semanasMescladas: Record<number, number> = { ...existente.semanas };
+        let mudou = false;
         
         Object.entries(l.semanas).forEach(([sem, val]) => {
           const semNum = parseInt(sem);
@@ -447,7 +449,8 @@ export default function DpmoPage() {
           // Pega MAIOR valor (autocorrige OCR que leu "37" mas o real era "377")
           if (val > existVal) {
             semanasMescladas[semNum] = val;
-            console.log(`🔄 ${l.nomeOcr} S${semNum}: ${existVal} → ${val} (mesclado de print ${l.printNum})`);
+            mudou = true;
+            console.log(`🔄 ${l.nomeOcr} S${semNum}: ${existVal} → ${val} (corrigido com print ${l.printNum})`);
           }
         });
         
@@ -455,7 +458,10 @@ export default function DpmoPage() {
         const totalMaior = Math.max(existente.totalGeral, l.totalGeral);
         if (totalMaior !== existente.totalGeral) {
           console.log(`🔄 ${l.nomeOcr} Total: ${existente.totalGeral} → ${totalMaior}`);
+          mudou = true;
         }
+        
+        if (mudou) autocorrecoes++;
         
         mapaUnicos.set(chave, {
           ...existente,
@@ -466,13 +472,14 @@ export default function DpmoPage() {
     });
     
     linhasUnicas.push(...Array.from(mapaUnicos.values()));
-    console.log(`📊 ${todasLinhas.length} linhas totais → ${linhasUnicas.length} colabs únicos (mesclados)`);
+    console.log(`📊 ${todasLinhas.length} leituras → ${linhasUnicas.length} colabs únicos (${autocorrecoes} autocorrigidos)`);
 
     const vinculadas = vincular(linhasUnicas);
     setLinhas(vinculadas);
     
     const vinc = vinculadas.filter((l) => l.cadastroVinculado).length;
-    toast.info(`${vinculadas.length} colabs detectados`, `${vinc} vinculados ao cadastro`);
+    const msgExtra = autocorrecoes > 0 ? ` · ${autocorrecoes} autocorrigidos por sobreposição` : '';
+    toast.info(`${vinculadas.length} colabs detectados`, `${vinc} vinculados ao cadastro${msgExtra}`);
   }
 
   function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
