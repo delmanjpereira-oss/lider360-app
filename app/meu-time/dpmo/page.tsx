@@ -465,7 +465,7 @@ export default function DpmoPage() {
       }
     });
     
-    linhasUnicas.push(...mapaUnicos.values());
+    linhasUnicas.push(...Array.from(mapaUnicos.values()));
     console.log(`📊 ${todasLinhas.length} linhas totais → ${linhasUnicas.length} colabs únicos (mesclados)`);
 
     const vinculadas = vincular(linhasUnicas);
