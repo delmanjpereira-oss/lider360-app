@@ -62,14 +62,14 @@ export default function MeuTimePage() {
         .select('*')
         .order('nome');
       if (error) {
-        toast.error('Erro ao carregar', error.message);
+        console.error('Erro ao carregar colaboradores:', error);
       } else {
         setColaboradores(data || []);
       }
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     carregar();
