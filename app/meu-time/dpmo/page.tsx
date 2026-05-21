@@ -159,7 +159,25 @@ function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): L
     if (!/[a-zA-ZÀ-ú]{3,}/.test(nome)) return;
     
     // 🎯 Pega o RESTO da linha (depois do nome) e quebra em TOKENS posicionais
-    const restoLinha = limpa.substring(posicaoPrimeiro);
+    // ATENÇÃO: precisa incluir os '-' ou 'o' que estão ENTRE o nome e o primeiro número
+    // Ex: "TATIANE o 2138 ..." → 'o' = S20 (zero erros), 2138 = S19
+    let restoLinha = limpa.substring(posicaoPrimeiro);
+    
+    // 🎯 Procura tokens vazios SOLTOS (cercados por espaços) entre o nome e o primeiro número
+    // Padrão: " o " ou " - " ou " O " ou " — " com espaços em volta
+    const nomeOriginal = limpa.substring(0, posicaoPrimeiro);
+    const tokensVaziosAntes: string[] = [];
+    // Procura padrão: espaço + caractere de vazio + espaço (ou fim)
+    const regexVaziosSoltos = /\s+([-—oO])(?=\s|$)/g;
+    let m;
+    while ((m = regexVaziosSoltos.exec(nomeOriginal)) !== null) {
+      tokensVaziosAntes.push(m[1]);
+    }
+    
+    if (tokensVaziosAntes.length > 0) {
+      restoLinha = tokensVaziosAntes.join(' ') + ' ' + restoLinha;
+      console.log(`   ⚡ Detectado ${tokensVaziosAntes.length} token(s) vazio(s) ANTES do primeiro número: [${tokensVaziosAntes.join(', ')}]`);
+    }
     
     // Tokens válidos:
     // - Número: "10.014", "1.290", "25", etc
