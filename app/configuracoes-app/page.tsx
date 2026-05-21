@@ -23,6 +23,7 @@ type UploadHistorico = {
   tabela: string;
   linhas: number;
   data: string;
+  modelo_csv?: string;
 };
 
 const MESES = [
