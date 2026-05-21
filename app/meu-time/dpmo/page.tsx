@@ -244,6 +244,11 @@ export default function DpmoPage() {
   const [processoSelecionado, setProcessoSelecionado] = useState<'Checkin' | 'P2M'>('Checkin');
   
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
+  // 🎯 REF pra ter o valor MAIS RECENTE de colaboradores, evita closure stale
+  const colaboradoresRef = useRef<Colaborador[]>([]);
+  useEffect(() => {
+    colaboradoresRef.current = colaboradores;
+  }, [colaboradores]);
   const [prints, setPrints] = useState<PrintInfo[]>([]);
   const [linhas, setLinhas] = useState<LinhaPrint[]>([]);
   const [semanasDetectadas, setSemanasDetectadas] = useState<number[]>([]);
@@ -482,17 +487,20 @@ export default function DpmoPage() {
   }
 
   function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
-    console.log(`🔗 ============ INICIO VINCULAÇÃO ============`);
-    console.log(`🔗 ${linhasInput.length} linhas | ${colaboradores.length} colabs ${processoSelecionado}`);
+    // 🎯 Usa REF (sempre valor atualizado) em vez do state (closure stale)
+    const colabs = colaboradoresRef.current;
     
-    if (colaboradores.length === 0) {
+    console.log(`🔗 ============ INICIO VINCULAÇÃO ============`);
+    console.log(`🔗 ${linhasInput.length} linhas | ${colabs.length} colabs ${processoSelecionado}`);
+    
+    if (colabs.length === 0) {
       console.warn('⚠️ AVISO: Lista de colaboradores está VAZIA! Não vai vincular nada.');
       return linhasInput.map(l => ({ ...l, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const }));
     }
     
     // Lista todos os colabs disponíveis pra debug
     console.log(`📋 Colabs disponíveis:`);
-    colaboradores.forEach((c, i) => {
+    colabs.forEach((c, i) => {
       console.log(`   ${i+1}. "${c.nome}" → normalizado: "${normalizarNome(c.nome)}"`);
     });
     
@@ -512,7 +520,7 @@ export default function DpmoPage() {
 
       // 🎯 ETAPA 0: Match TOTAL normalizado (mais simples e robusto)
       const normalOcr = normalizarNome(nomeLimpo);
-      const matchTotal = colaboradores.find((c) => normalizarNome(c.nome) === normalOcr);
+      const matchTotal = colabs.find((c) => normalizarNome(c.nome) === normalOcr);
       if (matchTotal) {
         console.log(`   ✅ TOTAL MATCH: "${linha.nomeOcr}" → ${matchTotal.nome}`);
         return { ...linha, cadastroVinculado: matchTotal, metodo: 'exato' as const };
@@ -534,7 +542,7 @@ export default function DpmoPage() {
       const primeiroOcr = partesOcr[0];
 
       // Filtra colabs cujo PRIMEIRO nome bate com o primeiro do OCR
-      const colabsComPrimeiroIgual = colaboradores.filter((c) => {
+      const colabsComPrimeiroIgual = colabs.filter((c) => {
         const partesColab = partesNome(c.nome);
         if (partesColab.length === 0) return false;
         return parteCasa(primeiroOcr, partesColab[0]);
