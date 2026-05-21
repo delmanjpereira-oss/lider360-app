@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import RegistrarTurnoModal from '../components/RegistrarTurnoModal';
 
 type TempoUnico = { h: number; m: number };
 type Tempos = {
@@ -35,16 +36,18 @@ function parseVolume(str: string): number {
   return isFinite(v) ? v : 0;
 }
 
+// Converte HH e MM em string "HH:MM:00"
+function tempoParaString(h: number, m: number): string {
+  const hh = String(h || 0).padStart(2, '0');
+  const mm = String(m || 0).padStart(2, '0');
+  return `${hh}:${mm}:00`;
+}
+
 // 🧠 Extrai tempos do texto OCR usando regex inteligente
 function extrairTemposDoTexto(texto: string): Partial<Tempos> {
   const t = texto.toLowerCase().replace(/\s+/g, ' ');
   const result: Partial<Tempos> = {};
 
-  // 🎯 DETECTA O PADRÃO DO TEXTO
-  // Padrão A: "Ociosidade total 43h 34min Tempo efetivo 125h 42min..."  (label valor label valor)
-  // Padrão B: "Ociosidade total Tempo efetivo Tempo não sistêmico Tempo não disponível 43h 34min..." (labels juntos, valores juntos)
-
-  // Acha posição de TODOS os rótulos
   const rotulosLista: { pos: number; tipo: keyof Tempos }[] = [];
   const buscarRotulos = [
     { tipo: 'ociosidade' as const, termos: ['ociosidade total', 'ociosidade'] },
@@ -65,15 +68,12 @@ function extrairTemposDoTexto(texto: string): Partial<Tempos> {
 
   rotulosLista.sort((a, b) => a.pos - b.pos);
 
-  // Acha posição do PRIMEIRO número que parece tempo
   const primeiroMatch = t.match(/(\d+)\s*h\w*\s*(\d+)\s*min|(\d+)\s*min/);
   const posPrimeiroTempo = primeiroMatch ? primeiroMatch.index || 0 : -1;
 
-  // Se TODOS os rótulos vêm ANTES do primeiro tempo → modo "ORDENADO" (Padrão B)
   const ultimoRotuloPos = rotulosLista.length > 0 ? rotulosLista[rotulosLista.length - 1].pos : 0;
   const modoOrdenado = rotulosLista.length >= 3 && posPrimeiroTempo > ultimoRotuloPos + 10;
 
-  // 🎯 ESTRATÉGIA 1: PROXIMIDADE (Padrão A — label próximo do valor)
   function acharTempoProximo(palavrasChave: string[]): TempoUnico | null {
     for (const chave of palavrasChave) {
       const idx = t.indexOf(chave);
@@ -104,7 +104,6 @@ function extrairTemposDoTexto(texto: string): Partial<Tempos> {
     if (naoDisponivel) result.naoDisponivel = naoDisponivel;
   }
 
-  // 🎯 ESTRATÉGIA 2: ORDENADA (Padrão B — labels juntos, valores juntos)
   const camposVazios: (keyof Tempos)[] = [];
   if (!result.ociosidade) camposVazios.push('ociosidade');
   if (!result.efetivo) camposVazios.push('efetivo');
@@ -112,7 +111,6 @@ function extrairTemposDoTexto(texto: string): Partial<Tempos> {
   if (!result.naoDisponivel) camposVazios.push('naoDisponivel');
 
   if (camposVazios.length > 0) {
-    // Pega TODOS os tempos no texto
     const todosOsTempos: { pos: number; tempo: TempoUnico }[] = [];
 
     const regexHorMin = /(\d+)\s*h\w*\s*(\d+)\s*min/g;
@@ -133,7 +131,6 @@ function extrairTemposDoTexto(texto: string): Partial<Tempos> {
     const regexSoMin = /(\d+)\s*min/g;
     let mm;
     while ((mm = regexSoMin.exec(t)) !== null) {
-      // Verifica se está DENTRO de um "h X min" já capturado
       const fimMatch = mm.index + mm[0].length;
       const dentroDeHM = matchesHM.some(
         (h) => mm!.index >= h.pos && fimMatch <= h.fim
@@ -148,7 +145,6 @@ function extrairTemposDoTexto(texto: string): Partial<Tempos> {
 
     todosOsTempos.sort((a, b) => a.pos - b.pos);
 
-    // Mapeia rótulos com tempos pela ordem
     if (rotulosLista.length === todosOsTempos.length) {
       rotulosLista.forEach((r, idx) => {
         if (!result[r.tipo] && todosOsTempos[idx]) {
@@ -173,6 +169,7 @@ export default function CalculadoraNetPage() {
   const [volumeStr, setVolumeStr] = useState('');
   const [gerandoImagem, setGerandoImagem] = useState(false);
   const [mostrarOcr, setMostrarOcr] = useState(false);
+  const [mostrarRegistrarTurno, setMostrarRegistrarTurno] = useState(false);
 
   // OCR
   const [imagemPreview, setImagemPreview] = useState<string | null>(null);
@@ -190,6 +187,28 @@ export default function CalculadoraNetPage() {
   const totalHoras = ocio + efe + naoSis + naoDisp;
   const volume = parseVolume(volumeStr);
   const net = totalHoras > 0 ? volume / totalHoras : 0;
+
+  // 🎯 Percentuais pro registro do turno
+  const pctEfetivo = totalHoras > 0 ? (efe / totalHoras) * 100 : 0;
+  const pctOcioso = totalHoras > 0 ? (ocio / totalHoras) * 100 : 0;
+  const pctNaoSistemico = totalHoras > 0 ? (naoSis / totalHoras) * 100 : 0;
+  const pctNaoDisponivel = totalHoras > 0 ? (naoDisp / totalHoras) * 100 : 0;
+
+  // 🎯 Dados que vão pro modal de Registrar Turno
+  const dadosTurno = {
+    tempo_efetivo: tempoParaString(tempos.efetivo.h, tempos.efetivo.m),
+    tempo_ocioso: tempoParaString(tempos.ociosidade.h, tempos.ociosidade.m),
+    tempo_nao_sistemico: tempoParaString(tempos.naoSistemico.h, tempos.naoSistemico.m),
+    tempo_nao_disponivel: tempoParaString(tempos.naoDisponivel.h, tempos.naoDisponivel.m),
+    pct_efetivo: Number(pctEfetivo.toFixed(2)),
+    pct_ocioso: Number(pctOcioso.toFixed(2)),
+    pct_nao_sistemico: Number(pctNaoSistemico.toFixed(2)),
+    pct_nao_disponivel: Number(pctNaoDisponivel.toFixed(2)),
+    unidades_total: volume,
+    net_geral_real: Number(net.toFixed(2)),
+  };
+
+  const podeRegistrarTurno = totalHoras > 0 && volume > 0;
 
   const decimaisPorTipo: Record<keyof Tempos, number> = {
     ociosidade: ocio,
@@ -212,8 +231,8 @@ export default function CalculadoraNetPage() {
   function limpar() {
     setTempos(TEMPOS_ZERADOS);
     setVolumeStr('');
-    if (typeof window !== 'undefined' && window.showToast) {
-      window.showToast('info', 'Calculadora limpa');
+    if (typeof window !== 'undefined' && (window as any).showToast) {
+      (window as any).showToast('info', 'Calculadora limpa');
     }
   }
 
@@ -239,19 +258,18 @@ export default function CalculadoraNetPage() {
       link.download = `calculadora-net-${ts}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
-      if (typeof window !== 'undefined' && window.showToast) {
-        window.showToast('success', 'PNG baixado!');
+      if (typeof window !== 'undefined' && (window as any).showToast) {
+        (window as any).showToast('success', 'PNG baixado!');
       }
     } catch (e) {
-      if (typeof window !== 'undefined' && window.showToast) {
-        window.showToast('error', 'Erro ao gerar PNG');
+      if (typeof window !== 'undefined' && (window as any).showToast) {
+        (window as any).showToast('error', 'Erro ao gerar PNG');
       }
     } finally {
       setGerandoImagem(false);
     }
   }
 
-  // ━━━━━━━ OCR ━━━━━━━
   async function processarImagem(file: File) {
     setOcrLoading(true);
     setOcrProgresso(0);
@@ -259,12 +277,10 @@ export default function CalculadoraNetPage() {
     setTextoExtraido('');
 
     try {
-      // Preview da imagem
       const reader = new FileReader();
       reader.onload = (e) => setImagemPreview(e.target?.result as string);
       reader.readAsDataURL(file);
 
-      // Carrega Tesseract dinamicamente
       const Tesseract = (await import('tesseract.js')).default;
 
       const worker = await Tesseract.createWorker('por', 1, {
@@ -285,23 +301,21 @@ export default function CalculadoraNetPage() {
       setTextoExtraido(texto);
       console.log('📝 Texto OCR:', texto);
 
-      // Extrai os tempos do texto
       const extraidos = extrairTemposDoTexto(texto);
       console.log('🎯 Tempos extraídos:', extraidos);
 
       if (Object.keys(extraidos).length === 0) {
-        if (typeof window !== 'undefined' && window.showToast) {
-          window.showToast(
+        if (typeof window !== 'undefined' && (window as any).showToast) {
+          (window as any).showToast(
             'warning',
             'Não consegui identificar os tempos. Confira o texto extraído e digite manualmente.'
           );
         }
       } else {
-        // Aplica os valores encontrados
         setTempos((prev) => ({ ...prev, ...extraidos }));
         const encontrados = Object.keys(extraidos).length;
-        if (typeof window !== 'undefined' && window.showToast) {
-          window.showToast(
+        if (typeof window !== 'undefined' && (window as any).showToast) {
+          (window as any).showToast(
             'success',
             `${encontrados} tempo(s) preenchido(s)! Confira e ajuste se precisar.`
           );
@@ -309,8 +323,8 @@ export default function CalculadoraNetPage() {
       }
     } catch (e: unknown) {
       console.error('Erro no OCR:', e);
-      if (typeof window !== 'undefined' && window.showToast) {
-        window.showToast(
+      if (typeof window !== 'undefined' && (window as any).showToast) {
+        (window as any).showToast(
           'error',
           'Erro ao processar imagem. Tente uma imagem com melhor qualidade.'
         );
@@ -450,6 +464,17 @@ export default function CalculadoraNetPage() {
               <span>🖼️</span>
               {gerandoImagem ? 'Gerando...' : 'Salvar PNG'}
             </button>
+
+            {/* ⭐ NOVO BOTÃO: Registrar Fim de Turno */}
+            <button
+              onClick={() => setMostrarRegistrarTurno(true)}
+              disabled={!podeRegistrarTurno}
+              title={!podeRegistrarTurno ? 'Preencha os tempos e o volume primeiro' : 'Salvar como registro oficial do dia'}
+              className="bg-gradient-to-br from-green-500 to-emerald-600 text-white font-bold px-6 py-3 rounded-xl hover:from-green-400 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/30 hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>📥</span> Registrar Fim de Turno
+            </button>
+
             <button
               onClick={limpar}
               className="bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] text-white font-bold px-6 py-3 rounded-xl hover:from-[#3a3a3a] transition-all border border-[#3a3a3a] hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2"
@@ -633,6 +658,13 @@ export default function CalculadoraNetPage() {
           </div>
         </div>
       )}
+
+      {/* ⭐ MODAL DE REGISTRAR FIM DE TURNO */}
+      <RegistrarTurnoModal
+        isOpen={mostrarRegistrarTurno}
+        onClose={() => setMostrarRegistrarTurno(false)}
+        tempos={dadosTurno}
+      />
     </div>
   );
 }
