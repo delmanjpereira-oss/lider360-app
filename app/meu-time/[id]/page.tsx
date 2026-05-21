@@ -44,7 +44,7 @@ type DpmoEvento = {
   ano: number;
   mes: number;
   trimestre: string;
-  processo: string; // 'CK' ou 'P2M'
+  processo: string;
 };
 
 type DpmoAgregado = {
@@ -88,6 +88,16 @@ type DpmoSemana = {
   dpmo: number;
   diasAuditados: string[];
   statusCalculo: 'completo' | 'falta_inventario' | 'falta_produtividade';
+};
+
+// 🎯 NOVO TIPO: registro de fim de turno
+type TurnoDiario = {
+  id: number;
+  data_referencia: string;
+  net_geral_real: number;
+  unidades_total: number;
+  pct_efetivo: number;
+  pct_ocioso: number;
 };
 
 function iniciais(nome: string): string {
@@ -158,7 +168,6 @@ function iconeTipo(tipo: string): string {
   }
 }
 
-// Converte "HH:MM:SS" pra segundos
 function tempoParaSegundos(tempo: string | null): number {
   if (!tempo) return 0;
   const partes = tempo.split(':').map(Number);
@@ -167,7 +176,6 @@ function tempoParaSegundos(tempo: string | null): number {
   return 0;
 }
 
-// Converte segundos pra "HH:MM:SS"
 function segundosParaTempo(seg: number): string {
   if (seg <= 0) return '-';
   const h = Math.floor(seg / 3600);
@@ -176,7 +184,6 @@ function segundosParaTempo(seg: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-// 🎯 Calcula ociosidade real: T.Processo - T.Efetivo
 function calcularOciosidade(tempoProcesso: string | null, tempoEfetivo: string | null): string {
   const proc = tempoParaSegundos(tempoProcesso);
   const efe = tempoParaSegundos(tempoEfetivo);
@@ -196,6 +203,22 @@ function getSemanaIso(dataStr: string): { semana: number; ano: number } {
   return { semana, ano: utc.getUTCFullYear() };
 }
 
+// 🎯 NOVO: Calcula NET individual do colab (unidades / horas tempo_processo)
+function calcularNetIndividual(unidades: number, tempoProcesso: string | null): number {
+  const seg = tempoParaSegundos(tempoProcesso);
+  if (seg <= 0 || unidades <= 0) return 0;
+  const horas = seg / 3600;
+  return unidades / horas;
+}
+
+// 🎯 NOVO: Calcula impacto NET real (compara NET ind vs NET time)
+function calcularImpactoReal(netIndividual: number, netTime: number): number {
+  if (netTime <= 0 || netIndividual <= 0) return 0;
+  let impacto = ((netIndividual - netTime) / netTime) * 100;
+  impacto = Math.max(-100, Math.min(200, impacto));
+  return Number(impacto.toFixed(1));
+}
+
 export default function DetalheColaboradorPage() {
   const router = useRouter();
   const params = useParams();
@@ -208,6 +231,7 @@ export default function DetalheColaboradorPage() {
   const [ocupacaoP2M, setOcupacaoP2M] = useState<OcupacaoP2M[]>([]);
   const [imaManual, setImaManual] = useState<any[]>([]);
   const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>([]);
+  const [turnosDiarios, setTurnosDiarios] = useState<TurnoDiario[]>([]); // 🎯 NOVO
   const [metaIma, setMetaIma] = useState(1567);
   const [loading, setLoading] = useState(true);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
@@ -232,6 +256,7 @@ export default function DetalheColaboradorPage() {
             buscarFeedbacks(data.id_groot);
             buscarImaManual(data.id_groot, data.processo);
             buscarMetaIma(data.processo);
+            buscarTurnosDiarios(); // 🎯 NOVO
           }
         }
       } catch (e: unknown) {
@@ -263,6 +288,28 @@ export default function DetalheColaboradorPage() {
       setHistorico(data || []);
     } finally {
       setLoadingHistorico(false);
+    }
+  }
+
+  // 🎯 NOVO: Busca registros de fim de turno (NET do time)
+  async function buscarTurnosDiarios() {
+    try {
+      const { data, error } = await supabase
+        .from('net_turno_diario')
+        .select('id, data_referencia, net_geral_real, unidades_total, pct_efetivo, pct_ocioso')
+        .order('data_referencia', { ascending: false });
+      
+      if (error) {
+        console.warn('⚠️ Tabela net_turno_diario não existe ou erro:', error);
+        return;
+      }
+      
+      if (data) {
+        setTurnosDiarios(data as TurnoDiario[]);
+        console.log(`📥 ${data.length} turnos diários carregados`);
+      }
+    } catch (e) {
+      console.warn('Erro buscando turnos:', e);
     }
   }
 
@@ -305,7 +352,6 @@ export default function DetalheColaboradorPage() {
         setDpmoAgregado([]);
         return;
       }
-      // Mapeia processo
       const procDpmo = processoColaborador === 'Checkin' ? 'CK' : 'P2M';
 
       const { data: porId } = await supabase
@@ -339,7 +385,6 @@ export default function DetalheColaboradorPage() {
 
   async function buscarOcupacaoP2M(idGroot: string, nome: string, processoColaborador: string | null) {
     try {
-      // Ocupação é exclusiva do P2M
       if (processoColaborador !== 'P2M') {
         setOcupacaoP2M([]);
         return;
@@ -367,7 +412,6 @@ export default function DetalheColaboradorPage() {
     if (data) setFeedbacksRecentes(data as FeedbackBreve[]);
   }
 
-  // 🎯 Busca IMA manual desse colab pra sobrescrever cálculos
   async function buscarImaManual(idGroot: string, processoColaborador: string | null) {
     if (!processoColaborador) return;
     try {
@@ -381,7 +425,6 @@ export default function DetalheColaboradorPage() {
       
       if (data) {
         setImaManual(data);
-        console.log(`✏️ IMA Manual carregado: ${data.length} registros`);
       }
     } catch (e) {
       console.warn('Erro buscando IMA manual:', e);
@@ -390,7 +433,7 @@ export default function DetalheColaboradorPage() {
 
   async function excluir() {
     if (!colaborador) return;
-    const ok = await window.showConfirm({
+    const ok = await (window as any).showConfirm({
       title: 'Excluir colaborador',
       message: `Deseja excluir ${colaborador.nome}?`,
       confirmText: 'Excluir',
@@ -398,17 +441,17 @@ export default function DetalheColaboradorPage() {
     });
     if (!ok) return;
     const { error } = await supabase.from('colaboradores').delete().eq('id', colaborador.id);
-    if (error) window.showToast('error', 'Erro: ' + error.message);
+    if (error) (window as any).showToast('error', 'Erro: ' + error.message);
     else {
-      window.showToast('success', 'Colaborador removido');
+      (window as any).showToast('success', 'Colaborador removido');
       router.push('/meu-time');
     }
   }
 
-  // 🎯 ESTRATÉGIA HÍBRIDA — Funciona com:
-  // - dpmo_agregado APENAS (vindo de print/OCR) ✅
-  // - dpmo_eventos APENAS (vindo do CSV legado) ✅
-  // - Os dois juntos (agregado prevalece) ✅
+  // 🎯 NOVO: Mapa rápido de turnos por data (pra lookup eficiente)
+  const turnosPorData = new Map<string, TurnoDiario>();
+  turnosDiarios.forEach((t) => turnosPorData.set(t.data_referencia, t));
+
   function calcularDpmoPorSemana(): DpmoSemana[] {
     const resultado: Record<string, DpmoSemana> = {};
 
@@ -418,13 +461,11 @@ export default function DetalheColaboradorPage() {
     const eventosPrincipal = dpmoEventos.filter((e) => e.processo === procPrincipal);
     const agregadoPrincipal = dpmoAgregado.filter((d) => d.processo === procPrincipal);
 
-    // Data máxima do inventário (eventos detalhados) - usado pra cortar produtividade
     let dataMaximaInventario = '';
     eventosPrincipal.forEach((e) => {
       if (e.checkin_data > dataMaximaInventario) dataMaximaInventario = e.checkin_data;
     });
 
-    // 🎯 1. DPMO POR SEMANA do AGREGADO (fonte primária - vem do print)
     agregadoPrincipal.forEach((d) => {
       const chave = `${d.ano}-S${d.semana}`;
       if (!resultado[chave]) {
@@ -443,7 +484,6 @@ export default function DetalheColaboradorPage() {
       }
     });
 
-    // 2. Cruza com DETALHADO pra mostrar defeitos/dias auditados (informativo)
     eventosPrincipal.forEach((e) => {
       const chave = `${e.ano}-S${e.semana}`;
       if (!resultado[chave]) {
@@ -463,9 +503,7 @@ export default function DetalheColaboradorPage() {
       }
     });
 
-    // 3. Soma unidades das semanas
     historico.forEach((h) => {
-      // Se tem inventário detalhado, corta na data máxima. Senão soma todas.
       if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return;
       const { ano, semana } = getSemanaIso(h.data_referencia);
       const chave = `${ano}-S${semana}`;
@@ -490,7 +528,6 @@ export default function DetalheColaboradorPage() {
     });
   }
 
-  // 🎯 Calcula DPMO/IMA do OUTRO processo (pra feedback adicional)
   const dpmoOutroProcesso = (() => {
     if (!colaborador) return null;
     const procPrincipal = colaborador.processo === 'Checkin' ? 'CK' : colaborador.processo === 'P2M' ? 'P2M' : null;
@@ -517,28 +554,15 @@ export default function DetalheColaboradorPage() {
   const semanasCompletas = dpmoPorSemana.filter((s) => s.statusCalculo === 'completo');
   const semanasFaltando = dpmoPorSemana.filter((s) => s.statusCalculo !== 'completo');
 
-  // 🎯 DPMO TOTAL GERAL — Prioridade:
-  // 1. IMA Manual (vem do print) - é o valor oficial salvo pelo TL
-  // 2. Média do DPMO agregado (semanas)
-  // 3. Cálculo via eventos detalhados + produtividade (legado CSV)
   const dpmoTotal = (() => {
-    // 🎯 PRIORIDADE 1: IMA Manual (Total Geral salvo via print)
     if (imaManual.length > 0) {
       const totalIma = imaManual.reduce((s, m) => s + (Number(m.ima) || 0), 0);
       const mediaIma = Math.round(totalIma / imaManual.length);
-      
-      // Tenta calcular defeitos/unidades pra info adicional
       const totalDef = dpmoEventos.reduce((s, e) => s + (e.qtd_dif || 0), 0);
       const totalUnid = historico.reduce((s, h) => s + (h.unidades || 0), 0);
-      
-      return {
-        defeitos: totalDef,
-        unidades: totalUnid,
-        dpmo: mediaIma,
-      };
+      return { defeitos: totalDef, unidades: totalUnid, dpmo: mediaIma };
     }
 
-    // 🎯 PRIORIDADE 2: DPMO agregado (média das semanas)
     if (dpmoAgregado.length > 0) {
       const procPrincipal = colaborador?.processo === 'Checkin' ? 'CK' : colaborador?.processo === 'P2M' ? 'P2M' : null;
       const agrPrincipal = dpmoAgregado.filter((d) => d.processo === procPrincipal);
@@ -546,15 +570,10 @@ export default function DetalheColaboradorPage() {
       if (agrPrincipal.length > 0) {
         const somaDpmo = agrPrincipal.reduce((s, d) => s + (d.dpmo || 0), 0);
         const mediaDpmo = Math.round(somaDpmo / agrPrincipal.length);
-        return {
-          defeitos: 0,
-          unidades: 0,
-          dpmo: mediaDpmo,
-        };
+        return { defeitos: 0, unidades: 0, dpmo: mediaDpmo };
       }
     }
 
-    // 🎯 PRIORIDADE 3: Cálculo legado via eventos detalhados (CSV)
     let dataMax = '';
     dpmoEventos.forEach((e) => {
       if (e.checkin_data > dataMax) dataMax = e.checkin_data;
@@ -583,7 +602,6 @@ export default function DetalheColaboradorPage() {
     };
   })();
 
-  // 🎯 Histórico só do MÊS ATUAL (mês corrente)
   const historicoFiltrado = (() => {
     const agora = new Date();
     const mesAtual = agora.getMonth() + 1;
@@ -600,7 +618,6 @@ export default function DetalheColaboradorPage() {
     const somaLiq = validos.reduce((s, h) => s + h.prod_liquida, 0);
     const somaImp = validos.reduce((s, h) => s + h.impacto_net, 0);
     
-    // 🎯 Calcula ociosidade média (em segundos)
     const ociosidadesValidas = validos
       .map((h) => tempoParaSegundos(h.tempo_processo) - tempoParaSegundos(h.tempo_efetivo))
       .filter((o) => o > 0);
@@ -829,7 +846,7 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      {/* 🎯 SEÇÃO FEEDBACK ADICIONAL — Trabalho em outro processo */}
+      {/* SEÇÃO FEEDBACK ADICIONAL */}
       {dpmoOutroProcesso && dpmoOutroProcesso.defeitos > 0 && (
         <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/30 rounded-2xl p-6 space-y-3" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)' }}>
           <div className="flex items-center gap-3">
@@ -861,12 +878,12 @@ export default function DetalheColaboradorPage() {
 
           <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-200">
             💡 <strong>Como usar:</strong> Esse colaborador é <strong>{colaborador.processo}</strong> mas teve atividade em <strong>{dpmoOutroProcesso.processo}</strong> no período. 
-            Use essa info no feedback: "Bom trabalho ajudando no {dpmoOutroProcesso.processo}!" mas continue focando o desenvolvimento dele no processo principal.
+            Use essa info no feedback: &quot;Bom trabalho ajudando no {dpmoOutroProcesso.processo}!&quot; mas continue focando o desenvolvimento dele no processo principal.
           </div>
         </div>
       )}
 
-      {/* 🎯 SEÇÃO OCUPAÇÃO P2M — só pra colaboradores de P2M */}
+      {/* SEÇÃO OCUPAÇÃO P2M */}
       {colaborador.processo === 'P2M' && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -881,7 +898,7 @@ export default function DetalheColaboradorPage() {
               <span className="text-4xl block mb-2">📭</span>
               <p>Sem dados de Ocupação P2M ainda</p>
               <p className="text-xs text-gray-500 mt-1">
-                Sobe o CSV "Totefullness" em MEU TIME → 🎯 Upload Ocupação
+                Sobe o CSV &quot;Totefullness&quot; em MEU TIME → 🎯 Upload Ocupação
               </p>
               <p className="text-xs text-yellow-400 mt-2">
                 💡 Confira se o <code>user_id_meli</code> deste colaborador está cadastrado
@@ -889,7 +906,6 @@ export default function DetalheColaboradorPage() {
             </div>
           ) : (
             (() => {
-              // Filtra mês atual
               const agora = new Date();
               const mesAtual = agora.getMonth() + 1;
               const anoAtual = agora.getFullYear();
@@ -1080,12 +1096,20 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
+      {/* 🎯 TABELA DO HISTÓRICO DO MÊS — COM NOVA COLUNA NET TIME */}
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico do Mês</h2>
-          <span className="text-xs bg-cyan-500/20 text-cyan-400 px-3 py-1 rounded-full font-bold">
-            {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {turnosDiarios.length > 0 && (
+              <span className="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full font-bold flex items-center gap-1">
+                📥 {turnosDiarios.length} turnos registrados
+              </span>
+            )}
+            <span className="text-xs bg-cyan-500/20 text-cyan-400 px-3 py-1 rounded-full font-bold">
+              {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+            </span>
+          </div>
         </div>
 
         {loadingHistorico ? (
@@ -1112,11 +1136,24 @@ export default function DetalheColaboradorPage() {
                   <th className="py-3 pr-3 text-right">Util.</th>
                   <th className="py-3 pr-3 text-right">Imp.NET</th>
                   <th className="py-3 pr-3">Status</th>
+                  {/* 🎯 NOVA COLUNA */}
+                  <th className="py-3 pr-3 text-center border-l border-[#2a2a2a] bg-green-500/5">
+                    <div className="text-green-400">NET Time</div>
+                    <div className="text-[10px] text-gray-500 normal-case">/ Impacto real</div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {historicoFiltrado.map((h) => {
                   const ociosidadeCalc = calcularOciosidade(h.tempo_processo, h.tempo_efetivo);
+                  
+                  // 🎯 NOVO: Busca turno do dia
+                  const turnoDoDia = turnosPorData.get(h.data_referencia);
+                  const netIndividual = calcularNetIndividual(h.unidades, h.tempo_processo);
+                  const impactoReal = turnoDoDia 
+                    ? calcularImpactoReal(netIndividual, turnoDoDia.net_geral_real)
+                    : null;
+                  
                   return (
                     <tr key={h.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors">
                       <td className="py-3 pr-3 text-white font-mono">{formatarDataCurta(h.data_referencia)}</td>
@@ -1134,11 +1171,53 @@ export default function DetalheColaboradorPage() {
                       <td className="py-3 pr-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(h.status_meta)}`}>{h.status_meta}</span>
                       </td>
+                      {/* 🎯 NOVA CÉLULA: NET TIME + IMPACTO REAL */}
+                      <td className="py-3 pr-3 text-center border-l border-[#2a2a2a] bg-green-500/5">
+                        {turnoDoDia ? (
+                          <div>
+                            <div className="text-[#FFD700] font-mono font-bold text-sm">
+                              {Math.round(turnoDoDia.net_geral_real).toLocaleString('pt-BR')}
+                              <span className="text-[10px] text-gray-500 ml-1">pç/h</span>
+                            </div>
+                            {impactoReal !== null && (
+                              <div className={`text-xs font-mono font-bold mt-0.5 ${impactoReal > 0 ? 'text-green-400' : impactoReal < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                                {impactoReal > 0 ? '+' : ''}{impactoReal.toFixed(1)}%
+                                {impactoReal > 0 ? ' 🟢' : impactoReal < 0 ? ' 🔴' : ''}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-gray-600 text-xs">
+                            <div>—</div>
+                            <div className="text-[9px]">sem registro</div>
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            
+            {/* 💡 Dica explicando */}
+            {turnosDiarios.length > 0 && (
+              <div className="mt-4 bg-green-500/5 border border-green-500/20 rounded-lg p-3 text-xs text-green-300">
+                💡 <strong>NET Time</strong> = valor real do CT salvo no fim do turno. 
+                <strong> Impacto real</strong> compara NET do colab com a NET do time daquele dia 
+                (cálculo: NET ind − NET time / NET time × 100).
+                {turnosDiarios.length < historicoFiltrado.length && (
+                  <span className="block mt-1 text-yellow-300">
+                    ⏳ Faltam dias sem registro — vá na Calculadora NET e clique &quot;📥 Registrar Fim de Turno&quot; pra preencher.
+                  </span>
+                )}
+              </div>
+            )}
+            {turnosDiarios.length === 0 && historicoFiltrado.length > 0 && (
+              <div className="mt-4 bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300">
+                💡 Pra ver a <strong>NET do time</strong> de cada dia, registre o fim de turno na Calculadora NET. 
+                A coluna verde vai preencher automaticamente!
+              </div>
+            )}
           </div>
         )}
       </div>
