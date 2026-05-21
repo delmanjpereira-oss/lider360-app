@@ -90,7 +90,6 @@ type DpmoSemana = {
   statusCalculo: 'completo' | 'falta_inventario' | 'falta_produtividade';
 };
 
-// 🎯 NOVO TIPO: registro de fim de turno
 type TurnoDiario = {
   id: number;
   data_referencia: string;
@@ -203,7 +202,7 @@ function getSemanaIso(dataStr: string): { semana: number; ano: number } {
   return { semana, ano: utc.getUTCFullYear() };
 }
 
-// 🎯 NOVO: Calcula NET individual do colab (unidades / horas tempo_processo)
+// 🎯 Calcula NET individual do colab (unidades / horas tempo_processo)
 function calcularNetIndividual(unidades: number, tempoProcesso: string | null): number {
   const seg = tempoParaSegundos(tempoProcesso);
   if (seg <= 0 || unidades <= 0) return 0;
@@ -211,12 +210,35 @@ function calcularNetIndividual(unidades: number, tempoProcesso: string | null): 
   return unidades / horas;
 }
 
-// 🎯 NOVO: Calcula impacto NET real (compara NET ind vs NET time)
+// 🎯 Calcula impacto NET real (compara NET ind vs NET time)
 function calcularImpactoReal(netIndividual: number, netTime: number): number {
   if (netTime <= 0 || netIndividual <= 0) return 0;
   let impacto = ((netIndividual - netTime) / netTime) * 100;
   impacto = Math.max(-100, Math.min(200, impacto));
   return Number(impacto.toFixed(1));
+}
+
+// 🎯 Análise descritiva baseada no impacto
+function analiseDoDia(netIndividual: number, netTime: number, impacto: number): { emoji: string; texto: string; cor: string } {
+  if (impacto >= 50) {
+    return { emoji: '🚀', texto: 'Carregou o time!', cor: 'text-green-400' };
+  }
+  if (impacto >= 20) {
+    return { emoji: '🔥', texto: 'Muito acima', cor: 'text-green-400' };
+  }
+  if (impacto >= 5) {
+    return { emoji: '🟢', texto: 'Levemente acima', cor: 'text-green-300' };
+  }
+  if (impacto >= -5) {
+    return { emoji: '⚪', texto: 'No padrão', cor: 'text-gray-300' };
+  }
+  if (impacto >= -20) {
+    return { emoji: '🟡', texto: 'Levemente abaixo', cor: 'text-yellow-400' };
+  }
+  if (impacto >= -50) {
+    return { emoji: '🔴', texto: 'Abaixo do time', cor: 'text-red-400' };
+  }
+  return { emoji: '🚨', texto: 'Crítico - atenção!', cor: 'text-red-500' };
 }
 
 export default function DetalheColaboradorPage() {
@@ -231,7 +253,7 @@ export default function DetalheColaboradorPage() {
   const [ocupacaoP2M, setOcupacaoP2M] = useState<OcupacaoP2M[]>([]);
   const [imaManual, setImaManual] = useState<any[]>([]);
   const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>([]);
-  const [turnosDiarios, setTurnosDiarios] = useState<TurnoDiario[]>([]); // 🎯 NOVO
+  const [turnosDiarios, setTurnosDiarios] = useState<TurnoDiario[]>([]);
   const [metaIma, setMetaIma] = useState(1567);
   const [loading, setLoading] = useState(true);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
@@ -256,7 +278,7 @@ export default function DetalheColaboradorPage() {
             buscarFeedbacks(data.id_groot);
             buscarImaManual(data.id_groot, data.processo);
             buscarMetaIma(data.processo);
-            buscarTurnosDiarios(); // 🎯 NOVO
+            buscarTurnosDiarios();
           }
         }
       } catch (e: unknown) {
@@ -291,7 +313,6 @@ export default function DetalheColaboradorPage() {
     }
   }
 
-  // 🎯 NOVO: Busca registros de fim de turno (NET do time)
   async function buscarTurnosDiarios() {
     try {
       const { data, error } = await supabase
@@ -306,7 +327,6 @@ export default function DetalheColaboradorPage() {
       
       if (data) {
         setTurnosDiarios(data as TurnoDiario[]);
-        console.log(`📥 ${data.length} turnos diários carregados`);
       }
     } catch (e) {
       console.warn('Erro buscando turnos:', e);
@@ -448,7 +468,6 @@ export default function DetalheColaboradorPage() {
     }
   }
 
-  // 🎯 NOVO: Mapa rápido de turnos por data (pra lookup eficiente)
   const turnosPorData = new Map<string, TurnoDiario>();
   turnosDiarios.forEach((t) => turnosPorData.set(t.data_referencia, t));
 
@@ -612,11 +631,25 @@ export default function DetalheColaboradorPage() {
     });
   })();
 
+  // 🎯 Calcula média de impacto NET com base no NOVO cálculo (turno)
   const stats = (() => {
     const validos = historicoFiltrado.filter((h) => h.prod_liquida > 0);
     if (validos.length === 0) return null;
     const somaLiq = validos.reduce((s, h) => s + h.prod_liquida, 0);
-    const somaImp = validos.reduce((s, h) => s + h.impacto_net, 0);
+    
+    // 🎯 IMPACTO NET MÉDIO via NOVO cálculo (turno)
+    let somaImpactoReal = 0;
+    let qtdComTurno = 0;
+    validos.forEach((h) => {
+      const turno = turnosPorData.get(h.data_referencia);
+      if (turno) {
+        const netInd = calcularNetIndividual(h.unidades, h.tempo_processo);
+        const impacto = calcularImpactoReal(netInd, turno.net_geral_real);
+        somaImpactoReal += impacto;
+        qtdComTurno++;
+      }
+    });
+    const mediaImpactoReal = qtdComTurno > 0 ? Number((somaImpactoReal / qtdComTurno).toFixed(1)) : 0;
     
     const ociosidadesValidas = validos
       .map((h) => tempoParaSegundos(h.tempo_processo) - tempoParaSegundos(h.tempo_efetivo))
@@ -630,7 +663,8 @@ export default function DetalheColaboradorPage() {
     return {
       totalDias: validos.length,
       mediaLiquida: Math.round(somaLiq / validos.length),
-      mediaImpacto: Number((somaImp / validos.length).toFixed(1)),
+      mediaImpacto: mediaImpactoReal,
+      diasComTurno: qtdComTurno,
       ociosidadeMedia: segundosParaTempo(ociosidadeMediaSeg),
       ociosidadeMediaSeg,
       diasSupera: validos.filter((h) => h.status_meta === 'Supera').length,
@@ -705,14 +739,14 @@ export default function DetalheColaboradorPage() {
             </div>
             <p className="text-xs text-gray-400">Líquida média (pç/h)</p>
           </div>
-          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4" title={`Calculado em ${stats.diasComTurno} dia(s) com NET do time registrada`}>
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">📈</span>
-              <span className={`text-2xl font-black ${stats.mediaImpacto > 0 ? 'text-green-400' : 'text-red-400'}`}>
+              <span className={`text-2xl font-black ${stats.mediaImpacto > 0 ? 'text-green-400' : stats.mediaImpacto < 0 ? 'text-red-400' : 'text-gray-400'}`}>
                 {stats.mediaImpacto > 0 ? '+' : ''}{stats.mediaImpacto}%
               </span>
             </div>
-            <p className="text-xs text-gray-400">Impacto NET médio</p>
+            <p className="text-xs text-gray-400">Impacto NET ({stats.diasComTurno}d)</p>
           </div>
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-orange-500/30 rounded-2xl p-4" title="T.Processo - T.Efetivo">
             <div className="flex items-center justify-between mb-2">
@@ -738,7 +772,7 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      {/* 🎯 SEÇÃO DPMO */}
+      {/* SEÇÃO DPMO */}
       {(colaborador.processo === 'Checkin' || colaborador.processo === 'P2M') && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1096,7 +1130,7 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
-      {/* 🎯 TABELA DO HISTÓRICO DO MÊS — COM NOVA COLUNA NET TIME */}
+      {/* 🎯 TABELA HISTÓRICO — Imp.NET SUBSTITUÍDO + Análise do Dia */}
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico do Mês</h2>
@@ -1134,12 +1168,13 @@ export default function DetalheColaboradorPage() {
                   <th className="py-3 pr-3 text-right">T.Efetivo</th>
                   <th className="py-3 pr-3 text-right">Ociosidade</th>
                   <th className="py-3 pr-3 text-right">Util.</th>
+                  {/* 🎯 IMP.NET AGORA VEM DO NOVO CÁLCULO (via turno) */}
                   <th className="py-3 pr-3 text-right">Imp.NET</th>
                   <th className="py-3 pr-3">Status</th>
+                  <th className="py-3 pr-3 text-right">NET Time</th>
                   {/* 🎯 NOVA COLUNA */}
-                  <th className="py-3 pr-3 text-center border-l border-[#2a2a2a] bg-green-500/5">
-                    <div className="text-green-400">NET Time</div>
-                    <div className="text-[10px] text-gray-500 normal-case">/ Impacto real</div>
+                  <th className="py-3 pr-3 border-l border-[#2a2a2a] bg-green-500/5">
+                    <div className="text-green-400">Análise do Dia</div>
                   </th>
                 </tr>
               </thead>
@@ -1147,11 +1182,14 @@ export default function DetalheColaboradorPage() {
                 {historicoFiltrado.map((h) => {
                   const ociosidadeCalc = calcularOciosidade(h.tempo_processo, h.tempo_efetivo);
                   
-                  // 🎯 NOVO: Busca turno do dia
+                  // 🎯 Calcula tudo a partir do turno registrado
                   const turnoDoDia = turnosPorData.get(h.data_referencia);
                   const netIndividual = calcularNetIndividual(h.unidades, h.tempo_processo);
                   const impactoReal = turnoDoDia 
                     ? calcularImpactoReal(netIndividual, turnoDoDia.net_geral_real)
+                    : null;
+                  const analise = turnoDoDia && impactoReal !== null 
+                    ? analiseDoDia(netIndividual, turnoDoDia.net_geral_real, impactoReal)
                     : null;
                   
                   return (
@@ -1165,31 +1203,45 @@ export default function DetalheColaboradorPage() {
                         {ociosidadeCalc}
                       </td>
                       <td className="py-3 pr-3 text-right text-gray-300 text-xs">{h.utilizacao || '-'}</td>
-                      <td className={`py-3 pr-3 text-right font-mono font-bold ${h.impacto_net > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {h.impacto_net > 0 ? '+' : ''}{h.impacto_net.toFixed(1)}%
+                      {/* 🎯 IMP.NET = porcentagem do NOVO cálculo (via turno) */}
+                      <td className={`py-3 pr-3 text-right font-mono font-bold ${
+                        impactoReal === null ? 'text-gray-500' :
+                        impactoReal > 0 ? 'text-green-400' : 
+                        impactoReal < 0 ? 'text-red-400' : 'text-gray-400'
+                      }`}>
+                        {impactoReal === null ? (
+                          <span className="text-xs text-gray-600">—</span>
+                        ) : (
+                          <>{impactoReal > 0 ? '+' : ''}{impactoReal.toFixed(1)}%</>
+                        )}
                       </td>
                       <td className="py-3 pr-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(h.status_meta)}`}>{h.status_meta}</span>
                       </td>
-                      {/* 🎯 NOVA CÉLULA: NET TIME + IMPACTO REAL */}
-                      <td className="py-3 pr-3 text-center border-l border-[#2a2a2a] bg-green-500/5">
+                      <td className="py-3 pr-3 text-right">
                         {turnoDoDia ? (
-                          <div>
-                            <div className="text-[#FFD700] font-mono font-bold text-sm">
-                              {Math.round(turnoDoDia.net_geral_real).toLocaleString('pt-BR')}
-                              <span className="text-[10px] text-gray-500 ml-1">pç/h</span>
+                          <span className="text-[#FFD700] font-mono font-bold text-sm">
+                            {Math.round(turnoDoDia.net_geral_real)}
+                            <span className="text-[10px] text-gray-500 ml-1">pç/h</span>
+                          </span>
+                        ) : (
+                          <span className="text-gray-600 text-xs">—</span>
+                        )}
+                      </td>
+                      {/* 🎯 ANÁLISE DO DIA */}
+                      <td className="py-3 pr-3 border-l border-[#2a2a2a] bg-green-500/5">
+                        {analise ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl">{analise.emoji}</span>
+                            <div>
+                              <div className={`text-xs font-bold ${analise.cor}`}>{analise.texto}</div>
+                              <div className="text-[10px] text-gray-500 font-mono">NET ind: {Math.round(netIndividual)}</div>
                             </div>
-                            {impactoReal !== null && (
-                              <div className={`text-xs font-mono font-bold mt-0.5 ${impactoReal > 0 ? 'text-green-400' : impactoReal < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                                {impactoReal > 0 ? '+' : ''}{impactoReal.toFixed(1)}%
-                                {impactoReal > 0 ? ' 🟢' : impactoReal < 0 ? ' 🔴' : ''}
-                              </div>
-                            )}
                           </div>
                         ) : (
                           <div className="text-gray-600 text-xs">
-                            <div>—</div>
-                            <div className="text-[9px]">sem registro</div>
+                            <div>— sem registro</div>
+                            <div className="text-[9px]">do turno</div>
                           </div>
                         )}
                       </td>
@@ -1199,25 +1251,23 @@ export default function DetalheColaboradorPage() {
               </tbody>
             </table>
             
-            {/* 💡 Dica explicando */}
-            {turnosDiarios.length > 0 && (
-              <div className="mt-4 bg-green-500/5 border border-green-500/20 rounded-lg p-3 text-xs text-green-300">
-                💡 <strong>NET Time</strong> = valor real do CT salvo no fim do turno. 
-                <strong> Impacto real</strong> compara NET do colab com a NET do time daquele dia 
-                (cálculo: NET ind − NET time / NET time × 100).
-                {turnosDiarios.length < historicoFiltrado.length && (
-                  <span className="block mt-1 text-yellow-300">
-                    ⏳ Faltam dias sem registro — vá na Calculadora NET e clique &quot;📥 Registrar Fim de Turno&quot; pra preencher.
-                  </span>
-                )}
+            {/* Legenda explicativa */}
+            <div className="mt-4 bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300 space-y-1">
+              <p className="font-bold">💡 Análise do Dia - escala de avaliação:</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-[11px]">
+                <div className="flex items-center gap-1"><span>🚀</span> <span className="text-green-400">Carregou (+50%+)</span></div>
+                <div className="flex items-center gap-1"><span>🔥</span> <span className="text-green-400">Muito acima (+20%+)</span></div>
+                <div className="flex items-center gap-1"><span>🟢</span> <span className="text-green-300">Levemente acima</span></div>
+                <div className="flex items-center gap-1"><span>⚪</span> <span className="text-gray-300">No padrão</span></div>
+                <div className="flex items-center gap-1"><span>🟡</span> <span className="text-yellow-400">Leve queda</span></div>
+                <div className="flex items-center gap-1"><span>🔴</span> <span className="text-red-400">Abaixo do time</span></div>
+                <div className="flex items-center gap-1"><span>🚨</span> <span className="text-red-500">Crítico (-50%+)</span></div>
               </div>
-            )}
-            {turnosDiarios.length === 0 && historicoFiltrado.length > 0 && (
-              <div className="mt-4 bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300">
-                💡 Pra ver a <strong>NET do time</strong> de cada dia, registre o fim de turno na Calculadora NET. 
-                A coluna verde vai preencher automaticamente!
-              </div>
-            )}
+              <p className="mt-2 text-blue-200">
+                💡 <strong>Imp.NET</strong> e <strong>Análise</strong> são calculados a partir do <strong>NET Time</strong> registrado no fim do turno. 
+                Sem registro do dia, aparece &quot;—&quot;.
+              </p>
+            </div>
           </div>
         )}
       </div>
