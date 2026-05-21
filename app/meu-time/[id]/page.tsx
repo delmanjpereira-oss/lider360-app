@@ -183,6 +183,16 @@ function segundosParaTempo(seg: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+function segundosParaHM(seg: number): string {
+  if (seg < 0) seg = Math.abs(seg);
+  if (seg === 0) return '0min';
+  const h = Math.floor(seg / 3600);
+  const m = Math.floor((seg % 3600) / 60);
+  if (h === 0) return `${m}min`;
+  if (m === 0) return `${h}h`;
+  return `${h}h${m.toString().padStart(2, '0')}`;
+}
+
 function calcularOciosidade(tempoProcesso: string | null, tempoEfetivo: string | null): string {
   const proc = tempoParaSegundos(tempoProcesso);
   const efe = tempoParaSegundos(tempoEfetivo);
@@ -202,7 +212,6 @@ function getSemanaIso(dataStr: string): { semana: number; ano: number } {
   return { semana, ano: utc.getUTCFullYear() };
 }
 
-// 🎯 Calcula NET individual do colab (unidades / horas tempo_processo)
 function calcularNetIndividual(unidades: number, tempoProcesso: string | null): number {
   const seg = tempoParaSegundos(tempoProcesso);
   if (seg <= 0 || unidades <= 0) return 0;
@@ -210,7 +219,6 @@ function calcularNetIndividual(unidades: number, tempoProcesso: string | null): 
   return unidades / horas;
 }
 
-// 🎯 Calcula impacto NET real (compara NET ind vs NET time)
 function calcularImpactoReal(netIndividual: number, netTime: number): number {
   if (netTime <= 0 || netIndividual <= 0) return 0;
   let impacto = ((netIndividual - netTime) / netTime) * 100;
@@ -218,27 +226,162 @@ function calcularImpactoReal(netIndividual: number, netTime: number): number {
   return Number(impacto.toFixed(1));
 }
 
-// 🎯 Análise descritiva baseada no impacto
-function analiseDoDia(netIndividual: number, netTime: number, impacto: number): { emoji: string; texto: string; cor: string } {
-  if (impacto >= 50) {
-    return { emoji: '🚀', texto: 'Carregou o time!', cor: 'text-green-400' };
+type AnaliseOciosidade = {
+  ociosidadeSaudavelSeg: number;
+  ociosidadeRealSeg: number;
+  diferencaSeg: number;
+  tempoEsperadoSeg: number;
+  bateuMeta: boolean;
+  pagouOciosidade: boolean;
+  velocidadeEfetiva: number;
+  status: 'excelente' | 'saudavel' | 'limite' | 'acima' | 'apertado';
+  emoji: string;
+  texto: string;
+  cor: string;
+  insight: string;
+};
+
+function analisarOciosidade(h: HistoricoLinha, meta: number): AnaliseOciosidade | null {
+  if (!meta || meta <= 0) return null;
+  
+  const procSeg = tempoParaSegundos(h.tempo_processo);
+  const efeSeg = tempoParaSegundos(h.tempo_efetivo);
+  if (procSeg <= 0 || h.unidades <= 0) return null;
+  
+  const efeHoras = efeSeg / 3600;
+  const tempoEsperadoHoras = h.unidades / meta;
+  const tempoEsperadoSeg = tempoEsperadoHoras * 3600;
+  
+  const ociosidadeSaudavelSeg = procSeg - tempoEsperadoSeg;
+  const ociosidadeRealSeg = procSeg - efeSeg;
+  const diferencaSeg = ociosidadeRealSeg - ociosidadeSaudavelSeg;
+  
+  const netLiquida = h.prod_liquida;
+  const bateuMeta = netLiquida >= meta;
+  const pagouOciosidade = efeHoras <= tempoEsperadoHoras;
+  const velocidadeEfetiva = efeHoras > 0 ? h.unidades / efeHoras : 0;
+  
+  const tolerancia = 15 * 60;
+  
+  if (ociosidadeSaudavelSeg < 0) {
+    return {
+      ociosidadeSaudavelSeg: 0,
+      ociosidadeRealSeg,
+      diferencaSeg: ociosidadeRealSeg,
+      tempoEsperadoSeg,
+      bateuMeta,
+      pagouOciosidade,
+      velocidadeEfetiva,
+      status: 'apertado',
+      emoji: '🟠',
+      texto: 'Turno apertado',
+      cor: 'text-orange-400',
+      insight: bateuMeta 
+        ? `Volume incompatível com tempo. Conseguiu bater meta correndo a ${Math.round(velocidadeEfetiva)} pç/h.`
+        : `Pra esse volume, precisava trabalhar acima da meta. Não compensou.`,
+    };
   }
-  if (impacto >= 20) {
-    return { emoji: '🔥', texto: 'Muito acima', cor: 'text-green-400' };
+  
+  if (diferencaSeg <= -tolerancia) {
+    return {
+      ociosidadeSaudavelSeg, ociosidadeRealSeg, diferencaSeg, tempoEsperadoSeg,
+      bateuMeta, pagouOciosidade, velocidadeEfetiva,
+      status: 'excelente',
+      emoji: '🌟',
+      texto: 'Muito controlada',
+      cor: 'text-green-400',
+      insight: `Ociosidade ${segundosParaHM(Math.abs(diferencaSeg))} abaixo do saudável.`,
+    };
   }
-  if (impacto >= 5) {
-    return { emoji: '🟢', texto: 'Levemente acima', cor: 'text-green-300' };
+  
+  if (diferencaSeg <= 0) {
+    return {
+      ociosidadeSaudavelSeg, ociosidadeRealSeg, diferencaSeg, tempoEsperadoSeg,
+      bateuMeta, pagouOciosidade, velocidadeEfetiva,
+      status: 'saudavel',
+      emoji: '✅',
+      texto: 'Saudável',
+      cor: 'text-green-300',
+      insight: `Dentro do limite de ${segundosParaHM(ociosidadeSaudavelSeg)}.`,
+    };
   }
-  if (impacto >= -5) {
-    return { emoji: '⚪', texto: 'No padrão', cor: 'text-gray-300' };
+  
+  if (diferencaSeg <= tolerancia) {
+    return {
+      ociosidadeSaudavelSeg, ociosidadeRealSeg, diferencaSeg, tempoEsperadoSeg,
+      bateuMeta, pagouOciosidade, velocidadeEfetiva,
+      status: 'limite',
+      emoji: '🟡',
+      texto: 'No limite',
+      cor: 'text-yellow-400',
+      insight: bateuMeta
+        ? `${segundosParaHM(diferencaSeg)} acima, mas compensou.`
+        : `${segundosParaHM(diferencaSeg)} acima e não bateu meta.`,
+    };
   }
-  if (impacto >= -20) {
-    return { emoji: '🟡', texto: 'Levemente abaixo', cor: 'text-yellow-400' };
+  
+  return {
+    ociosidadeSaudavelSeg, ociosidadeRealSeg, diferencaSeg, tempoEsperadoSeg,
+    bateuMeta, pagouOciosidade, velocidadeEfetiva,
+    status: 'acima',
+    emoji: '🔴',
+    texto: 'Acima do saudável',
+    cor: 'text-red-400',
+    insight: bateuMeta
+      ? `${segundosParaHM(diferencaSeg)} ACIMA. Teve que correr ${Math.round(velocidadeEfetiva)} pç/h.`
+      : `${segundosParaHM(diferencaSeg)} ACIMA e NÃO bateu meta. Problema duplo.`,
+  };
+}
+
+function detectarPerfil(analises: AnaliseOciosidade[]): { 
+  perfil: string; 
+  emoji: string; 
+  descricao: string;
+  cor: string;
+} {
+  if (analises.length === 0) {
+    return { perfil: 'SEM DADOS', emoji: '❓', descricao: 'Dados insuficientes', cor: 'text-gray-400' };
   }
-  if (impacto >= -50) {
-    return { emoji: '🔴', texto: 'Abaixo do time', cor: 'text-red-400' };
+  
+  const bateuMeta = analises.filter(a => a.bateuMeta).length;
+  const ociosidadeSaudavel = analises.filter(a => a.status === 'saudavel' || a.status === 'excelente').length;
+  
+  const pctBateuMeta = bateuMeta / analises.length;
+  const pctOcioSaudavel = ociosidadeSaudavel / analises.length;
+  
+  if (pctBateuMeta >= 0.7 && pctOcioSaudavel >= 0.7) {
+    return {
+      perfil: 'EQUILIBRADO',
+      emoji: '🌟',
+      descricao: 'Bate meta consistentemente com ociosidade controlada. Performance sustentável.',
+      cor: 'text-green-400',
+    };
   }
-  return { emoji: '🚨', texto: 'Crítico - atenção!', cor: 'text-red-500' };
+  
+  if (pctBateuMeta >= 0.7 && pctOcioSaudavel < 0.7) {
+    return {
+      perfil: 'RUSHER',
+      emoji: '⚡',
+      descricao: 'Bate meta mas com ociosidade alta. Tem potencial - trabalhar constância pode elevar resultado.',
+      cor: 'text-yellow-400',
+    };
+  }
+  
+  if (pctBateuMeta < 0.7 && pctOcioSaudavel >= 0.7) {
+    return {
+      perfil: 'LENTO',
+      emoji: '🐢',
+      descricao: 'Trabalha o tempo todo, mas ritmo abaixo da meta. Precisa de aceleração.',
+      cor: 'text-orange-400',
+    };
+  }
+  
+  return {
+    perfil: 'CRÍTICO',
+    emoji: '🚨',
+    descricao: 'Ociosidade alta + ritmo abaixo da meta. Requer atenção urgente.',
+    cor: 'text-red-400',
+  };
 }
 
 export default function DetalheColaboradorPage() {
@@ -255,9 +398,17 @@ export default function DetalheColaboradorPage() {
   const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>([]);
   const [turnosDiarios, setTurnosDiarios] = useState<TurnoDiario[]>([]);
   const [metaIma, setMetaIma] = useState(1567);
+  const [metaProcesso, setMetaProcesso] = useState(296);
   const [loading, setLoading] = useState(true);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  
+  const [relatorioIA, setRelatorioIA] = useState<string>('');
+  const [carregandoIA, setCarregandoIA] = useState(false);
+  const [iaModelo, setIaModelo] = useState<string>('');
+  const [iaGeradoEm, setIaGeradoEm] = useState<string>('');
+  const [iaFromCache, setIaFromCache] = useState(false);
+  const [erroIA, setErroIA] = useState<string>('');
 
   useEffect(() => {
     async function buscar() {
@@ -278,6 +429,7 @@ export default function DetalheColaboradorPage() {
             buscarFeedbacks(data.id_groot);
             buscarImaManual(data.id_groot, data.processo);
             buscarMetaIma(data.processo);
+            buscarMetaProcesso(data.processo);
             buscarTurnosDiarios();
           }
         }
@@ -297,6 +449,14 @@ export default function DetalheColaboradorPage() {
     if (!chave) return;
     const { data } = await supabase.from('config').select('valor').eq('chave', chave).single();
     if (data) setMetaIma(Number(data.valor));
+  }
+
+  async function buscarMetaProcesso(processo: string | null) {
+    if (!processo) return;
+    const chave = processo === 'Checkin' ? 'meta_checkin_base' : processo === 'P2M' ? 'meta_p2m_base' : null;
+    if (!chave) return;
+    const { data } = await supabase.from('config').select('valor').eq('chave', chave).single();
+    if (data) setMetaProcesso(Number(data.valor));
   }
 
   async function buscarHistorico(idGroot: string) {
@@ -319,17 +479,10 @@ export default function DetalheColaboradorPage() {
         .from('net_turno_diario')
         .select('id, data_referencia, net_geral_real, unidades_total, pct_efetivo, pct_ocioso')
         .order('data_referencia', { ascending: false });
-      
-      if (error) {
-        console.warn('⚠️ Tabela net_turno_diario não existe ou erro:', error);
-        return;
-      }
-      
-      if (data) {
-        setTurnosDiarios(data as TurnoDiario[]);
-      }
+      if (error) return;
+      if (data) setTurnosDiarios(data as TurnoDiario[]);
     } catch (e) {
-      console.warn('Erro buscando turnos:', e);
+      console.warn('Erro turnos:', e);
     }
   }
 
@@ -339,13 +492,11 @@ export default function DetalheColaboradorPage() {
         setDpmoEventos([]);
         return;
       }
-
       const { data: porId } = await supabase
         .from('dpmo_eventos')
         .select('*')
         .eq('id_groot', idGroot)
         .order('checkin_data', { ascending: false });
-
       const { data: porNome } = await supabase
         .from('dpmo_eventos')
         .select('*')
@@ -362,7 +513,7 @@ export default function DetalheColaboradorPage() {
       });
       setDpmoEventos(todos);
     } catch (e) {
-      console.error('Erro buscando DPMO eventos:', e);
+      console.error('Erro DPMO eventos:', e);
     }
   }
 
@@ -399,7 +550,7 @@ export default function DetalheColaboradorPage() {
       });
       setDpmoAgregado(todos);
     } catch (e) {
-      console.error('Erro buscando DPMO agregado:', e);
+      console.error('Erro DPMO agregado:', e);
     }
   }
 
@@ -409,16 +560,14 @@ export default function DetalheColaboradorPage() {
         setOcupacaoP2M([]);
         return;
       }
-
       const { data: porId } = await supabase
         .from('ocupacao_p2m')
         .select('*')
         .eq('id_groot', idGroot)
         .order('data_referencia', { ascending: false });
-
       setOcupacaoP2M((porId as OcupacaoP2M[]) || []);
     } catch (e) {
-      console.error('Erro buscando ocupação P2M:', e);
+      console.error('Erro ocupação P2M:', e);
     }
   }
 
@@ -442,12 +591,33 @@ export default function DetalheColaboradorPage() {
         .eq('processo', processoColaborador)
         .order('ano', { ascending: false })
         .order('mes', { ascending: false });
-      
-      if (data) {
-        setImaManual(data);
-      }
+      if (data) setImaManual(data);
     } catch (e) {
-      console.warn('Erro buscando IMA manual:', e);
+      console.warn('Erro IMA manual:', e);
+    }
+  }
+
+  async function carregarAnaliseIA(forcarNovo = false) {
+    if (!colaborador) return;
+    setCarregandoIA(true);
+    setErroIA('');
+    try {
+      const url = `/api/ia/perfil/${colaborador.id_groot}${forcarNovo ? '?forcar=true' : ''}`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detalhe || err.erro || 'Erro ao gerar análise');
+      }
+      const dados = await resp.json();
+      setRelatorioIA(dados.relatorio || '');
+      setIaModelo(dados.modelo || '');
+      setIaGeradoEm(dados.geradoEm || '');
+      setIaFromCache(dados.fromCache || false);
+    } catch (e: any) {
+      console.error('Erro IA:', e);
+      setErroIA(e.message || 'Erro desconhecido');
+    } finally {
+      setCarregandoIA(false);
     }
   }
 
@@ -473,7 +643,6 @@ export default function DetalheColaboradorPage() {
 
   function calcularDpmoPorSemana(): DpmoSemana[] {
     const resultado: Record<string, DpmoSemana> = {};
-
     const procPrincipal = colaborador?.processo === 'Checkin' ? 'CK' : colaborador?.processo === 'P2M' ? 'P2M' : null;
     if (!procPrincipal) return [];
 
@@ -489,13 +658,8 @@ export default function DetalheColaboradorPage() {
       const chave = `${d.ano}-S${d.semana}`;
       if (!resultado[chave]) {
         resultado[chave] = {
-          ano: d.ano,
-          semana: d.semana,
-          defeitos: 0,
-          unidades: 0,
-          dpmo: d.dpmo,
-          diasAuditados: [],
-          statusCalculo: 'completo',
+          ano: d.ano, semana: d.semana, defeitos: 0, unidades: 0,
+          dpmo: d.dpmo, diasAuditados: [], statusCalculo: 'completo',
         };
       } else {
         resultado[chave].dpmo = d.dpmo;
@@ -507,13 +671,8 @@ export default function DetalheColaboradorPage() {
       const chave = `${e.ano}-S${e.semana}`;
       if (!resultado[chave]) {
         resultado[chave] = {
-          ano: e.ano,
-          semana: e.semana,
-          defeitos: 0,
-          unidades: 0,
-          dpmo: 0,
-          diasAuditados: [],
-          statusCalculo: 'falta_produtividade',
+          ano: e.ano, semana: e.semana, defeitos: 0, unidades: 0,
+          dpmo: 0, diasAuditados: [], statusCalculo: 'falta_produtividade',
         };
       }
       resultado[chave].defeitos += e.qtd_dif || 0;
@@ -526,16 +685,10 @@ export default function DetalheColaboradorPage() {
       if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return;
       const { ano, semana } = getSemanaIso(h.data_referencia);
       const chave = `${ano}-S${semana}`;
-      
       if (!resultado[chave]) {
         resultado[chave] = {
-          ano,
-          semana,
-          defeitos: 0,
-          unidades: 0,
-          dpmo: 0,
-          diasAuditados: [],
-          statusCalculo: 'falta_inventario',
+          ano, semana, defeitos: 0, unidades: 0, dpmo: 0,
+          diasAuditados: [], statusCalculo: 'falta_inventario',
         };
       }
       resultado[chave].unidades += h.unidades || 0;
@@ -551,15 +704,11 @@ export default function DetalheColaboradorPage() {
     if (!colaborador) return null;
     const procPrincipal = colaborador.processo === 'Checkin' ? 'CK' : colaborador.processo === 'P2M' ? 'P2M' : null;
     if (!procPrincipal) return null;
-    
     const outroProcesso = procPrincipal === 'CK' ? 'P2M' : 'CK';
     const eventosOutro = dpmoEventos.filter((e) => e.processo === outroProcesso);
-    
     if (eventosOutro.length === 0) return null;
-    
     const totalDef = eventosOutro.reduce((s, e) => s + (e.qtd_dif || 0), 0);
     const datasAuditadas = new Set(eventosOutro.map((e) => e.checkin_data));
-    
     return {
       processo: outroProcesso === 'CK' ? 'Checkin' : 'P2M',
       processoSigla: outroProcesso,
@@ -571,7 +720,6 @@ export default function DetalheColaboradorPage() {
 
   const dpmoPorSemana = calcularDpmoPorSemana();
   const semanasCompletas = dpmoPorSemana.filter((s) => s.statusCalculo === 'completo');
-  const semanasFaltando = dpmoPorSemana.filter((s) => s.statusCalculo !== 'completo');
 
   const dpmoTotal = (() => {
     if (imaManual.length > 0) {
@@ -581,44 +729,16 @@ export default function DetalheColaboradorPage() {
       const totalUnid = historico.reduce((s, h) => s + (h.unidades || 0), 0);
       return { defeitos: totalDef, unidades: totalUnid, dpmo: mediaIma };
     }
-
     if (dpmoAgregado.length > 0) {
       const procPrincipal = colaborador?.processo === 'Checkin' ? 'CK' : colaborador?.processo === 'P2M' ? 'P2M' : null;
       const agrPrincipal = dpmoAgregado.filter((d) => d.processo === procPrincipal);
-      
       if (agrPrincipal.length > 0) {
         const somaDpmo = agrPrincipal.reduce((s, d) => s + (d.dpmo || 0), 0);
         const mediaDpmo = Math.round(somaDpmo / agrPrincipal.length);
         return { defeitos: 0, unidades: 0, dpmo: mediaDpmo };
       }
     }
-
-    let dataMax = '';
-    dpmoEventos.forEach((e) => {
-      if (e.checkin_data > dataMax) dataMax = e.checkin_data;
-    });
-    if (!dataMax) return null;
-
-    const semanasComInventario = new Set<string>();
-    dpmoEventos.forEach((e) => {
-      semanasComInventario.add(`${e.ano}-S${e.semana}`);
-    });
-
-    const totalDef = dpmoEventos.reduce((s, e) => s + (e.qtd_dif || 0), 0);
-    const totalUnid = historico
-      .filter((h) => h.data_referencia <= dataMax)
-      .filter((h) => {
-        const { ano, semana } = getSemanaIso(h.data_referencia);
-        return semanasComInventario.has(`${ano}-S${semana}`);
-      })
-      .reduce((s, h) => s + (h.unidades || 0), 0);
-
-    if (totalUnid === 0 || totalDef === 0) return null;
-    return {
-      defeitos: totalDef,
-      unidades: totalUnid,
-      dpmo: Math.round((totalDef / totalUnid) * 1_000_000),
-    };
+    return null;
   })();
 
   const historicoFiltrado = (() => {
@@ -631,13 +751,49 @@ export default function DetalheColaboradorPage() {
     });
   })();
 
-  // 🎯 Calcula média de impacto NET com base no NOVO cálculo (turno)
+  const analisesOciosidade: AnaliseOciosidade[] = historicoFiltrado
+    .map((h) => analisarOciosidade(h, metaProcesso))
+    .filter((a): a is AnaliseOciosidade => a !== null);
+
+  const perfilDominante = detectarPerfil(analisesOciosidade);
+
+  const statsOciosidade = (() => {
+    if (analisesOciosidade.length === 0) return null;
+    const excelente = analisesOciosidade.filter(a => a.status === 'excelente').length;
+    const saudavel = analisesOciosidade.filter(a => a.status === 'saudavel').length;
+    const limite = analisesOciosidade.filter(a => a.status === 'limite').length;
+    const acima = analisesOciosidade.filter(a => a.status === 'acima').length;
+    const apertado = analisesOciosidade.filter(a => a.status === 'apertado').length;
+    
+    const bateuMeta = analisesOciosidade.filter(a => a.bateuMeta).length;
+    const pagouOciosidade = analisesOciosidade.filter(a => a.pagouOciosidade).length;
+    
+    const ocioSaudavelMediaSeg = Math.round(
+      analisesOciosidade.reduce((s, a) => s + a.ociosidadeSaudavelSeg, 0) / analisesOciosidade.length
+    );
+    const ocioRealMediaSeg = Math.round(
+      analisesOciosidade.reduce((s, a) => s + a.ociosidadeRealSeg, 0) / analisesOciosidade.length
+    );
+    const velocidadeEfetivaMedia = Math.round(
+      analisesOciosidade.reduce((s, a) => s + a.velocidadeEfetiva, 0) / analisesOciosidade.length
+    );
+    
+    return {
+      total: analisesOciosidade.length,
+      excelente, saudavel, limite, acima, apertado,
+      bateuMeta, pagouOciosidade,
+      ocioSaudavelMediaSeg, ocioRealMediaSeg, velocidadeEfetivaMedia,
+      pctBateuMeta: Math.round((bateuMeta / analisesOciosidade.length) * 100),
+      pctPagouOciosidade: Math.round((pagouOciosidade / analisesOciosidade.length) * 100),
+      pctSaudavel: Math.round(((excelente + saudavel) / analisesOciosidade.length) * 100),
+    };
+  })();
+
   const stats = (() => {
     const validos = historicoFiltrado.filter((h) => h.prod_liquida > 0);
     if (validos.length === 0) return null;
     const somaLiq = validos.reduce((s, h) => s + h.prod_liquida, 0);
     
-    // 🎯 IMPACTO NET MÉDIO via NOVO cálculo (turno)
     let somaImpactoReal = 0;
     let qtdComTurno = 0;
     validos.forEach((h) => {
@@ -657,7 +813,7 @@ export default function DetalheColaboradorPage() {
     const ociosidadeMediaSeg = ociosidadesValidas.length > 0
       ? Math.round(ociosidadesValidas.reduce((s, v) => s + v, 0) / ociosidadesValidas.length)
       : 0;
-
+    
     const melhorDia = validos.reduce((max, h) => (h.prod_liquida > max.prod_liquida ? h : max));
     const piorDia = validos.reduce((min, h) => (h.prod_liquida < min.prod_liquida ? h : min));
     return {
@@ -666,7 +822,6 @@ export default function DetalheColaboradorPage() {
       mediaImpacto: mediaImpactoReal,
       diasComTurno: qtdComTurno,
       ociosidadeMedia: segundosParaTempo(ociosidadeMediaSeg),
-      ociosidadeMediaSeg,
       diasSupera: validos.filter((h) => h.status_meta === 'Supera').length,
       diasAlinhado: validos.filter((h) => h.status_meta === 'Alinhado').length,
       diasAbaixo: validos.filter((h) => h.status_meta === 'Abaixo').length,
@@ -702,7 +857,7 @@ export default function DetalheColaboradorPage() {
         ← Voltar para MEU TIME
       </Link>
 
-      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-start gap-6 flex-wrap">
           <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-3xl flex-shrink-0 shadow-lg shadow-yellow-500/30">
             {iniciais(colaborador.nome)}
@@ -730,6 +885,27 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
+      {perfilDominante.perfil !== 'SEM DADOS' && (
+        <div className={`bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 ${
+          perfilDominante.perfil === 'EQUILIBRADO' ? 'border-green-500/40' :
+          perfilDominante.perfil === 'RUSHER' ? 'border-yellow-500/40' :
+          perfilDominante.perfil === 'LENTO' ? 'border-orange-500/40' :
+          'border-red-500/40'
+        } rounded-2xl p-6`}>
+          <div className="flex items-start gap-4 flex-wrap">
+            <div className="text-7xl">{perfilDominante.emoji}</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-400 uppercase tracking-wider font-bold mb-1">🎯 PERFIL DOMINANTE</p>
+              <h2 className={`text-3xl font-black ${perfilDominante.cor} mb-2`}>{perfilDominante.perfil}</h2>
+              <p className="text-gray-300 text-sm">{perfilDominante.descricao}</p>
+              <p className="text-xs text-gray-500 mt-2">
+                Baseado em {analisesOciosidade.length} dia(s) com meta {metaProcesso} pç/h
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!loadingHistorico && stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
@@ -739,7 +915,7 @@ export default function DetalheColaboradorPage() {
             </div>
             <p className="text-xs text-gray-400">Líquida média (pç/h)</p>
           </div>
-          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4" title={`Calculado em ${stats.diasComTurno} dia(s) com NET do time registrada`}>
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">📈</span>
               <span className={`text-2xl font-black ${stats.mediaImpacto > 0 ? 'text-green-400' : stats.mediaImpacto < 0 ? 'text-red-400' : 'text-gray-400'}`}>
@@ -748,7 +924,7 @@ export default function DetalheColaboradorPage() {
             </div>
             <p className="text-xs text-gray-400">Impacto NET ({stats.diasComTurno}d)</p>
           </div>
-          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-orange-500/30 rounded-2xl p-4" title="T.Processo - T.Efetivo">
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-orange-500/30 rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">⏱️</span>
               <span className="text-2xl font-black text-orange-400 font-mono">{stats.ociosidadeMedia}</span>
@@ -772,130 +948,251 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      {/* SEÇÃO DPMO */}
-      {(colaborador.processo === 'Checkin' || colaborador.processo === 'P2M') && (
-        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+      {statsOciosidade && (
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-orange-500/30 rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-lg font-bold text-purple-400 flex items-center gap-2">
-              📊 DPMO (Qualidade)
+            <h2 className="text-lg font-bold text-orange-400 flex items-center gap-2">
+              ⏱️ Análise de Ociosidade Saudável
             </h2>
-            <span className="text-xs text-gray-500">Cálculo: (Σ Defeitos / Σ Unidades) × 1.000.000</span>
+            <span className="text-xs text-gray-500">
+              Meta: {metaProcesso} pç/h ({colaborador.processo})
+            </span>
+          </div>
+          
+          <p className="text-xs text-gray-400">
+            <strong>Ociosidade saudável</strong> = sobra de tempo após produzir o volume na meta. Calculado dinamicamente pra cada dia.
+          </p>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+              <p className="text-xs text-green-300 uppercase font-bold">Bateu meta</p>
+              <p className="text-3xl font-black text-green-400">{statsOciosidade.pctBateuMeta}%</p>
+              <p className="text-xs text-gray-500">{statsOciosidade.bateuMeta}/{statsOciosidade.total} dias</p>
+            </div>
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+              <p className="text-xs text-blue-300 uppercase font-bold">Pagou ociosidade</p>
+              <p className="text-3xl font-black text-blue-400">{statsOciosidade.pctPagouOciosidade}%</p>
+              <p className="text-xs text-gray-500">{statsOciosidade.pagouOciosidade}/{statsOciosidade.total} dias</p>
+            </div>
+            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
+              <p className="text-xs text-emerald-300 uppercase font-bold">Ocio saudável</p>
+              <p className="text-3xl font-black text-emerald-400">{statsOciosidade.pctSaudavel}%</p>
+              <p className="text-xs text-gray-500">{statsOciosidade.excelente + statsOciosidade.saudavel}/{statsOciosidade.total} dias</p>
+            </div>
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+              <p className="text-xs text-yellow-300 uppercase font-bold">Vel. efetiva</p>
+              <p className="text-3xl font-black text-yellow-400">{statsOciosidade.velocidadeEfetivaMedia}</p>
+              <p className="text-xs text-gray-500">pç/h trabalhando</p>
+            </div>
+          </div>
+          
+          <div className="bg-[#0a0a0a] rounded-xl p-4 space-y-3">
+            <p className="text-xs text-gray-400 font-bold uppercase">Comparação média do mês</p>
+            <div className="space-y-2">
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-gray-400">Saudável (pode ficar até)</span>
+                  <span className="text-green-400 font-mono font-bold">{segundosParaHM(statsOciosidade.ocioSaudavelMediaSeg)}</span>
+                </div>
+                <div className="bg-[#1a1a1a] rounded-full h-3 overflow-hidden">
+                  <div className="bg-gradient-to-r from-green-500 to-emerald-400 h-full" style={{ width: '100%' }}></div>
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-gray-400">Real (ficou)</span>
+                  <span className={`font-mono font-bold ${statsOciosidade.ocioRealMediaSeg > statsOciosidade.ocioSaudavelMediaSeg ? 'text-red-400' : 'text-yellow-400'}`}>
+                    {segundosParaHM(statsOciosidade.ocioRealMediaSeg)}
+                  </span>
+                </div>
+                <div className="bg-[#1a1a1a] rounded-full h-3 overflow-hidden">
+                  <div 
+                    className={`h-full ${statsOciosidade.ocioRealMediaSeg > statsOciosidade.ocioSaudavelMediaSeg ? 'bg-gradient-to-r from-red-500 to-orange-400' : 'bg-gradient-to-r from-yellow-500 to-amber-400'}`}
+                    style={{ 
+                      width: `${Math.min(100, (statsOciosidade.ocioRealMediaSeg / Math.max(1, statsOciosidade.ocioSaudavelMediaSeg)) * 100)}%` 
+                    }}
+                  ></div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {dpmoPorSemana.length === 0 ? (
-            <div className="text-center py-8 text-gray-400 text-sm">
-              <span className="text-4xl block mb-2">📭</span>
-              <p>Sem dados de DPMO ainda</p>
-              <p className="text-xs text-gray-500 mt-1">
-                Sobe o CSV INVENTÁRIO DPMO em MEU TIME → 📊 Upload DPMO
-              </p>
+          <div className="grid grid-cols-5 gap-2">
+            <div className="bg-green-500/10 rounded-lg p-2 text-center">
+              <p className="text-2xl">🌟</p>
+              <p className="text-xl font-black text-green-400">{statsOciosidade.excelente}</p>
+              <p className="text-[10px] text-gray-500">Muito controlada</p>
             </div>
-          ) : (
-            <>
-              {dpmoTotal !== null ? (
-                <div className={`rounded-lg p-4 border ${dpmoTotal.dpmo > metaIma ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
-                  <div className="flex items-center justify-between flex-wrap gap-3">
-                    <div>
-                      <p className="text-xs text-gray-400 uppercase font-bold mb-1">TOTAL GERAL</p>
-                      <p className={`text-4xl font-black font-mono ${dpmoTotal.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
-                        {dpmoTotal.dpmo.toLocaleString('pt-BR')}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {dpmoTotal.defeitos} defeitos / {dpmoTotal.unidades.toLocaleString('pt-BR')} unidades
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-400">Meta IMA</p>
-                      <p className="text-2xl font-bold text-white">{metaIma}</p>
-                      <p className={`text-xs font-bold mt-1 ${dpmoTotal.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
-                        {dpmoTotal.dpmo > metaIma ? '⚠️ acima da meta' : '✓ na meta'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
-                  <p className="text-yellow-300 text-sm">
-                    ⚠️ <strong>Faltam dados.</strong> Sobe o CSV INVENTÁRIO DPMO em MEU TIME → 📊 Upload DPMO.
+            <div className="bg-green-500/10 rounded-lg p-2 text-center">
+              <p className="text-2xl">✅</p>
+              <p className="text-xl font-black text-green-300">{statsOciosidade.saudavel}</p>
+              <p className="text-[10px] text-gray-500">Saudável</p>
+            </div>
+            <div className="bg-yellow-500/10 rounded-lg p-2 text-center">
+              <p className="text-2xl">🟡</p>
+              <p className="text-xl font-black text-yellow-400">{statsOciosidade.limite}</p>
+              <p className="text-[10px] text-gray-500">No limite</p>
+            </div>
+            <div className="bg-red-500/10 rounded-lg p-2 text-center">
+              <p className="text-2xl">🔴</p>
+              <p className="text-xl font-black text-red-400">{statsOciosidade.acima}</p>
+              <p className="text-[10px] text-gray-500">Acima</p>
+            </div>
+            <div className="bg-orange-500/10 rounded-lg p-2 text-center">
+              <p className="text-2xl">🟠</p>
+              <p className="text-xl font-black text-orange-400">{statsOciosidade.apertado}</p>
+              <p className="text-[10px] text-gray-500">Apertado</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 rounded-2xl p-6 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h2 className="text-lg font-bold text-purple-300 flex items-center gap-2">
+            🧠 Análise Comportamental — IA
+          </h2>
+          {relatorioIA && (
+            <div className="flex items-center gap-2">
+              {iaFromCache && (
+                <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded-full">💾 cache</span>
+              )}
+              {iaGeradoEm && (
+                <span className="text-xs text-gray-500">{tempoRelativo(iaGeradoEm)}</span>
+              )}
+              <button
+                onClick={() => carregarAnaliseIA(true)}
+                disabled={carregandoIA}
+                className="text-xs bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 px-3 py-1 rounded-full font-bold transition-all disabled:opacity-50"
+              >
+                {carregandoIA ? '⏳ Gerando...' : '🔄 Regenerar'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {!relatorioIA && !carregandoIA && !erroIA && (
+          <div className="text-center py-8 space-y-3">
+            <span className="text-6xl block">🧠</span>
+            <p className="text-gray-300 font-bold">Análise comportamental com IA</p>
+            <p className="text-xs text-gray-400 max-w-md mx-auto">
+              A IA vai cruzar TODOS os dados desse colab e gerar uma análise completa.
+            </p>
+            <button
+              onClick={() => carregarAnaliseIA(false)}
+              className="bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-black px-6 py-3 rounded-xl shadow-lg shadow-purple-500/30 hover:-translate-y-0.5 transition-all"
+            >
+              🧠 Gerar Análise Inteligente
+            </button>
+          </div>
+        )}
+
+        {carregandoIA && (
+          <div className="text-center py-12 space-y-3">
+            <span className="text-6xl block animate-pulse">🤖</span>
+            <p className="text-purple-300 font-bold">IA analisando os dados...</p>
+            <p className="text-xs text-gray-500">Pode levar 10-15 segundos</p>
+          </div>
+        )}
+
+        {erroIA && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+            <p className="text-red-300 text-sm font-bold">❌ Erro: {erroIA}</p>
+            <button
+              onClick={() => carregarAnaliseIA(true)}
+              className="text-xs text-red-400 hover:text-red-300 mt-2 underline"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        )}
+
+        {relatorioIA && !carregandoIA && (
+          <div className="bg-[#0a0a0a] rounded-xl p-5">
+            <div 
+              className="text-gray-200 leading-relaxed whitespace-pre-line text-sm"
+              dangerouslySetInnerHTML={{
+                __html: relatorioIA
+                  .replace(/^## (.+)$/gm, '<h3 style="color: #d8b4fe; font-weight: bold; font-size: 1rem; margin-top: 1rem; margin-bottom: 0.5rem;">$1</h3>')
+                  .replace(/^### (.+)$/gm, '<h4 style="color: #f9a8d4; font-weight: bold; font-size: 0.875rem; margin-top: 0.75rem; margin-bottom: 0.5rem;">$1</h4>')
+                  .replace(/\*\*(.+?)\*\*/g, '<strong style="color: white;">$1</strong>')
+                  .replace(/^- (.+)$/gm, '<li style="color: #d1d5db; margin-left: 1rem;">• $1</li>')
+                  .replace(/^(\d+\.) (.+)$/gm, '<li style="color: #d1d5db; margin-left: 1rem;"><strong style="color: #d8b4fe;">$1</strong> $2</li>'),
+              }}
+            />
+            {iaModelo && (
+              <p className="text-[10px] text-gray-600 mt-4 pt-3 border-t border-[#2a2a2a]">
+                🤖 Gerado por {iaModelo}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {(colaborador.processo === 'Checkin' || colaborador.processo === 'P2M') && dpmoPorSemana.length > 0 && (
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-lg font-bold text-purple-400 flex items-center gap-2">📊 DPMO (Qualidade)</h2>
+          </div>
+
+          {dpmoTotal !== null && (
+            <div className={`rounded-lg p-4 border ${dpmoTotal.dpmo > metaIma ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <p className="text-xs text-gray-400 uppercase font-bold mb-1">TOTAL GERAL</p>
+                  <p className={`text-4xl font-black font-mono ${dpmoTotal.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
+                    {dpmoTotal.dpmo.toLocaleString('pt-BR')}
                   </p>
                 </div>
-              )}
-
-              {semanasCompletas.length > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
-                        <th className="py-2 pr-2">Período</th>
-                        <th className="py-2 pr-2 text-center">Dias auditados</th>
-                        <th className="py-2 pr-2 text-right">Defeitos</th>
-                        <th className="py-2 pr-2 text-right">Unidades</th>
-                        <th className="py-2 pr-2 text-right">DPMO</th>
-                        <th className="py-2 pr-2">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {semanasCompletas.slice(0, 12).map((s) => (
-                        <tr key={`${s.ano}-${s.semana}`} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a]">
-                          <td className="py-2 pr-2 text-white">Semana {s.semana} / {s.ano}</td>
-                          <td className="py-2 pr-2 text-center text-gray-400 text-xs">{s.diasAuditados.length} dia(s)</td>
-                          <td className="py-2 pr-2 text-right text-red-400 font-mono">{s.defeitos}</td>
-                          <td className="py-2 pr-2 text-right text-gray-300 font-mono">{s.unidades.toLocaleString('pt-BR')}</td>
-                          <td className={`py-2 pr-2 text-right font-mono font-bold ${s.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
-                            {s.dpmo.toLocaleString('pt-BR')}
-                          </td>
-                          <td className="py-2 pr-2">
-                            {s.dpmo > metaIma ? (
-                              <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-red-500/20 text-red-400">Acima</span>
-                            ) : (
-                              <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-green-500/20 text-green-400">Na meta</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Meta IMA</p>
+                  <p className="text-2xl font-bold text-white">{metaIma}</p>
                 </div>
-              )}
-
-              {semanasFaltando.length > 0 && (
-                <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3">
-                  <p className="text-xs text-blue-300 font-bold mb-2">⏳ Semanas aguardando:</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {semanasFaltando.map((s) => (
-                      <span key={`${s.ano}-${s.semana}`} className="text-xs bg-blue-500/10 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/30">
-                        S{s.semana}/{s.ano}: {s.statusCalculo === 'falta_inventario' ? 'falta inventário' : 'falta produtividade'}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300">
-                💡 <strong>Cálculo igual Looker:</strong> Soma unidades das semanas auditadas <strong>até a última data de inventário</strong>. 
-                Se você tem produtividade até dia 16 mas inventário até dia 15, ignora o dia 16 (não foi auditado). Igual Looker faz.
               </div>
-            </>
+            </div>
+          )}
+
+          {semanasCompletas.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
+                    <th className="py-2 pr-2">Período</th>
+                    <th className="py-2 pr-2 text-right">Defeitos</th>
+                    <th className="py-2 pr-2 text-right">DPMO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {semanasCompletas.slice(0, 8).map((s) => (
+                    <tr key={`${s.ano}-${s.semana}`} className="border-b border-[#2a2a2a]">
+                      <td className="py-2 pr-2 text-white">S{s.semana}/{s.ano}</td>
+                      <td className="py-2 pr-2 text-right text-red-400 font-mono">{s.defeitos}</td>
+                      <td className={`py-2 pr-2 text-right font-mono font-bold ${s.dpmo > metaIma ? 'text-red-400' : 'text-green-400'}`}>
+                        {s.dpmo.toLocaleString('pt-BR')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
 
-      {/* SEÇÃO FEEDBACK ADICIONAL */}
       {dpmoOutroProcesso && dpmoOutroProcesso.defeitos > 0 && (
-        <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/30 rounded-2xl p-6 space-y-3" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)' }}>
+        <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/30 rounded-2xl p-6 space-y-3">
           <div className="flex items-center gap-3">
             <span className="text-3xl">💬</span>
             <div className="flex-1">
               <h2 className="text-base font-bold text-amber-400">
-                Dados extras de {dpmoOutroProcesso.processo} — apenas pra feedback
+                Dados extras de {dpmoOutroProcesso.processo}
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Esse colaborador trabalhou em outro processo no período. <strong>Estes dados NÃO contam na calibração</strong>, apenas pra você dar feedback.
+                Trabalhou em outro processo. <strong>NÃO conta na calibração.</strong>
               </p>
             </div>
           </div>
-
-          <div className="grid grid-cols-3 gap-3 mt-3">
+          <div className="grid grid-cols-3 gap-3">
             <div className="bg-[#0a0a0a]/50 rounded-lg p-3 border border-amber-500/20">
               <p className="text-xs text-gray-400 uppercase font-bold mb-1">Eventos</p>
               <p className="text-2xl font-black text-amber-300 font-mono">{dpmoOutroProcesso.eventos}</p>
@@ -909,125 +1206,38 @@ export default function DetalheColaboradorPage() {
               <p className="text-2xl font-black text-amber-300 font-mono">{dpmoOutroProcesso.diasAuditados}</p>
             </div>
           </div>
-
-          <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-200">
-            💡 <strong>Como usar:</strong> Esse colaborador é <strong>{colaborador.processo}</strong> mas teve atividade em <strong>{dpmoOutroProcesso.processo}</strong> no período. 
-            Use essa info no feedback: &quot;Bom trabalho ajudando no {dpmoOutroProcesso.processo}!&quot; mas continue focando o desenvolvimento dele no processo principal.
-          </div>
         </div>
       )}
 
-      {/* SEÇÃO OCUPAÇÃO P2M */}
-      {colaborador.processo === 'P2M' && (
-        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
-              📦 Ocupação P2M (Qualidade)
-            </h2>
-            <span className="text-xs text-gray-500">Meta: 80%+ — Quanto maior, melhor</span>
-          </div>
-
-          {ocupacaoP2M.length === 0 ? (
-            <div className="text-center py-8 text-gray-400 text-sm">
-              <span className="text-4xl block mb-2">📭</span>
-              <p>Sem dados de Ocupação P2M ainda</p>
-              <p className="text-xs text-gray-500 mt-1">
-                Sobe o CSV &quot;Totefullness&quot; em MEU TIME → 🎯 Upload Ocupação
-              </p>
-              <p className="text-xs text-yellow-400 mt-2">
-                💡 Confira se o <code>user_id_meli</code> deste colaborador está cadastrado
-              </p>
-            </div>
-          ) : (
-            (() => {
-              const agora = new Date();
-              const mesAtual = agora.getMonth() + 1;
-              const anoAtual = agora.getFullYear();
-              const doMes = ocupacaoP2M.filter((o) => {
-                const d = new Date(o.data_referencia + 'T12:00:00');
-                return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual;
-              });
-
-              if (doMes.length === 0) {
-                return (
-                  <div className="text-center py-6 text-gray-400 text-sm">
-                    <span className="text-3xl block mb-2">📅</span>
-                    <p>Sem dados de Ocupação deste mês</p>
-                  </div>
-                );
-              }
-
-              const mediaOcup = doMes.reduce((s, o) => s + o.ocupacao_pct, 0) / doMes.length;
-              const totalTotes = doMes.reduce((s, o) => s + o.qtd_totes, 0);
-              const naMeta = mediaOcup >= 80;
-
-              return (
-                <>
-                  <div className={`rounded-lg p-4 border ${naMeta ? 'bg-green-500/10 border-green-500/30' : 'bg-yellow-500/10 border-yellow-500/30'}`}>
-                    <div className="flex items-center justify-between flex-wrap gap-3">
-                      <div>
-                        <p className="text-xs text-gray-400 uppercase font-bold mb-1">OCUPAÇÃO MÉDIA DO MÊS</p>
-                        <p className={`text-4xl font-black font-mono ${naMeta ? 'text-green-400' : 'text-yellow-400'}`}>
-                          {mediaOcup.toFixed(2)}%
-                        </p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          {doMes.length} dia(s) · {totalTotes.toLocaleString('pt-BR')} totes no total
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-gray-400">Meta</p>
-                        <p className="text-2xl font-bold text-white">80%</p>
-                        <p className={`text-xs font-bold mt-1 ${naMeta ? 'text-green-400' : 'text-yellow-400'}`}>
-                          {naMeta ? '✓ acima da meta' : '⚠️ abaixo da meta'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
-                          <th className="py-2 pr-2">Data</th>
-                          <th className="py-2 pr-2 text-right">Qtd Totes</th>
-                          <th className="py-2 pr-2 text-right">Ocupação</th>
-                          <th className="py-2 pr-2">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {doMes.map((o) => (
-                          <tr key={o.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a]">
-                            <td className="py-2 pr-2 text-white font-mono">{formatarDataCurta(o.data_referencia)}</td>
-                            <td className="py-2 pr-2 text-right text-gray-300 font-mono">{o.qtd_totes}</td>
-                            <td className={`py-2 pr-2 text-right font-mono font-bold ${o.ocupacao_pct >= 80 ? 'text-green-400' : 'text-yellow-400'}`}>
-                              {o.ocupacao_pct.toFixed(2)}%
-                            </td>
-                            <td className="py-2 pr-2">
-                              {o.ocupacao_pct >= 80 ? (
-                                <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-green-500/20 text-green-400">Na meta</span>
-                              ) : (
-                                <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-yellow-500/20 text-yellow-400">Abaixo</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 text-xs text-emerald-300">
-                    💡 <strong>Ocupação = eficiência do tempo</strong> (não quantidade de totes). 
-                    Quanto menos pausas/ociosidade durante o trabalho com totes, maior a ocupação.
-                  </div>
-                </>
-              );
-            })()
-          )}
+      {colaborador.processo === 'P2M' && ocupacaoP2M.length > 0 && (
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
+          <h2 className="text-lg font-bold text-emerald-400 flex items-center gap-2">📦 Ocupação P2M</h2>
+          {(() => {
+            const agora = new Date();
+            const mesAtual = agora.getMonth() + 1;
+            const anoAtual = agora.getFullYear();
+            const doMes = ocupacaoP2M.filter((o) => {
+              const d = new Date(o.data_referencia + 'T12:00:00');
+              return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual;
+            });
+            if (doMes.length === 0) return <p className="text-sm text-gray-400">Sem dados deste mês.</p>;
+            const mediaOcup = doMes.reduce((s, o) => s + o.ocupacao_pct, 0) / doMes.length;
+            const naMeta = mediaOcup >= 80;
+            return (
+              <div className={`rounded-lg p-4 border ${naMeta ? 'bg-green-500/10 border-green-500/30' : 'bg-yellow-500/10 border-yellow-500/30'}`}>
+                <p className="text-xs text-gray-400 uppercase font-bold">OCUPAÇÃO MÉDIA</p>
+                <p className={`text-4xl font-black font-mono ${naMeta ? 'text-green-400' : 'text-yellow-400'}`}>
+                  {mediaOcup.toFixed(2)}%
+                </p>
+                <p className="text-xs text-gray-400 mt-1">{doMes.length} dia(s)</p>
+              </div>
+            );
+          })()}
         </div>
       )}
 
       {!loadingHistorico && stats && (
-        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
           <h3 className="text-sm font-bold text-gray-400 mb-4">DISTRIBUIÇÃO DE STATUS</h3>
           <div className="grid grid-cols-3 gap-4">
             <div className="text-center">
@@ -1061,10 +1271,10 @@ export default function DetalheColaboradorPage() {
         </div>
       )}
 
-      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">💬 Feedbacks Recentes</h2>
-          <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="text-sm text-blue-400 hover:text-blue-300 transition-colors font-bold">Ver todos →</Link>
+          <Link href={`/meu-time/${colaborador.id}/feedbacks`} className="text-sm text-blue-400 hover:text-blue-300 font-bold">Ver todos →</Link>
         </div>
         {feedbacksRecentes.length === 0 ? (
           <div className="text-center py-8">
@@ -1092,7 +1302,7 @@ export default function DetalheColaboradorPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
           <h2 className="text-lg font-bold text-[#FFD700] mb-4">📋 Dados Cadastrais</h2>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between border-b border-[#2a2a2a] pb-2">
@@ -1113,7 +1323,7 @@ export default function DetalheColaboradorPage() {
             </div>
           </div>
         </div>
-        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
           <h2 className="text-lg font-bold text-[#FFD700] mb-4">📅 Datas Importantes</h2>
           <div className="space-y-3 text-sm">
             <div>
@@ -1130,14 +1340,13 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
-      {/* 🎯 TABELA HISTÓRICO — Imp.NET SUBSTITUÍDO + Análise do Dia */}
-      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6" style={{ boxShadow: '0 10px 25px -5px rgba(0,0,0,0.4)' }}>
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico do Mês</h2>
           <div className="flex items-center gap-2 flex-wrap">
             {turnosDiarios.length > 0 && (
-              <span className="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full font-bold flex items-center gap-1">
-                📥 {turnosDiarios.length} turnos registrados
+              <span className="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full font-bold">
+                📥 {turnosDiarios.length} turnos
               </span>
             )}
             <span className="text-xs bg-cyan-500/20 text-cyan-400 px-3 py-1 rounded-full font-bold">
@@ -1163,34 +1372,26 @@ export default function DetalheColaboradorPage() {
                 <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400 uppercase">
                   <th className="py-3 pr-3">Data</th>
                   <th className="py-3 pr-3 text-right">Líquida</th>
-                  <th className="py-3 pr-3 text-right">Unidades</th>
-                  <th className="py-3 pr-3 text-right">T.Processo</th>
-                  <th className="py-3 pr-3 text-right">T.Efetivo</th>
-                  <th className="py-3 pr-3 text-right">Ociosidade</th>
-                  <th className="py-3 pr-3 text-right">Util.</th>
-                  {/* 🎯 IMP.NET AGORA VEM DO NOVO CÁLCULO (via turno) */}
+                  <th className="py-3 pr-3 text-right">Unid</th>
+                  <th className="py-3 pr-3 text-right">T.Proc</th>
+                  <th className="py-3 pr-3 text-right">T.Efe</th>
+                  <th className="py-3 pr-3 text-right">Ocio Saud.</th>
+                  <th className="py-3 pr-3 text-right">Ocio Real</th>
                   <th className="py-3 pr-3 text-right">Imp.NET</th>
                   <th className="py-3 pr-3">Status</th>
                   <th className="py-3 pr-3 text-right">NET Time</th>
-                  {/* 🎯 NOVA COLUNA */}
-                  <th className="py-3 pr-3 border-l border-[#2a2a2a] bg-green-500/5">
-                    <div className="text-green-400">Análise do Dia</div>
+                  <th className="py-3 pr-3 border-l border-[#2a2a2a] bg-orange-500/5">
+                    <div className="text-orange-400">Análise Ociosidade</div>
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {historicoFiltrado.map((h) => {
                   const ociosidadeCalc = calcularOciosidade(h.tempo_processo, h.tempo_efetivo);
-                  
-                  // 🎯 Calcula tudo a partir do turno registrado
                   const turnoDoDia = turnosPorData.get(h.data_referencia);
                   const netIndividual = calcularNetIndividual(h.unidades, h.tempo_processo);
-                  const impactoReal = turnoDoDia 
-                    ? calcularImpactoReal(netIndividual, turnoDoDia.net_geral_real)
-                    : null;
-                  const analise = turnoDoDia && impactoReal !== null 
-                    ? analiseDoDia(netIndividual, turnoDoDia.net_geral_real, impactoReal)
-                    : null;
+                  const impactoReal = turnoDoDia ? calcularImpactoReal(netIndividual, turnoDoDia.net_geral_real) : null;
+                  const analiseOcio = analisarOciosidade(h, metaProcesso);
                   
                   return (
                     <tr key={h.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors">
@@ -1199,21 +1400,16 @@ export default function DetalheColaboradorPage() {
                       <td className="py-3 pr-3 text-right text-gray-300 font-mono">{h.unidades.toLocaleString('pt-BR')}</td>
                       <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_processo || '-'}</td>
                       <td className="py-3 pr-3 text-right text-gray-400 font-mono text-xs">{h.tempo_efetivo || '-'}</td>
-                      <td className="py-3 pr-3 text-right text-orange-400 font-mono text-xs font-bold" title="T.Processo - T.Efetivo">
-                        {ociosidadeCalc}
+                      <td className="py-3 pr-3 text-right text-green-300 font-mono text-xs font-bold">
+                        {analiseOcio ? segundosParaHM(Math.max(0, analiseOcio.ociosidadeSaudavelSeg)) : '-'}
                       </td>
-                      <td className="py-3 pr-3 text-right text-gray-300 text-xs">{h.utilizacao || '-'}</td>
-                      {/* 🎯 IMP.NET = porcentagem do NOVO cálculo (via turno) */}
+                      <td className="py-3 pr-3 text-right text-orange-400 font-mono text-xs font-bold">{ociosidadeCalc}</td>
                       <td className={`py-3 pr-3 text-right font-mono font-bold ${
                         impactoReal === null ? 'text-gray-500' :
                         impactoReal > 0 ? 'text-green-400' : 
                         impactoReal < 0 ? 'text-red-400' : 'text-gray-400'
                       }`}>
-                        {impactoReal === null ? (
-                          <span className="text-xs text-gray-600">—</span>
-                        ) : (
-                          <>{impactoReal > 0 ? '+' : ''}{impactoReal.toFixed(1)}%</>
-                        )}
+                        {impactoReal === null ? '—' : `${impactoReal > 0 ? '+' : ''}${impactoReal.toFixed(1)}%`}
                       </td>
                       <td className="py-3 pr-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(h.status_meta)}`}>{h.status_meta}</span>
@@ -1222,27 +1418,24 @@ export default function DetalheColaboradorPage() {
                         {turnoDoDia ? (
                           <span className="text-[#FFD700] font-mono font-bold text-sm">
                             {Math.round(turnoDoDia.net_geral_real)}
-                            <span className="text-[10px] text-gray-500 ml-1">pç/h</span>
                           </span>
                         ) : (
                           <span className="text-gray-600 text-xs">—</span>
                         )}
                       </td>
-                      {/* 🎯 ANÁLISE DO DIA */}
-                      <td className="py-3 pr-3 border-l border-[#2a2a2a] bg-green-500/5">
-                        {analise ? (
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl">{analise.emoji}</span>
+                      <td className="py-3 pr-3 border-l border-[#2a2a2a] bg-orange-500/5">
+                        {analiseOcio ? (
+                          <div className="flex items-center gap-2" title={analiseOcio.insight}>
+                            <span className="text-2xl">{analiseOcio.emoji}</span>
                             <div>
-                              <div className={`text-xs font-bold ${analise.cor}`}>{analise.texto}</div>
-                              <div className="text-[10px] text-gray-500 font-mono">NET ind: {Math.round(netIndividual)}</div>
+                              <div className={`text-xs font-bold ${analiseOcio.cor}`}>{analiseOcio.texto}</div>
+                              <div className="text-[10px] text-gray-500">
+                                {analiseOcio.bateuMeta ? '✓ Meta' : '✗ Meta'} · {Math.round(analiseOcio.velocidadeEfetiva)} efe.
+                              </div>
                             </div>
                           </div>
                         ) : (
-                          <div className="text-gray-600 text-xs">
-                            <div>— sem registro</div>
-                            <div className="text-[9px]">do turno</div>
-                          </div>
+                          <div className="text-gray-600 text-xs">—</div>
                         )}
                       </td>
                     </tr>
@@ -1251,21 +1444,17 @@ export default function DetalheColaboradorPage() {
               </tbody>
             </table>
             
-            {/* Legenda explicativa */}
-            <div className="mt-4 bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300 space-y-1">
-              <p className="font-bold">💡 Análise do Dia - escala de avaliação:</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-[11px]">
-                <div className="flex items-center gap-1"><span>🚀</span> <span className="text-green-400">Carregou (+50%+)</span></div>
-                <div className="flex items-center gap-1"><span>🔥</span> <span className="text-green-400">Muito acima (+20%+)</span></div>
-                <div className="flex items-center gap-1"><span>🟢</span> <span className="text-green-300">Levemente acima</span></div>
-                <div className="flex items-center gap-1"><span>⚪</span> <span className="text-gray-300">No padrão</span></div>
-                <div className="flex items-center gap-1"><span>🟡</span> <span className="text-yellow-400">Leve queda</span></div>
-                <div className="flex items-center gap-1"><span>🔴</span> <span className="text-red-400">Abaixo do time</span></div>
-                <div className="flex items-center gap-1"><span>🚨</span> <span className="text-red-500">Crítico (-50%+)</span></div>
+            <div className="mt-4 bg-orange-500/5 border border-orange-500/20 rounded-lg p-3 text-xs text-orange-200 space-y-1">
+              <p className="font-bold">💡 Como ler a Análise de Ociosidade:</p>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2 text-[11px]">
+                <div className="flex items-center gap-1"><span>🌟</span> <span className="text-green-400">Muito controlada</span></div>
+                <div className="flex items-center gap-1"><span>✅</span> <span className="text-green-300">Saudável</span></div>
+                <div className="flex items-center gap-1"><span>🟡</span> <span className="text-yellow-400">No limite</span></div>
+                <div className="flex items-center gap-1"><span>🔴</span> <span className="text-red-400">Acima</span></div>
+                <div className="flex items-center gap-1"><span>🟠</span> <span className="text-orange-400">Turno apertado</span></div>
               </div>
-              <p className="mt-2 text-blue-200">
-                💡 <strong>Imp.NET</strong> e <strong>Análise</strong> são calculados a partir do <strong>NET Time</strong> registrado no fim do turno. 
-                Sem registro do dia, aparece &quot;—&quot;.
+              <p className="mt-2">
+                <strong>Ocio Saudável</strong> = quanto a pessoa poderia ficar parada e ainda bater a meta de {metaProcesso} pç/h.
               </p>
             </div>
           </div>
