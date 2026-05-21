@@ -120,12 +120,34 @@ export default function ConfiguracoesBancoPage() {
       });
       
       // Carrega uploads
-      const { data: uploadsData } = await supabase
+      console.log('🔍 Buscando uploads do banco...');
+      const { data: uploadsData, error: uploadsError } = await supabase
         .from('uploads')
         .select('*')
         .order('data', { ascending: false })
         .limit(15);
-      if (uploadsData) setUploads(uploadsData as UploadHistorico[]);
+      
+      if (uploadsError) {
+        console.error('❌ ERRO ao carregar uploads:', uploadsError);
+        console.error('   Code:', uploadsError.code);
+        console.error('   Message:', uploadsError.message);
+        
+        // Tenta sem ordenar por 'data' (caso a coluna seja diferente)
+        console.log('🔄 Tentando sem order...');
+        const { data: uploadsSimples, error: erro2 } = await supabase
+          .from('uploads')
+          .select('*')
+          .limit(15);
+        if (erro2) {
+          console.error('❌ Tentativa simples também falhou:', erro2);
+        } else if (uploadsSimples) {
+          console.log(`✅ Carregou ${uploadsSimples.length} uploads sem order:`, uploadsSimples);
+          setUploads(uploadsSimples as UploadHistorico[]);
+        }
+      } else if (uploadsData) {
+        console.log(`✅ Carregou ${uploadsData.length} uploads do banco:`, uploadsData);
+        setUploads(uploadsData as UploadHistorico[]);
+      }
     } catch (e: any) {
       toast.error('Erro ao carregar', e.message);
     } finally {
