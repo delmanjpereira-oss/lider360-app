@@ -48,6 +48,7 @@ export default function ConfiguracoesBancoPage() {
     totalFeedbacks: 0,
   });
   const [uploads, setUploads] = useState<UploadHistorico[]>([]);
+  const [abaHistorico, setAbaHistorico] = useState<'csv' | 'print'>('csv');
   const [duplicatas, setDuplicatas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -470,7 +471,7 @@ export default function ConfiguracoesBancoPage() {
         <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4 group">
           <summary className="cursor-pointer p-5 flex items-center justify-between hover:bg-[#1e1e1e] transition-all rounded-xl list-none">
             <span className="text-sm font-bold text-gray-300 flex items-center gap-2">
-              📋 Histórico de Envios (CSVs e Prints)
+              📋 Histórico de Envios
             </span>
             <div className="flex items-center gap-3">
               <span className="text-xs bg-[#0a0a0a] text-gray-400 px-2.5 py-1 rounded-full">{uploads.length}</span>
@@ -478,26 +479,73 @@ export default function ConfiguracoesBancoPage() {
             </div>
           </summary>
           <div className="px-5 pb-5 pt-2 space-y-2 border-t border-[#2a2a2a]">
-            <p className="text-xs text-gray-500 italic mt-2 mb-3">
-              Registro dos últimos uploads (arquivos CSV e prints OCR processados)
-            </p>
-            {uploads.length === 0 ? (
-              <p className="text-xs text-gray-500 py-3 italic text-center">
-                ✨ Nenhum upload registrado ainda. Quando você subir um print ou CSV, vai aparecer aqui.
-              </p>
-            ) : (
-              uploads.map((u) => (
-                <div key={u.id} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3 text-xs flex items-center justify-between flex-wrap gap-3 hover:border-[#3a3a3a] transition-all">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white font-bold truncate">{u.arquivo}</p>
-                    <p className="text-gray-500 mt-0.5">
-                      <span className="text-yellow-500/80">{u.tabela}</span> · {u.linhas} linhas
-                    </p>
+            {/* TABS - CSVs e Prints */}
+            {(() => {
+              const isPrint = (u: UploadHistorico) => 
+                String(u.modelo_csv || '').toLowerCase().includes('print') ||
+                String(u.arquivo || '').toLowerCase().includes('print ocr') ||
+                String(u.tabela || '').includes('ima_manual');
+              
+              const uploadsPrint = uploads.filter(isPrint);
+              const uploadsCsv = uploads.filter((u) => !isPrint(u));
+              const uploadsAtivos = abaHistorico === 'csv' ? uploadsCsv : uploadsPrint;
+              
+              return (
+                <>
+                  <div className="flex gap-2 mt-3 border-b border-[#2a2a2a] -mx-5 px-5 pb-0">
+                    <button
+                      onClick={() => setAbaHistorico('csv')}
+                      className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px ${
+                        abaHistorico === 'csv'
+                          ? 'border-[#FFD700] text-[#FFD700]'
+                          : 'border-transparent text-gray-500 hover:text-gray-300'
+                      }`}
+                    >
+                      📊 CSVs ({uploadsCsv.length})
+                    </button>
+                    <button
+                      onClick={() => setAbaHistorico('print')}
+                      className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px ${
+                        abaHistorico === 'print'
+                          ? 'border-purple-400 text-purple-300'
+                          : 'border-transparent text-gray-500 hover:text-gray-300'
+                      }`}
+                    >
+                      📸 Prints OCR ({uploadsPrint.length})
+                    </button>
                   </div>
-                  <p className="text-gray-500 text-[10px] font-mono">{formatarData(u.data)}</p>
-                </div>
-              ))
-            )}
+
+                  <p className="text-xs text-gray-500 italic mt-3 mb-2">
+                    {abaHistorico === 'csv' 
+                      ? 'Uploads de arquivos CSV (produtividade, DPMO Looker, ocupação)'
+                      : 'Uploads de prints (OCR de imagens do Looker)'}
+                  </p>
+                  
+                  {uploadsAtivos.length === 0 ? (
+                    <p className="text-xs text-gray-500 py-3 italic text-center">
+                      {abaHistorico === 'csv' 
+                        ? '✨ Nenhum CSV enviado ainda. Vai em Meu Time → Upload CSV pra começar.'
+                        : '✨ Nenhum print OCR enviado ainda. Vai em Meu Time → Subir Print pra começar.'}
+                    </p>
+                  ) : (
+                    uploadsAtivos.map((u) => (
+                      <div key={u.id} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3 text-xs flex items-center justify-between flex-wrap gap-3 hover:border-[#3a3a3a] transition-all">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white font-bold truncate flex items-center gap-2">
+                            <span>{isPrint(u) ? '📸' : '📊'}</span>
+                            {u.arquivo}
+                          </p>
+                          <p className="text-gray-500 mt-0.5">
+                            <span className={isPrint(u) ? 'text-purple-300/80' : 'text-yellow-500/80'}>{u.tabela}</span> · {u.linhas} linhas
+                          </p>
+                        </div>
+                        <p className="text-gray-500 text-[10px] font-mono">{formatarData(u.data)}</p>
+                      </div>
+                    ))
+                  )}
+                </>
+              );
+            })()}
           </div>
         </details>
 
