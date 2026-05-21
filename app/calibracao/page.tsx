@@ -31,7 +31,7 @@ type DpmoEvento = {
   ano: number;
   mes: number;
   trimestre: string;
-  processo: string;  // 'CK' ou 'P2M'
+  processo: string;
 };
 
 type DpmoAgregado = {
@@ -40,6 +40,7 @@ type DpmoAgregado = {
   processo: string;
   semana: number;
   ano: number;
+  mes?: number;
   trimestre: string;
   dpmo: number;
 };
@@ -91,9 +92,6 @@ const MESES_POR_TRIM: Record<string, number[]> = {
   Q1: [1, 2, 3], Q2: [4, 5, 6], Q3: [7, 8, 9], Q4: [10, 11, 12],
 };
 
-// 🎯 Normaliza o processo pra aceitar variações
-// "CK" = "Checkin" = "Check-in" = "CHECKIN"
-// "P2M" = "p2m" = "P2m"
 function normalizarProcesso(p: string | null | undefined): string {
   if (!p) return '';
   const norm = String(p).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -103,7 +101,6 @@ function normalizarProcesso(p: string | null | undefined): string {
   return norm;
 }
 
-// 🎯 Compara dois processos, ignorando diferenças de escrita
 function processosIguais(a: string | null | undefined, b: string | null | undefined): boolean {
   return normalizarProcesso(a) === normalizarProcesso(b);
 }
@@ -112,26 +109,21 @@ function normalizarNome(nome: string): string {
   return String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim().replace(/\s+/g, ' ');
 }
 
-// 🎯 Verifica se dois nomes "batem" (matching flexível)
-// "VITORIA DOS SANTOS" bate com "VITORIA DOS SANTOS MARQUES"
 function nomesIguais(a: string, b: string): boolean {
   const na = normalizarNome(a);
   const nb = normalizarNome(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
   
-  // Tira conectivos (DA, DE, DO, DOS, DAS, E)
   const limpar = (s: string) => s.split(' ').filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p));
   const partesA = limpar(na);
   const partesB = limpar(nb);
   
   if (partesA.length === 0 || partesB.length === 0) return false;
   
-  // Conta palavras em comum
   let comuns = 0;
   partesA.forEach((p) => { if (partesB.includes(p)) comuns++; });
   
-  // Se 60% ou mais das palavras do menor nome batem, considera igual
   const minTamanho = Math.min(partesA.length, partesB.length);
   return (comuns / minTamanho) >= 0.6;
 }
@@ -180,7 +172,6 @@ export default function CalibracaoPage() {
     carregar();
   }, []);
 
-  // 🎯 Helper que pagina automaticamente pra burlar limite do Supabase
   async function fetchAll(query: any, tableName: string): Promise<any[]> {
     const todos: any[] = [];
     const PAGE_SIZE = 1000;
@@ -201,10 +192,10 @@ export default function CalibracaoPage() {
       
       todos.push(...data);
       
-      if (data.length < PAGE_SIZE) break; // última página
+      if (data.length < PAGE_SIZE) break;
       pagina++;
       
-      if (pagina > 50) { // segurança: max 50 páginas = 50k linhas
+      if (pagina > 50) {
         console.warn(`⚠️ ${tableName} parou em 50 páginas`);
         break;
       }
@@ -217,8 +208,6 @@ export default function CalibracaoPage() {
   async function carregar() {
     setLoading(true);
     try {
-      // 🎯 Usa paginação manual pra GARANTIR que pega TODOS os registros
-      // O Supabase tem limite default de 1000 que .limit() nem sempre supera
       const [
         colabData,
         histData,
@@ -247,7 +236,7 @@ export default function CalibracaoPage() {
           'dpmo_eventos'
         ),
         fetchAll(
-          supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, ano, trimestre, dpmo'),
+          supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, mes, ano, trimestre, dpmo'),
           'dpmo_agregado'
         ),
         fetchAll(
@@ -265,18 +254,19 @@ export default function CalibracaoPage() {
         supabase.from('config').select('chave, valor'),
       ]);
 
-      // Logs de validação
       console.log('🔍 ===== DEBUG CALIBRAÇÃO =====');
       console.log('👥 Colaboradores:', colabData.length);
       console.log('📅 Histórico diário:', histData.length);
       console.log('📆 Produtividade MENSAL:', prodMensalData.length);
       console.log('🔥 DPMO eventos TOTAL:', dpmoData.length);
       console.log('🔥 DPMO agregado TOTAL:', dpmoAggData.length);
+      console.log('📷 IMA Manual TOTAL:', imaManualData.length);
       
-      if (prodMensalData.length > 0) {
-        console.log('📆 Primeiros 3 registros mensais:', prodMensalData.slice(0, 3));
-        const trimestresMensal = new Set(prodMensalData.map((p: any) => `${p.ano}-${p.trimestre}`));
-        console.log('📆 Trimestres no mensal:', Array.from(trimestresMensal));
+      if (dpmoAggData.length > 0) {
+        console.log('🔥 Primeiros 3 DPMO agregados:', dpmoAggData.slice(0, 3));
+      }
+      if (imaManualData.length > 0) {
+        console.log('📷 Primeiros 3 IMA Manual:', imaManualData.slice(0, 3));
       }
 
       setColaboradores(colabData);
@@ -311,23 +301,26 @@ export default function CalibracaoPage() {
     dpmoEventos.forEach((d) => {
       set.add(`${d.ano}-${d.trimestre}`);
     });
-    // 🎯 Inclui trimestres do DPMO agregado (CSV Looker semanal)
     dpmoAgregado.forEach((d) => {
       if (d.trimestre && d.ano) {
         set.add(`${d.ano}-${d.trimestre}`);
       }
     });
-    // 🎯 Inclui trimestres do CSV mensal
     produtividadeMensal.forEach((p) => {
       if (p.trimestre && p.ano) {
         set.add(`${p.ano}-${p.trimestre}`);
+      }
+    });
+    imaManual.forEach((m) => {
+      if (m.trimestre && m.ano) {
+        set.add(`${m.ano}-${m.trimestre}`);
       }
     });
     
     const lista = Array.from(set).sort().reverse();
     console.log('📅 Trimestres disponíveis:', lista);
     return lista;
-  }, [historico, dpmoEventos, dpmoAgregado, produtividadeMensal]);
+  }, [historico, dpmoEventos, dpmoAgregado, produtividadeMensal, imaManual]);
 
   useEffect(() => {
     if (!trimestreSelecionado && trimestresDisponiveis.length > 0) {
@@ -343,13 +336,11 @@ export default function CalibracaoPage() {
     if (!quarterSel) return [];
     const set = new Set<number>();
     
-    // 1. Histórico diário
     historico.forEach((h) => {
       const { ano, mes, quarter } = getTrimestreDeData(h.data_referencia);
       if (ano === anoNum && quarter === quarterSel) set.add(mes);
     });
     
-    // 2. CSV mensal consolidado
     produtividadeMensal.forEach((p) => {
       const pAno = Number(p.ano);
       const pTrim = String(p.trimestre || '').trim().toUpperCase();
@@ -359,7 +350,6 @@ export default function CalibracaoPage() {
       }
     });
     
-    // 🎯 3. DPMO eventos (detalhado)
     dpmoEventos.forEach((d) => {
       const dAno = Number(d.ano);
       const dTrim = String(d.trimestre || '').trim().toUpperCase();
@@ -369,16 +359,21 @@ export default function CalibracaoPage() {
       }
     });
     
-    // 🎯 4. DPMO agregado (semanal Looker) - deduz mês pela semana ISO
+    // 🎯 DPMO agregado - USA CAMPO 'mes' DO BANCO primeiro
     dpmoAgregado.forEach((d) => {
+      const dAny = d as any;
       const dAno = Number(d.ano);
       const dTrim = String(d.trimestre || '').trim().toUpperCase();
       const trimSel = String(quarterSel || '').toUpperCase();
-      if (dAno === anoNum && dTrim === trimSel && d.semana) {
-        // Calcula o mês a partir da semana ISO
-        // Semana N do ano → data da quinta-feira → mês
+      if (dAno !== anoNum || dTrim !== trimSel) return;
+      
+      if (dAny.mes && Number(dAny.mes) > 0) {
+        set.add(Number(dAny.mes));
+        return;
+      }
+      
+      if (d.semana) {
         const semana = Number(d.semana);
-        // Data: 4 de janeiro + (semana - 1) * 7 dias (referência ISO 8601)
         const dataRef = new Date(dAno, 0, 4 + (semana - 1) * 7);
         const mesDaSemana = dataRef.getMonth() + 1;
         if (mesDaSemana >= 1 && mesDaSemana <= 12) {
@@ -387,7 +382,6 @@ export default function CalibracaoPage() {
       }
     });
     
-    // 🎯 5. Ocupação P2M
     ocupacaoP2M.forEach((o) => {
       const oAno = Number(o.ano);
       const oTrim = String(o.trimestre || '').trim().toUpperCase();
@@ -397,7 +391,6 @@ export default function CalibracaoPage() {
       }
     });
     
-    // 🎯 6. IMA Manual (vem do print) - garante que o mês aparece
     imaManual.forEach((m) => {
       const mAno = Number(m.ano);
       const mTrim = String(m.trimestre || '').trim().toUpperCase();
@@ -421,10 +414,8 @@ export default function CalibracaoPage() {
     console.log('🔥 Meses possíveis no trim:', mesesPossiveis);
     console.log('🔥 Meses COM dados:', mesesComDados);
     console.log('🔥 Total colaboradores:', colaboradores.length);
-    console.log('🔥 Total histórico:', historico.length);
-    console.log('🔥 Total prod_mensal:', produtividadeMensal.length);
-    console.log('🔥 Total DPMO eventos:', dpmoEventos.length);
     console.log('🔥 Total DPMO agregado:', dpmoAgregado.length);
+    console.log('🔥 Total IMA Manual:', imaManual.length);
     console.log('🔥 ============================================');
 
     return colaboradores.map((c, idx) => {
@@ -439,15 +430,9 @@ export default function CalibracaoPage() {
         const { mes } = getTrimestreDeData(h.data_referencia);
         if (!mediasPorMes[mes]) mediasPorMes[mes] = { liq: [], ocup: [] };
         if (h.prod_liquida > 0) mediasPorMes[mes].liq.push(h.prod_liquida);
-        // ⚠️ Utilização do CSV de produtividade NÃO é usada como ocupação
-        // Ocupação real virá de tabelas específicas (ocupacao_p2m, ocupacao_checkin futuro)
       });
 
-      // 🎯 COMPLEMENTAR com produtividade_mensal (CSV consolidado)
-      // Esses dados vem do CSV "Lista 2026-04-01 al 2026-04-30..." 
-      // Usado APENAS quando não tem dados diários suficientes no mês
       const prodMensalColab = produtividadeMensal.filter((p) => {
-        // Normaliza tipos pra comparação (banco pode vir string ou number)
         const pIdGroot = String(p.id_groot || '').trim();
         const cIdGroot = String(c.id_groot || '').trim();
         const pAno = Number(p.ano);
@@ -462,32 +447,16 @@ export default function CalibracaoPage() {
         if (pProc !== cProc) return false;
         return true;
       });
-
-      // LOG DEBUG - mostra o que tá rolando pra cada colab
-      if (produtividadeMensal.length > 0 && idx < 5) {
-        console.log(`🔍 [${c.nome}] Procurando produtividade mensal:`, {
-          id_groot_colab: c.id_groot,
-          processo_colab: c.processo,
-          anoNum,
-          quarterSel,
-          totalProdMensal: produtividadeMensal.length,
-          encontrados: prodMensalColab.length,
-          exemplo: produtividadeMensal[0],
-        });
-      }
       
       prodMensalColab.forEach((p) => {
         const pMes = Number(p.mes);
         if (!mediasPorMes[pMes]) mediasPorMes[pMes] = { liq: [], ocup: [] };
-        // Adiciona a média mensal como UM valor (representa o mês inteiro)
         const liqValue = Number(p.prod_liquida_media);
         if (liqValue > 0) {
           mediasPorMes[pMes].liq.push(liqValue);
-          console.log(`✅ [${c.nome}] Adicionou produtividade mensal: Mês ${pMes}, Líquida ${liqValue}`);
         }
       });
 
-      // 🎯 Pra P2M, ocupação vem da tabela ocupacao_p2m (CSV Totefullness)
       if (c.processo === 'P2M') {
         const ocupColab = ocupacaoP2M.filter((o) => {
           if (o.ano !== anoNum || o.trimestre !== quarterSel) return false;
@@ -498,10 +467,6 @@ export default function CalibracaoPage() {
           if (o.ocupacao_pct > 0) mediasPorMes[o.mes].ocup.push(o.ocupacao_pct);
         });
       }
-
-      // 🚧 Pra Checkin, ocupação vem da tabela ocupacao_checkin (FUTURA — ainda não criada)
-      // Por enquanto, Checkin NÃO TEM ocupação na calibração
-      // Quando criar a tabela e o CSV específico, adicionar lógica aqui similar à do P2M
 
       const mediaMes = (mes: number, tipo: 'liq' | 'ocup') => {
         const arr = mediasPorMes[mes]?.[tipo] || [];
@@ -514,7 +479,7 @@ export default function CalibracaoPage() {
         medMes[m] = {
           liq: Math.round(mediaMes(m, 'liq')),
           ocup: Math.round(mediaMes(m, 'ocup')),
-          ima: 0, // 🎯 Calculado abaixo
+          ima: 0,
         };
       });
 
@@ -523,9 +488,6 @@ export default function CalibracaoPage() {
       const liqTrim = liqsValidas.length > 0 ? Math.round(liqsValidas.reduce((s, v) => s + v, 0) / liqsValidas.length) : 0;
       const ocupTrim = ocupsValidas.length > 0 ? Math.round(ocupsValidas.reduce((s, v) => s + v, 0) / ocupsValidas.length) : 0;
 
-      // 🎯 CÁLCULO IMA INTELIGENTE — Só usa UNIDADES dos dias auditados
-      const quarterKey = `${anoNum}-${quarterSel}`;
-
       let ima = 0;
       let imaDefeitos = 0;
       let imaUnidades = 0;
@@ -533,40 +495,21 @@ export default function CalibracaoPage() {
       let imaOrigem: 'auto' | 'vazio' | 'aguardando' = 'vazio';
 
       if (c.processo === 'Checkin' || c.processo === 'P2M') {
-        const nomeNorm = normalizarNome(c.nome);
         const procDpmo = c.processo === 'Checkin' ? 'CK' : 'P2M';
 
-        // 1. Pega eventos do trimestre desse colaborador (filtra POR PROCESSO PRINCIPAL)
-        // 🎯 Matching RIGOROSO:
-        //   - Se DPMO tem id_groot: vincula SÓ por id_groot (mais confiável)
-        //   - Se DPMO NÃO tem id_groot: vincula por nome flexível (fallback)
         const eventosTrim = dpmoEventos.filter((d) => {
           if (d.ano !== anoNum || d.trimestre !== quarterSel) return false;
           if (d.processo !== procDpmo) return false;
           
-          // Tem id_groot? Vincula APENAS por id_groot
           if (d.id_groot) {
             return String(d.id_groot).trim() === String(c.id_groot).trim();
           }
           
-          // Sem id_groot? Tenta por nome flexível
           if (nomesIguais(d.representante, c.nome)) return true;
           
           return false;
         });
 
-        if (idx < 3) {
-          console.log(`🎯 [${c.nome}] DPMO eventos encontrados:`, eventosTrim.length);
-          if (eventosTrim.length === 0) {
-            const exemplos = dpmoEventos
-              .filter((d) => d.ano === anoNum && d.trimestre === quarterSel && d.processo === procDpmo)
-              .slice(0, 3);
-            console.log(`   🔎 Exemplos DPMO disponíveis (${procDpmo}/${quarterSel}/${anoNum}):`, exemplos.map((e) => ({ rep: e.representante, id: e.id_groot })));
-          }
-        }
-
-        // 2. Acha a DATA MÁXIMA do inventário GERAL (de todos colaboradores)
-        //    Looker usa essa data como limite — não pega produtividade depois dela
         let dataMaximaInventario = '';
         dpmoEventos.forEach((d) => {
           if (d.checkin_data > dataMaximaInventario) {
@@ -574,18 +517,14 @@ export default function CalibracaoPage() {
           }
         });
 
-        // 3. Lista SEMANAS que têm inventário desse colaborador
         const semanasComInventario = new Set<string>(
           eventosTrim.map((e) => `${e.ano}-${e.semana}`)
         );
 
-        // 4. Soma unidades das SEMANAS com inventário, MAS só dias ≤ data máxima geral
         const unidadesAuditadasDiarias = histColab
           .filter((h) => h.processo === c.processo)
           .filter((h) => {
-            // Ignora dias depois da última auditoria
             if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return false;
-            // Calcula semana ISO da data
             const d = new Date(h.data_referencia + 'T12:00:00');
             const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
             const diaDaSemana = utc.getUTCDay() || 7;
@@ -596,8 +535,6 @@ export default function CalibracaoPage() {
           })
           .reduce((s, h) => s + (h.unidades || 0), 0);
 
-        // 🎯 COMPLEMENTAR com unidades do CSV MENSAL pra meses sem diário
-        // Soma as unidades de todos os meses do trimestre que vieram pelo mensal
         const unidadesAuditadasMensal = produtividadeMensal
           .filter((p) => {
             if (Number(p.ano) !== anoNum) return false;
@@ -605,7 +542,6 @@ export default function CalibracaoPage() {
             if (pTrim !== quarterSel) return false;
             if (!processosIguais(p.processo, c.processo)) return false;
             
-            // Vincula por ID ou nome
             if (p.id_groot && c.id_groot && String(p.id_groot).trim() === String(c.id_groot).trim()) {
               return true;
             }
@@ -617,45 +553,39 @@ export default function CalibracaoPage() {
           .reduce((s, p) => s + (Number(p.unidades_total) || 0), 0);
 
         const unidadesAuditadas = unidadesAuditadasDiarias + unidadesAuditadasMensal;
-        
-        if (idx < 3) {
-          console.log(`📊 [${c.nome}] IMA Trim: diário=${unidadesAuditadasDiarias} + mensal=${unidadesAuditadasMensal} = ${unidadesAuditadas} unidades`);
-        }
-
         const totalDef = eventosTrim.reduce((s, d) => s + (d.qtd_dif || 0), 0);
         const datasAuditadas = new Set<string>(eventosTrim.map((e) => e.checkin_data));
 
-        // Calcula só se tem os 2 dados
         if (unidadesAuditadas > 0 && eventosTrim.length > 0) {
           imaDefeitos = totalDef;
           imaUnidades = unidadesAuditadas;
           imaDiasAuditados = datasAuditadas.size;
           ima = Math.round((totalDef / unidadesAuditadas) * 1_000_000);
           imaOrigem = 'auto';
-        } else if (histColab.length > 0 && eventosTrim.length === 0) {
-          imaOrigem = 'aguardando';
-        } else if (eventosTrim.length > 0 && unidadesAuditadas === 0) {
-          imaOrigem = 'aguardando';
         }
 
-        // 🎯 CÁLCULO IMA POR MÊS — Looker style ponderado
+        // 🎯 CÁLCULO IMA POR MÊS — Looker style ponderado + Fallback agregado
         mesesPossiveis.forEach((mes) => {
-          // Defeitos só do mês X
           const eventosMes = eventosTrim.filter((e) => Number(e.mes) === Number(mes));
           
-          if (idx < 3 && eventosTrim.length > 0) {
-            console.log(`📅 [${c.nome}] Mês ${mes}: ${eventosMes.length} eventos DPMO de ${eventosTrim.length} total`);
-          }
-          
           // 🎯 FALLBACK: Se NÃO tem eventos detalhados, usa o DPMO agregado direto
-          // (Esse é o caso do print: dpmo_agregado tem o valor, mas dpmo_eventos não)
           if (eventosMes.length === 0) {
             const agrColab = dpmoAgregado.filter((d) => {
-              if (String(d.id_groot) !== String(c.id_groot)) return false;
+              const idBate = d.id_groot && c.id_groot && String(d.id_groot).trim() === String(c.id_groot).trim();
+              const nomeBate = d.representante && nomesIguais(d.representante, c.nome);
+              if (!idBate && !nomeBate) return false;
+              
               if (!processosIguais(d.processo, c.processo)) return false;
               if (Number(d.ano) !== anoNum) return false;
               if (!d.semana) return false;
-              // Deduz mês da semana ISO
+              
+              // 🎯 PRIMEIRO tenta usar campo 'mes' do banco (mais confiável que deduzir)
+              const dAny = d as any;
+              if (dAny.mes && Number(dAny.mes) > 0) {
+                return Number(dAny.mes) === mes;
+              }
+              
+              // Fallback: deduz mês pela semana ISO
               const dataRef = new Date(anoNum, 0, 4 + (Number(d.semana) - 1) * 7);
               return dataRef.getMonth() + 1 === mes;
             });
@@ -663,7 +593,7 @@ export default function CalibracaoPage() {
             if (agrColab.length > 0) {
               const somaDpmo = agrColab.reduce((s, d) => s + (Number(d.dpmo) || 0), 0);
               medMes[mes].ima = Math.round(somaDpmo / agrColab.length);
-              if (idx < 3) {
+              if (idx < 5) {
                 console.log(`✅ [${c.nome}] IMA Mês ${mes} via AGREGADO: ${medMes[mes].ima} (${agrColab.length} semanas)`);
               }
             } else {
@@ -675,15 +605,12 @@ export default function CalibracaoPage() {
           const defMes = eventosMes.reduce((s, e) => s + (e.qtd_dif || 0), 0);
           const semanasMes = new Set<string>(eventosMes.map((e) => `${e.ano}-${e.semana}`));
 
-          // Unidades só dos dias do mês X (do histórico diário)
           const unidadesDiarias = histColab
             .filter((h) => h.processo === c.processo)
             .filter((h) => {
               if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return false;
-              // Confere se é desse mês
               const dataDia = new Date(h.data_referencia + 'T12:00:00');
               if (dataDia.getMonth() + 1 !== mes) return false;
-              // Confere se é semana auditada
               const utc = new Date(Date.UTC(dataDia.getFullYear(), dataDia.getMonth(), dataDia.getDate()));
               const dow = utc.getUTCDay() || 7;
               utc.setUTCDate(utc.getUTCDate() + 4 - dow);
@@ -693,8 +620,6 @@ export default function CalibracaoPage() {
             })
             .reduce((s, h) => s + (h.unidades || 0), 0);
 
-          // 🎯 COMPLEMENTAR com unidades do CSV MENSAL se não tiver no diário
-          // Usado pra meses passados onde só veio o consolidado (ex: Abril)
           let unidadesMensal = 0;
           if (unidadesDiarias === 0) {
             const prodMensalMes = produtividadeMensal.filter((p) => {
@@ -702,12 +627,10 @@ export default function CalibracaoPage() {
               if (Number(p.ano) !== anoNum) return false;
               if (!processosIguais(p.processo, c.processo)) return false;
               
-              // Tenta por id_groot
               if (p.id_groot && c.id_groot && String(p.id_groot).trim() === String(c.id_groot).trim()) {
                 return true;
               }
               
-              // 🎯 Tenta também por nome flexível (caso não tenha id_groot)
               if (p.nome && nomesIguais(p.nome, c.nome)) {
                 return true;
               }
@@ -715,34 +638,17 @@ export default function CalibracaoPage() {
               return false;
             });
             unidadesMensal = prodMensalMes.reduce((s, p) => s + (Number(p.unidades_total) || 0), 0);
-            
-            if (idx < 3 && prodMensalMes.length > 0) {
-              console.log(`💰 [${c.nome}] IMA Mês ${mes}: usando ${prodMensalMes.length} registros mensais, ${unidadesMensal} unidades`);
-            }
-            if (idx < 3 && eventosMes.length > 0 && unidadesMensal === 0 && unidadesDiarias === 0) {
-              console.warn(`⚠️ [${c.nome}] IMA Mês ${mes}: TEM ${eventosMes.length} eventos DPMO mas NÃO achou unidades`);
-              console.warn(`   procurando: mes=${mes}, ano=${anoNum}, processo=${c.processo}, id=${c.id_groot}`);
-              console.warn(`   produtividadeMensal disponíveis pro mês:`, produtividadeMensal.filter((p) => Number(p.mes) === mes).map((p) => ({ id: p.id_groot, nome: p.nome, proc: p.processo })));
-            }
           }
 
           const unidadesMes = unidadesDiarias + unidadesMensal;
 
           if (unidadesMes > 0) {
             medMes[mes].ima = Math.round((defMes / unidadesMes) * 1_000_000);
-            if (idx < 5) {
-              console.log(`🔥 [${c.nome}] IMA MÊS ${mes} CALCULADO: ${medMes[mes].ima} (def=${defMes}, unid=${unidadesMes})`);
-            }
-            // Alerta se IMA tá muito alto (provável bug)
-            if (medMes[mes].ima > 10000) {
-              console.warn(`🚨 [${c.nome}] IMA Mês ${mes} ABSURDO: ${medMes[mes].ima}! def=${defMes}, unid=${unidadesMes} - VERIFICAR!`);
-            }
-          } else if (idx < 5) {
-            console.warn(`⚠️ [${c.nome}] IMA Mês ${mes}: unidades=0, IMA não calcula! (def=${defMes})`);
           }
         });
         
-        // 🎯 SOBRESCREVE com IMA MANUAL se tiver (prioridade máxima)
+        // 🎯 SOBRESCREVE com IMA MANUAL se tiver (PRIORIDADE MÁXIMA)
+        // O IMA Manual vem direto do PRINT OCR — é o Total Geral exibido no Looker
         mesesPossiveis.forEach((mes) => {
           const manual = imaManual.find((m: any) =>
             String(m.id_groot) === String(c.id_groot) &&
@@ -754,11 +660,19 @@ export default function CalibracaoPage() {
             const valorAuto = medMes[mes].ima;
             medMes[mes].ima = Number(manual.ima);
             if (idx < 5) {
-              console.log(`✏️ [${c.nome}] IMA MANUAL Mês ${mes}: ${manual.ima} (substituiu auto=${valorAuto})`);
+              console.log(`✏️ [${c.nome}] IMA MANUAL (PRINT) Mês ${mes}: ${manual.ima} (substituiu auto=${valorAuto})`);
             }
           }
         });
+        
+        // 🎯 Recalcula IMA TRIMESTRAL: média dos meses com valor (incluindo manuais)
+        const imasValidos = mesesPossiveis.map((m) => medMes[m].ima).filter((v) => v > 0);
+        if (imasValidos.length > 0) {
+          ima = Math.round(imasValidos.reduce((s, v) => s + v, 0) / imasValidos.length);
+          imaOrigem = 'auto';
+        }
       }
+      
       let que = 'Sem dados';
       if (c.processo === 'Checkin' || c.processo === 'P2M') {
         const metaL = c.processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
@@ -839,21 +753,18 @@ export default function CalibracaoPage() {
   const totalNaoAptos = linhasCalibracao.filter((l) => l.aptidao === 'NÃO APTO').length;
   const totalAguardando = linhasCalibracao.filter((l) => l.imaOrigem === 'aguardando').length;
 
-  // 🎯 EXPORTAR CSV (planilha) — versão completa pra líder
   function exportarCSV(processo: 'Checkin' | 'P2M' | 'Sorting') {
     const linhas = porProcesso[processo];
     if (linhas.length === 0) return;
 
-    const incluiOcup = processo !== 'Checkin'; // Checkin não tem ocupação ainda
+    const incluiOcup = processo !== 'Checkin';
 
     const headers: string[] = ['ID', 'Nome', 'Processo'];
-    // Pra cada mês: Líq + IMA + (Oc% se P2M)
     mesesComDados.forEach((m) => {
       headers.push(`${NOMES_MESES[m]}_Liq`);
       headers.push(`${NOMES_MESES[m]}_IMA`);
       if (incluiOcup) headers.push(`${NOMES_MESES[m]}_Ocup`);
     });
-    // Trim: Líq + IMA + (Oc% se P2M)
     headers.push('Trim_Liq');
     headers.push('Trim_IMA');
     if (incluiOcup) headers.push('Trim_Ocup');
@@ -861,13 +772,11 @@ export default function CalibracaoPage() {
 
     const rows = linhas.map((l) => {
       const row: (string | number)[] = [l.idGroot, l.nome, l.processo];
-      // Pra cada mês: Líq + IMA + Oc% (se P2M)
       mesesComDados.forEach((m) => {
         row.push(l.medMes[m]?.liq || '-');
         row.push(l.imaOrigem === 'aguardando' ? 'aguardando' : (l.medMes[m]?.ima || '0'));
         if (incluiOcup) row.push(l.medMes[m]?.ocup ? `${l.medMes[m].ocup}%` : '-');
       });
-      // Trim
       row.push(l.liqTrim || '-');
       row.push(l.imaOrigem === 'aguardando' ? 'aguardando' : (l.ima || '0'));
       if (incluiOcup) row.push(l.ocupTrim ? `${l.ocupTrim}%` : '-');
@@ -877,7 +786,6 @@ export default function CalibracaoPage() {
       return row;
     });
 
-    // BOM pra abrir certo no Excel
     const bom = '\uFEFF';
     const csv = bom + [headers, ...rows]
       .map((r) => r.map((v) => {
@@ -893,17 +801,15 @@ export default function CalibracaoPage() {
     link.download = `Calibracao_${processo}_${trimestreSelecionado}.csv`;
     link.click();
     URL.revokeObjectURL(url);
-    window.showToast('success', `📥 ${processo} exportado!`);
+    (window as any).showToast?.('success', `📥 ${processo} exportado!`);
   }
 
-  // 🎯 GERAR PRINT PÚBLICO — só ID + indicadores, SEM nome, QUE e COMO
   async function gerarPrintPublico(processo: 'Checkin' | 'P2M' | 'Sorting') {
     const linhas = porProcesso[processo];
     if (linhas.length === 0) return;
 
     const procEmoji = processo === 'Checkin' ? '📦' : processo === 'P2M' ? '🚚' : '📋';
 
-    // 🎯 Acha a DATA MÁXIMA dos dados
     let dataMax = '';
     historico.forEach((h) => {
       if (h.data_referencia > dataMax) dataMax = h.data_referencia;
@@ -913,8 +819,6 @@ export default function CalibracaoPage() {
     const anoAtual = new Date().getFullYear();
     const mesesTrim = mesesComDados;
 
-    // 🎯 FILTRO: só inclui colaboradores que TEM PELO MENOS 1 DADO no trimestre
-    //    (líquida > 0 OU IMA > 0 OU ocupação > 0)
     const linhasComDados = linhas.filter((l) => {
       const temLiq = l.liqTrim > 0;
       const temIma = l.ima > 0;
@@ -923,27 +827,23 @@ export default function CalibracaoPage() {
     });
 
     if (linhasComDados.length === 0) {
-      window.showToast('error', `Nenhum colaborador de ${processo} tem dados no trimestre`);
+      (window as any).showToast?.('error', `Nenhum colaborador de ${processo} tem dados no trimestre`);
       return;
     }
 
-    // 🎯 Ordena por LÍQUIDA do trimestre, do maior pro menor
     const linhasOrdenadas = [...linhasComDados].sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0));
 
-    // Definição de colunas de qualidade
     const temIma = processo === 'Checkin' || processo === 'P2M';
     const temOcup = processo === 'P2M';
     const colsQualidade = (temIma ? 1 : 0) + (temOcup ? 1 : 0);
 
-    // 🎨 Cores SIMPLES: VERDE (na meta) + VERMELHO (abaixo)
     function corStatus(valor: number, meta: number, inverso: boolean = false): string {
       if (valor === 0) return '#6b7280';
       if (inverso) return valor <= meta ? '#10b981' : '#ef4444';
       return valor >= meta ? '#10b981' : '#ef4444';
     }
 
-    // Largura dinâmica baseada em quantos meses + colunas
-    const numColsTotal = 1 + mesesTrim.length + colsQualidade + 1; // ID + meses + qualidade + trim
+    const numColsTotal = 1 + mesesTrim.length + colsQualidade + 1;
     const widthBase = Math.max(600, numColsTotal * 110);
 
     const div = document.createElement('div');
@@ -954,7 +854,6 @@ export default function CalibracaoPage() {
     `;
 
     div.innerHTML = `
-      <!-- HEADER -->
       <div style="text-align: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 3px solid #FFD700;">
         <h1 style="color: #FFD700; font-size: 22px; font-weight: 900; margin: 0; letter-spacing: 1px;">
           ${procEmoji} CALIBRAÇÃO ${processo.toUpperCase()} — TRIMESTRE ${quarterSel}
@@ -964,10 +863,8 @@ export default function CalibracaoPage() {
         </p>
       </div>
 
-      <!-- TABELA -->
       <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
         <thead>
-          <!-- Linha 1: SEÇÕES PRINCIPAIS (mesma altura pra todas) -->
           <tr style="height: 50px;">
             <th style="padding: 14px 18px; text-align: center; background: #2a2a2a; color: #FFD700; font-size: 14px; font-weight: 900; border: 2px solid #FFD700; min-width: 160px;">
               ID COLABORADOR
@@ -981,7 +878,6 @@ export default function CalibracaoPage() {
               </th>
             ` : ''}
           </tr>
-          <!-- Linha 2: SUB-CABEÇALHOS -->
           <tr style="background: #1a1a1a;">
             <th style="padding: 8px 6px; text-align: center; border-bottom: 1px solid #2a2a2a; color: #888; font-size: 10px; font-weight: bold;">
               &nbsp;
@@ -1002,12 +898,9 @@ export default function CalibracaoPage() {
             const isPar = idx % 2 === 0;
             const bg = isPar ? '#141414' : '#0f0f0f';
 
-            // Líquida do TRIMESTRE
             const liqTrim = l.liqTrim || 0;
             const metaL = processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
-            const corTrim = corStatus(liqTrim, metaL);
 
-            // Células dos meses (sem dados = 0)
             const mesesCells = mesesTrim.map((m) => {
               const liqMes = l.medMes[m]?.liq || 0;
               const corMes = corStatus(liqMes, metaL);
@@ -1018,7 +911,6 @@ export default function CalibracaoPage() {
               `;
             }).join('');
 
-            // IMA — Sem dados = 0 (verde, sem erro é bom!)
             let imaHtml = '';
             if (temIma) {
               const ima = l.ima || 0;
@@ -1031,7 +923,6 @@ export default function CalibracaoPage() {
               imaHtml = `<td style="padding: 10px 8px; text-align: center; color: ${corIma}; font-family: monospace; font-weight: bold; font-size: 13px;">${imaTxt}</td>`;
             }
 
-            // OCUPAÇÃO (só P2M) — Sem dados = "0%"
             let ocupHtml = '';
             if (temOcup) {
               const ocup = l.ocupTrim || 0;
@@ -1056,13 +947,11 @@ export default function CalibracaoPage() {
         </tbody>
       </table>
 
-      <!-- LEGENDA -->
       <div style="margin-top: 14px; padding: 10px 16px; background: #1a1a1a; border-radius: 8px; display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; font-size: 11px; font-weight: bold;">
         <span style="color: #10b981;">🟢 NA META</span>
         <span style="color: #ef4444;">🔴 ABAIXO</span>
       </div>
 
-      <!-- RODAPÉ -->
       <div style="margin-top: 8px; padding: 6px; font-size: 9px; color: #666; text-align: center;">
         📊 LIDER 360 · Gerado em ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
       </div>
@@ -1083,10 +972,10 @@ export default function CalibracaoPage() {
       link.href = canvas.toDataURL('image/png');
       link.click();
 
-      window.showToast('success', `📸 Print ${processo} gerado!`);
+      (window as any).showToast?.('success', `📸 Print ${processo} gerado!`);
     } catch (e) {
       console.error(e);
-      window.showToast('error', 'Erro ao gerar print');
+      (window as any).showToast?.('error', 'Erro ao gerar print');
     } finally {
       document.body.removeChild(div);
     }
@@ -1115,15 +1004,15 @@ export default function CalibracaoPage() {
       
       <ApolloBadge
         mood="info"
-        message="IMA calculado em tempo real"
-        detail="(Σ Defeitos / Σ Unidades das semanas auditadas) × 1M · Bate 100% Looker"
+        message="IMA do Print OCR puxado em tempo real"
+        detail="Print OCR (prioridade) + CSV Looker · Bate 100% com Looker"
       />
 
       {trimestresDisponiveis.length === 0 ? (
         <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center">
           <span className="text-6xl block mb-4">📭</span>
           <h3 className="text-xl font-bold text-white mb-2">Nenhum dado ainda</h3>
-          <p className="text-gray-400 mb-4">Faça upload de CSV de produtividade ou DPMO pra começar</p>
+          <p className="text-gray-400 mb-4">Faça upload de CSV de produtividade ou print de DPMO pra começar</p>
         </div>
       ) : (
         <>
@@ -1169,7 +1058,7 @@ export default function CalibracaoPage() {
           {totalAguardando > 0 && (
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-sm">
               <p className="text-blue-300">
-                ⏳ <strong>{totalAguardando} colaboradores</strong> aguardando dados de DPMO. Sobe o CSV INVENTÁRIO DPMO em MEU TIME pra completar.
+                ⏳ <strong>{totalAguardando} colaboradores</strong> aguardando dados de DPMO. Sobe o print/CSV em MEU TIME pra completar.
               </p>
             </div>
           )}
@@ -1207,7 +1096,6 @@ export default function CalibracaoPage() {
                     <thead>
                       <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400">
                         <th className="py-3 px-3" rowSpan={2}>Colab.</th>
-                        {/* Para cada mês: Líq + IMA + (Oc% se P2M) */}
                         {mesesComDados.map((m) => (
                           <th key={m} colSpan={proc === 'Checkin' ? 2 : 3} className="py-3 px-2 text-center border-l border-[#2a2a2a]">{NOMES_MESES[m]}</th>
                         ))}
@@ -1232,14 +1120,13 @@ export default function CalibracaoPage() {
                             <div className="text-white text-xs font-bold truncate max-w-[140px]">{l.nome}</div>
                             <div className="text-xs text-gray-500 font-mono">{l.idGroot}</div>
                           </td>
-                          {/* Para cada mês: Líq + IMA + Oc% (se P2M) */}
                           {mesesComDados.map((m) => (
                             <>
                               <td key={`${l.idGroot}-${m}-l`} className="py-2 px-2 text-center text-gray-300 font-mono text-xs border-l border-[#2a2a2a]">
                                 {l.medMes[m]?.liq || '-'}
                               </td>
                               <td key={`${l.idGroot}-${m}-i`} className="py-2 px-2 text-center font-mono text-xs">
-                                {l.imaOrigem === 'aguardando' ? (
+                                {l.imaOrigem === 'aguardando' && !l.medMes[m]?.ima ? (
                                   <span className="text-blue-400">⏳</span>
                                 ) : (
                                   <span className="text-purple-300 font-bold">{l.medMes[m]?.ima || '0'}</span>
@@ -1274,13 +1161,12 @@ export default function CalibracaoPage() {
           })}
 
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
-            <p className="font-bold mb-2">💡 Cálculo igual Looker:</p>
+            <p className="font-bold mb-2">💡 Cálculo:</p>
             <ul className="space-y-1 list-disc pl-5 text-xs">
-              <li><strong>IMA</strong> = Σ Defeitos ÷ Σ Unidades das semanas auditadas <strong>até a última data com inventário</strong></li>
-              <li>Ignora dias de produtividade <strong>depois</strong> da última auditoria (mesmo se tem no banco)</li>
-              <li>Ex: produtividade até 16/05 + inventário até 15/05 → usa unidades só até 15/05</li>
+              <li><strong>IMA</strong> = vem do PRINT OCR (Total Geral do colaborador) ou cálculo do CSV Looker</li>
+              <li>IMA Manual (print) tem PRIORIDADE sobre cálculo automático</li>
               <li><strong>QUE</strong> = Líquida + Ocupação + IMA (3 pontos: Supera / 1-2: Alinhado / 0: Abaixo)</li>
-              <li><strong>COMO</strong> = derivado dos feedbacks. Pode SOBRESCREVER clicando</li>
+              <li><strong>COMO</strong> = derivado dos feedbacks</li>
               <li><strong>APTIDÃO</strong>: QUE=Supera + COMO≥Alinhado → APTO | Algum Abaixo → NÃO APTO | Resto → EM OBSERVAÇÃO</li>
             </ul>
           </div>
