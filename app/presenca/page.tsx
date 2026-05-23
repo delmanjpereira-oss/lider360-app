@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 
 // ============================================
@@ -92,7 +93,6 @@ const MOTIVOS_PRESENCA = [
   },
 ];
 
-// Lookup rápido pra encontrar motivo
 function buscarMotivo(codigo: string) {
   for (const g of MOTIVOS_PRESENCA) {
     const m = g.motivos.find(mt => mt.codigo === codigo);
@@ -123,15 +123,6 @@ function formatarDataLonga(data: string): string {
   return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
 }
 
-function tempoRelativo(iso: string): string {
-  const agora = new Date();
-  const data = new Date(iso);
-  const diff = Math.floor((agora.getTime() - data.getTime()) / 1000);
-  if (diff < 3600) return `${Math.floor(diff / 60)}min atrás`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h atrás`;
-  return `${Math.floor(diff / 86400)}d atrás`;
-}
-
 export default function PresencaPage() {
   const [registros, setRegistros] = useState<Presenca[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,9 +135,34 @@ export default function PresencaPage() {
   const [confirmacaoMassa, setConfirmacaoMassa] = useState<'descartar' | null>(null);
   const [processando, setProcessando] = useState(false);
 
+  // 🎯 Última importação CSV do MELI
+  const [ultimaImportacao, setUltimaImportacao] = useState<{ data: string; total: number } | null>(null);
+
   useEffect(() => {
     carregar();
+    carregarUltimaImportacao();
   }, []);
+
+  async function carregarUltimaImportacao() {
+    const { data } = await supabase
+      .from('presenca')
+      .select('criado_em, data_referencia')
+      .eq('registrado_por', 'csv_meli')
+      .order('criado_em', { ascending: false })
+      .limit(1);
+    
+    if (data && data.length > 0) {
+      const { count } = await supabase
+        .from('presenca')
+        .select('id', { count: 'exact', head: true })
+        .eq('registrado_por', 'csv_meli');
+      
+      setUltimaImportacao({
+        data: data[0].criado_em,
+        total: count || 0,
+      });
+    }
+  }
 
   async function carregar() {
     setLoading(true);
@@ -162,11 +178,9 @@ export default function PresencaPage() {
     setSelecionados(new Set());
   }
 
-  // 🎯 Escaneia: cria presença pra QUEM TÁ no CSV e pendência pra QUEM NÃO TÁ
   async function escanearPresencas() {
     setScanLoading(true);
     try {
-      // Pega TODOS os colabs ativos
       const { data: colabs } = await supabase
         .from('colaboradores')
         .select('id_groot, nome, processo, status')
@@ -179,7 +193,6 @@ export default function PresencaPage() {
         return;
       }
       
-      // Pega histórico do mês atual
       const agora = new Date();
       const mesAtual = agora.getMonth() + 1;
       const anoAtual = agora.getFullYear();
@@ -197,10 +210,8 @@ export default function PresencaPage() {
         return;
       }
       
-      // Identifica datas únicas do CSV
       const datasUnicas = Array.from(new Set(historico.map((h: any) => h.data_referencia))).sort();
       
-      // Identifica quem trabalhou em cada data (presença automática)
       const presencaPorData = new Map<string, Set<string>>();
       historico.forEach((h: any) => {
         if (!presencaPorData.has(h.data_referencia)) {
@@ -209,7 +220,6 @@ export default function PresencaPage() {
         presencaPorData.get(h.data_referencia)!.add(h.id_groot);
       });
       
-      // Cria registros: presença OU pendência
       const novosRegistros: any[] = [];
       
       for (const data of datasUnicas) {
@@ -232,7 +242,6 @@ export default function PresencaPage() {
         }
       }
       
-      // UPSERT (não duplica)
       const { data: inserido, error } = await supabase
         .from('presenca')
         .upsert(novosRegistros, { onConflict: 'id_groot,data_referencia', ignoreDuplicates: true })
@@ -262,14 +271,10 @@ export default function PresencaPage() {
     }
   }
 
-  // 🗑️ Descartar 1
   async function descartarUm(id: number) {
     const { error } = await supabase
       .from('presenca')
-      .update({
-        status: 'descartado',
-        atualizado_em: new Date().toISOString(),
-      })
+      .update({ status: 'descartado', atualizado_em: new Date().toISOString() })
       .eq('id', id);
     
     if (!error) {
@@ -280,17 +285,13 @@ export default function PresencaPage() {
     }
   }
 
-  // 🗑️ Descartar em massa
   async function descartarSelecionados() {
     setProcessando(true);
     const ids = Array.from(selecionados);
     
     const { error } = await supabase
       .from('presenca')
-      .update({
-        status: 'descartado',
-        atualizado_em: new Date().toISOString(),
-      })
+      .update({ status: 'descartado', atualizado_em: new Date().toISOString() })
       .in('id', ids);
     
     if (!error) {
@@ -303,7 +304,6 @@ export default function PresencaPage() {
     setProcessando(false);
   }
 
-  // 🔄 Reabrir
   async function reabrir(id: number) {
     const { error } = await supabase
       .from('presenca')
@@ -352,7 +352,6 @@ export default function PresencaPage() {
     descartados: registros.filter(p => p.status === 'descartado').length,
   };
 
-  // 📊 Cálculo ABS (absenteísmo)
   const calcAbs = (() => {
     const total = registros.filter(p => p.status !== 'descartado').length;
     const ausencias = registros.filter(p => p.conta_abs && p.status !== 'descartado').length;
@@ -364,14 +363,53 @@ export default function PresencaPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-4xl font-black mb-2">
-          📋 Lista de <span className="text-[#FFD700]">Presença</span>
-        </h1>
-        <p className="text-gray-400">
-          Gestão de presença diária + cálculo de ABS do time
-        </p>
+      {/* HEADER + Botão Importar do MELI */}
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-4xl font-black mb-2">
+            📋 Lista de <span className="text-[#FFD700]">Presença</span>
+          </h1>
+          <p className="text-gray-400">
+            Gestão de presença diária + cálculo de ABS do time
+          </p>
+        </div>
+
+        {/* 🎯 BOTÃO DE IMPORTAR DO MELI */}
+        <Link
+          href="/presenca/importar"
+          className="bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-bold px-5 py-3 rounded-xl shadow-lg shadow-purple-500/30 hover:-translate-y-0.5 transition-all flex items-center gap-2"
+        >
+          <span className="text-xl">📥</span>
+          <div className="text-left">
+            <p className="text-sm">Importar do MELI</p>
+            <p className="text-[10px] opacity-80">CSV de presença completo</p>
+          </div>
+        </Link>
       </div>
+
+      {/* 🎯 BANNER DE ÚLTIMA IMPORTAÇÃO */}
+      {ultimaImportacao && (
+        <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 rounded-2xl p-4 flex items-center gap-3 flex-wrap">
+          <span className="text-2xl">📅</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-purple-300 font-bold text-sm">
+              Última importação do MELI · {ultimaImportacao.total} registros
+            </p>
+            <p className="text-xs text-gray-400">
+              {new Date(ultimaImportacao.data).toLocaleString('pt-BR', { 
+                day: '2-digit', month: '2-digit', year: 'numeric', 
+                hour: '2-digit', minute: '2-digit' 
+              })}
+            </p>
+          </div>
+          <Link 
+            href="/presenca/importar" 
+            className="text-purple-300 hover:text-purple-200 text-xs font-bold underline"
+          >
+            🔄 Importar nova
+          </Link>
+        </div>
+      )}
 
       {/* Stats - 5 cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -599,11 +637,19 @@ export default function PresencaPage() {
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
           <span className="text-6xl block mb-4">✨</span>
           <p className="text-gray-400 mb-2 font-bold">Nenhum registro</p>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-500 mb-4">
             {filtroStatus === 'pendente' 
               ? 'Tudo justificado! Ou clica em "Sincronizar" pra criar novos.'
               : 'Ajuste os filtros pra ver outros registros.'}
           </p>
+          {!ultimaImportacao && filtroStatus === 'pendente' && (
+            <Link
+              href="/presenca/importar"
+              className="inline-block bg-gradient-to-br from-purple-500 to-pink-600 text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-purple-500/30 mt-2"
+            >
+              📥 Importar primeiro CSV do MELI
+            </Link>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -725,7 +771,6 @@ function CardPresenca({
         <span className="text-2xl flex-shrink-0">{cor.emoji}</span>
       </div>
 
-      {/* Status badge */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${cor.corTexto} bg-${registro.status === 'pendente' ? 'yellow' : registro.status === 'presente' ? 'green' : registro.status === 'justificado' ? 'blue' : 'gray'}-500/10`}>
           {cor.texto}
@@ -740,19 +785,22 @@ function CardPresenca({
             ⚠️ Conta ABS
           </span>
         )}
+        {registro.registrado_por === 'csv_meli' && (
+          <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-purple-500/20 text-purple-300">
+            📥 CSV
+          </span>
+        )}
       </div>
 
-      {/* Motivo (se justificado/presente) */}
       {registro.motivo && motivoInfo && (
         <div className="bg-[#0a0a0a]/50 rounded-lg p-2 text-xs mb-3">
-          <p className={`font-bold flex items-center gap-1`}>
+          <p className="font-bold flex items-center gap-1">
             {motivoInfo.emoji} <span className="text-white">{motivoInfo.categoria}</span>
           </p>
           <p className="text-gray-400 mt-1 line-clamp-2">{registro.motivo}</p>
         </div>
       )}
 
-      {/* Ações */}
       <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-[#2a2a2a]/50">
         {registro.status === 'pendente' && (
           <>
@@ -809,7 +857,6 @@ function ModalJustificar({
   const [observacao, setObservacao] = useState(registro.observacao || '');
   const [salvando, setSalvando] = useState(false);
 
-  // Detecta grupo do motivo atual
   useEffect(() => {
     if (registro.motivo) {
       const info = buscarMotivo(registro.motivo);
@@ -887,7 +934,6 @@ function ModalJustificar({
           </button>
         </div>
 
-        {/* Grupo */}
         <div className="mb-4">
           <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
             🏷️ Grupo
@@ -913,7 +959,6 @@ function ModalJustificar({
           </div>
         </div>
 
-        {/* Motivos do grupo */}
         {grupoAtual && (
           <div className="mb-4">
             <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
@@ -956,7 +1001,6 @@ function ModalJustificar({
           </div>
         )}
 
-        {/* Observação */}
         <div className="mb-6">
           <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
             📝 Observação (opcional)
