@@ -3,14 +3,11 @@
  * COLETOR DE CONTEXTO DO COPILOTO VIVO
  * lib/copiloto/coletor-contexto.ts
  * 
- * Junta dados de TODOS os colabs ativos do time:
- * - Carreira (Janela Promocional + Quarter)
- * - Performance (últimos 30d)
- * - Streak negativo (limite DINÂMICO do config)
- * - Ofensores críticos
- * - Quem tá pra promover
- * 
- * Retorna payload estruturado pra IA gerar tarefas inteligentes
+ * Novidades v2:
+ * - Busca dados de PRESENÇA do Q atual (atestados, faltas, BH, SIE)
+ * - Respeita LIMITE de tarefas pendentes (config)
+ * - Filtra colabs que JÁ têm tarefa pendente
+ * - Calcula vagas disponíveis pra IA gerar
  * ====================================================
  */
 
@@ -20,6 +17,19 @@ import { analisarCarreira, calcularStreakNegativo, type AnaliseCarreira } from '
 // ============================================
 // TIPOS
 // ============================================
+
+export type PresencaQuarter = {
+  totalDias: number;
+  presencas: number;
+  atestados: number;          // FJ - Atestado
+  faltasInjustificadas: number; // FI
+  bhPlanejado: number;
+  bhNaoPlanejado: number;
+  sinergiaExterna: number;
+  outrasJustificadas: number;
+  abandono: number;
+  pctAbs: number;
+};
 
 export type ColabContexto = {
   id: number;
@@ -41,17 +51,20 @@ export type ColabContexto = {
   ultimoImpacto: number | null;
   diasComDados: number;
   
-  // Performance recente
+  // Performance recente (janela dinâmica)
   liquidaMedia30d: number;
   diasSuperaMes: number;
   diasAlinhadoMes: number;
   diasAbaixoMes: number;
-  taxaSucesso: number; // % dias supera+alinhado
+  taxaSucesso: number;
+  
+  // 🆕 PRESENÇA DO Q ATUAL
+  presencaQuarter: PresencaQuarter;
   
   // Sinais
-  isOfensorCritico: boolean; // streak ≥ limite_dinamico
-  isJanelaCritica: boolean;  // mês 3 da janela ou prejudicada
-  isAptoMuitoTempo: boolean; // perpétuo ≥ 3 meses
+  isOfensorCritico: boolean;
+  isJanelaCritica: boolean;
+  isAptoMuitoTempo: boolean;
   isAniversarioHoje: boolean;
   
   // Tarefas existentes
@@ -63,14 +76,13 @@ export type ContextoTime = {
   totalColabs: number;
   colabsAtivos: number;
   
-  // Listas relevantes (ordenadas por urgência)
-  ofensoresCriticos: ColabContexto[]; // streak ≥ limite
-  janelaPromocaoIminente: ColabContexto[]; // mês 3 da janela
+  // Listas relevantes
+  ofensoresCriticos: ColabContexto[];
+  janelaPromocaoIminente: ColabContexto[];
   janelaPrejudicada: ColabContexto[];
-  aptosPerpetuosAvalidos: ColabContexto[]; // ≥ 3m esperando
+  aptosPerpetuosAvalidos: ColabContexto[];
   aniversariantesHoje: ColabContexto[];
   
-  // Todos
   todosColabsAtivos: ColabContexto[];
   
   // Stats
@@ -78,14 +90,20 @@ export type ContextoTime = {
   totalSuperas: number;
   totalAlinhados: number;
   
-  // 🎯 Metas DINÂMICAS (do Supabase)
+  // Metas dinâmicas
   metas: MetasDinamicas;
   
-  // Meta info
+  // 🆕 Estado do COPILOTO
+  tarefasPendentesAtual: number;     // quantas tem agora
+  vagasDisponiveis: number;          // limite - pendentes
+  limiteAtingido: boolean;           // true se vagas=0
+  idsComTarefaPendente: string[];    // pra excluir do recálculo
+  
   ultimoUpload: string | null;
   uploadAtrasado: boolean;
   hoje: string;
   quarter: string;
+  inicioQuarter: string;
 };
 
 export type MetasDinamicas = {
@@ -98,6 +116,7 @@ export type MetasDinamicas = {
   meta_ima_checkin: number;
   meta_ima_p2m: number;
   streak_negativo: number;
+  limite_tarefas_pendentes: number;   // 🆕
   janela_performance_dias: number;
   janela_presenca_dias: number;
   presenca_red_flag_pct: number;
@@ -113,6 +132,7 @@ const METAS_FALLBACK: MetasDinamicas = {
   meta_ima_checkin: 1567,
   meta_ima_p2m: 1567,
   streak_negativo: 5,
+  limite_tarefas_pendentes: 10,
   janela_performance_dias: 30,
   janela_presenca_dias: 60,
   presenca_red_flag_pct: 70,
@@ -137,6 +157,16 @@ function getQuarter(data: Date): string {
   return 'Q4';
 }
 
+function getInicioQuarter(data: Date): string {
+  const ano = data.getFullYear();
+  const mes = data.getMonth() + 1;
+  let mesInicio = 1;
+  if (mes >= 4 && mes <= 6) mesInicio = 4;
+  else if (mes >= 7 && mes <= 9) mesInicio = 7;
+  else if (mes >= 10) mesInicio = 10;
+  return `${ano}-${String(mesInicio).padStart(2, '0')}-01`;
+}
+
 function isUploadAtrasado(ultimoUpload: string | null): boolean {
   if (!ultimoUpload) return true;
   const hoje = new Date().toISOString().split('T')[0];
@@ -144,7 +174,7 @@ function isUploadAtrasado(ultimoUpload: string | null): boolean {
 }
 
 // ============================================
-// 🎯 CARREGA METAS DINÂMICAS DO CONFIG
+// CARREGA METAS DO CONFIG
 // ============================================
 
 export async function carregarMetasDinamicas(): Promise<MetasDinamicas> {
@@ -176,28 +206,94 @@ export async function carregarMetasDinamicas(): Promise<MetasDinamicas> {
 }
 
 // ============================================
+// 🎯 PROCESSA PRESENÇA DE 1 COLAB NO Q
+// ============================================
+
+function processarPresencaColab(
+  presencaData: any[],
+  idGroot: string,
+  inicioQuarter: string,
+): PresencaQuarter {
+  const registros = presencaData.filter(p => 
+    p.id_groot === idGroot && 
+    p.data_referencia >= inicioQuarter &&
+    p.status !== 'descartado'
+  );
+  
+  let presencas = 0;
+  let atestados = 0;
+  let faltasInjustificadas = 0;
+  let bhPlanejado = 0;
+  let bhNaoPlanejado = 0;
+  let sinergiaExterna = 0;
+  let outrasJustificadas = 0;
+  let abandono = 0;
+  
+  registros.forEach(r => {
+    const motivo = (r.motivo || '').toLowerCase();
+    const categoria = (r.categoria || '').toUpperCase();
+    
+    if (r.status === 'presente' || categoria === 'P' || categoria === 'HE' || categoria === 'ON') {
+      presencas++;
+    } else if (motivo.includes('atestado')) {
+      atestados++;
+    } else if (categoria === 'FI' || motivo.includes('falta injustificada')) {
+      faltasInjustificadas++;
+    } else if (motivo.includes('banco de horas planejado') || motivo.includes('banco de horas plan')) {
+      bhPlanejado++;
+    } else if (motivo.includes('banco de horas não plan') || motivo.includes('banco de horas n')) {
+      bhNaoPlanejado++;
+    } else if (motivo.includes('sinergia') || categoria === 'SIE') {
+      sinergiaExterna++;
+    } else if (categoria === 'AB' || motivo.includes('abandono')) {
+      abandono++;
+    } else if (r.status === 'justificado') {
+      outrasJustificadas++;
+    }
+  });
+  
+  const totalContabilizado = presencas + atestados + faltasInjustificadas + bhPlanejado + bhNaoPlanejado + outrasJustificadas + abandono;
+  const totalAusencias = faltasInjustificadas + bhNaoPlanejado + abandono;
+  const pctAbs = totalContabilizado > 0 ? (totalAusencias / totalContabilizado) * 100 : 0;
+  
+  return {
+    totalDias: registros.length,
+    presencas,
+    atestados,
+    faltasInjustificadas,
+    bhPlanejado,
+    bhNaoPlanejado,
+    sinergiaExterna,
+    outrasJustificadas,
+    abandono,
+    pctAbs: Number(pctAbs.toFixed(1)),
+  };
+}
+
+// ============================================
 // FUNÇÃO PRINCIPAL — COLETA CONTEXTO DO TIME
 // ============================================
 
 export async function coletarContextoTime(): Promise<ContextoTime> {
   const hoje = new Date();
   const hojeStr = hoje.toISOString().split('T')[0];
+  const inicioQuarter = getInicioQuarter(hoje);
   
-  // 🎯 1. Carrega metas dinâmicas
+  // 1. Metas dinâmicas
   const metas = await carregarMetasDinamicas();
   
   const trintaDiasAtras = new Date();
   trintaDiasAtras.setDate(trintaDiasAtras.getDate() - metas.janela_performance_dias);
   const trintaDiasStr = trintaDiasAtras.toISOString().split('T')[0];
 
-  // 2. Busca todos os colabs ATIVOS
+  // 2. Colabs ATIVOS
   const { data: colabs } = await supabase
     .from('colaboradores')
     .select('id, id_groot, nome, cargo, carreira, processo, status, data_admissao, data_entrada_carreira, aniversario')
     .eq('status', 'Ativo')
     .order('nome');
 
-  // 3. Busca histórico dos últimos 90 dias (pra análise de carreira)
+  // 3. Histórico 90 dias
   const noventaDiasAtras = new Date();
   noventaDiasAtras.setDate(noventaDiasAtras.getDate() - 90);
   const noventaDiasStr = noventaDiasAtras.toISOString().split('T')[0];
@@ -208,13 +304,28 @@ export async function coletarContextoTime(): Promise<ContextoTime> {
     .gte('data_referencia', noventaDiasStr)
     .order('data_referencia', { ascending: false });
 
-  // 4. Busca tarefas pendentes
+  // 4. 🆕 PRESENÇA do Q atual (todos colabs)
+  const { data: presencaQ } = await supabase
+    .from('presenca')
+    .select('id_groot, data_referencia, status, motivo, categoria, conta_abs, conta_presenca')
+    .gte('data_referencia', inicioQuarter)
+    .neq('status', 'descartado');
+
+  // 5. Tarefas pendentes (incluindo gerada_por_ia=false)
   const { data: tarefasPendentes } = await supabase
     .from('tarefas')
     .select('id_groot, tipo, gatilho_origem')
     .eq('status', 'Pendente');
 
-  // 5. Busca último upload
+  const idsComTarefaPendente = (tarefasPendentes || []).map((t: any) => String(t.id_groot));
+  const idsPendentesSet = new Set(idsComTarefaPendente);
+  
+  // 6. CALCULA VAGAS
+  const tarefasPendentesAtual = (tarefasPendentes || []).length;
+  const vagasDisponiveis = Math.max(0, metas.limite_tarefas_pendentes - tarefasPendentesAtual);
+  const limiteAtingido = vagasDisponiveis === 0;
+
+  // 7. Último upload
   const { data: ultimoUploadData } = await supabase
     .from('uploads')
     .select('data_referencia')
@@ -224,11 +335,10 @@ export async function coletarContextoTime(): Promise<ContextoTime> {
   const ultimoUpload = ultimoUploadData?.[0]?.data_referencia || null;
   const uploadAtrasado = isUploadAtrasado(ultimoUpload);
 
-  // 6. Processa cada colab — análise completa
+  // 8. Processa CADA colab
   const colabsContexto: ColabContexto[] = (colabs || []).map((c: any) => {
     const histColab = (historico || []).filter((h: any) => h.id_groot === c.id_groot);
     
-    // Análise de carreira
     const analiseCarreira = analisarCarreira(
       c.carreira,
       c.data_admissao,
@@ -239,13 +349,9 @@ export async function coletarContextoTime(): Promise<ContextoTime> {
       }))
     );
     
-    // Streak negativo
     const streakNegativo = calcularStreakNegativo(histColab);
-    
-    // Último registro
     const ultimo = histColab[0];
     
-    // Performance recente (janela dinâmica do config)
     const histRecente = histColab.filter((h: any) => h.data_referencia >= trintaDiasStr);
     const diasComDados30d = histRecente.length;
     const somaLiquida = histRecente.reduce((s: number, h: any) => s + (Number(h.prod_liquida) || 0), 0);
@@ -258,7 +364,13 @@ export async function coletarContextoTime(): Promise<ContextoTime> {
       ? ((diasSuperaMes + diasAlinhadoMes) / diasComDados30d) * 100 
       : 0;
     
-    // 🎯 Sinais (usando metas dinâmicas)
+    // 🆕 PRESENÇA DO Q
+    const presencaQuarter = processarPresencaColab(
+      presencaQ || [],
+      c.id_groot,
+      inicioQuarter
+    );
+    
     const isOfensorCritico = streakNegativo >= metas.streak_negativo;
     const isJanelaCritica = 
       analiseCarreira.status === 'JANELA_PREJUDICADA' ||
@@ -267,7 +379,6 @@ export async function coletarContextoTime(): Promise<ContextoTime> {
       analiseCarreira.status === 'APTO_PERPETUO' && 
       (analiseCarreira.mesesPerpetuo || 0) >= 3;
     
-    // Tarefa pendente?
     const tarefaPendente = (tarefasPendentes || []).find((t: any) => t.id_groot === c.id_groot);
     
     return {
@@ -295,6 +406,8 @@ export async function coletarContextoTime(): Promise<ContextoTime> {
       diasAbaixoMes,
       taxaSucesso: Number(taxaSucesso.toFixed(1)),
       
+      presencaQuarter,
+      
       isOfensorCritico,
       isJanelaCritica,
       isAptoMuitoTempo,
@@ -305,7 +418,7 @@ export async function coletarContextoTime(): Promise<ContextoTime> {
     };
   });
 
-  // 7. Separa em listas relevantes
+  // 9. Listas priorizadas
   const ofensoresCriticos = colabsContexto
     .filter(c => c.isOfensorCritico)
     .sort((a, b) => b.streakNegativo - a.streakNegativo);
@@ -328,7 +441,6 @@ export async function coletarContextoTime(): Promise<ContextoTime> {
   
   const aniversariantesHoje = colabsContexto.filter(c => c.isAniversarioHoje);
 
-  // Stats gerais
   const totalOfensores = colabsContexto.filter(c => c.ultimoStatus === 'Abaixo').length;
   const totalSuperas = colabsContexto.filter(c => c.ultimoStatus === 'Supera').length;
   const totalAlinhados = colabsContexto.filter(c => c.ultimoStatus === 'Alinhado').length;
@@ -351,43 +463,66 @@ export async function coletarContextoTime(): Promise<ContextoTime> {
     
     metas,
     
+    // 🆕 ESTADO DO COPILOTO
+    tarefasPendentesAtual,
+    vagasDisponiveis,
+    limiteAtingido,
+    idsComTarefaPendente,
+    
     ultimoUpload,
     uploadAtrasado,
     hoje: hojeStr,
     quarter: getQuarter(hoje),
+    inicioQuarter,
   };
 }
 
 // ============================================
-// PRIORIZA: quem PRECISA de análise IA agora
-// (pra economizar tokens, IA roda só nos críticos)
+// 🎯 PRIORIZA: respeita limite + anti-duplicata
 // ============================================
 
 export function priorizarParaAnaliseIA(contexto: ContextoTime): ColabContexto[] {
+  // Se limite atingido, retorna VAZIO
+  if (contexto.limiteAtingido) {
+    console.log(`⚠️ Limite atingido: ${contexto.tarefasPendentesAtual}/${contexto.metas.limite_tarefas_pendentes}`);
+    return [];
+  }
+  
+  const idsPendentesSet = new Set(contexto.idsComTarefaPendente);
   const prioritarios: ColabContexto[] = [];
   const idsJaIncluidos = new Set<string>();
   
   function adicionar(colab: ColabContexto) {
-    if (!idsJaIncluidos.has(colab.id_groot)) {
-      prioritarios.push(colab);
-      idsJaIncluidos.add(colab.id_groot);
+    // PULA se já tem tarefa pendente
+    if (idsPendentesSet.has(colab.id_groot)) {
+      return;
     }
+    // PULA se já incluiu no batch atual
+    if (idsJaIncluidos.has(colab.id_groot)) {
+      return;
+    }
+    prioritarios.push(colab);
+    idsJaIncluidos.add(colab.id_groot);
   }
   
-  // 1. Janela Promocional ATIVA (mês 3 = PROMOVER AGORA)
+  // Ordem de urgência:
+  // 1. Janela Promocional Iminente (mês 3)
   contexto.janelaPromocaoIminente.forEach(adicionar);
   
-  // 2. Janela Prejudicada (alta urgência)
+  // 2. Janela Prejudicada
   contexto.janelaPrejudicada.forEach(adicionar);
   
-  // 3. Aptos Perpétuos esperando muito (≥ 3 meses)
+  // 3. Aptos Perpétuos esperando ≥ 3m
   contexto.aptosPerpetuosAvalidos.forEach(adicionar);
   
-  // 4. Ofensores Críticos (streak ≥ limite dinâmico)
+  // 4. Ofensores Críticos
   contexto.ofensoresCriticos.forEach(adicionar);
   
-  // Limite — máximo 15 análises por vez (controla tokens da IA)
-  return prioritarios.slice(0, 15);
+  // 5. Aniversariantes
+  contexto.aniversariantesHoje.forEach(adicionar);
+  
+  // 🎯 Limita pelas vagas disponíveis
+  return prioritarios.slice(0, contexto.vagasDisponiveis);
 }
 
 // ============================================
@@ -400,8 +535,12 @@ export function montarResumoTime(contexto: ContextoTime): string {
   linhas.push(`📊 CONTEXTO DO TIME (${contexto.hoje} - ${contexto.quarter})`);
   linhas.push(`Total: ${contexto.colabsAtivos} colabs ativos`);
   linhas.push(`Performance: ${contexto.totalSuperas} Superas | ${contexto.totalAlinhados} Alinhados | ${contexto.totalOfensores} Ofensores`);
-  linhas.push(`Streak alerta configurado: ${contexto.metas.streak_negativo} dias`);
+  linhas.push(`Tarefas: ${contexto.tarefasPendentesAtual}/${contexto.metas.limite_tarefas_pendentes} (${contexto.vagasDisponiveis} vaga(s))`);
   linhas.push('');
+  
+  if (contexto.limiteAtingido) {
+    linhas.push(`🛑 LIMITE ATINGIDO - sem gerar novas tarefas`);
+  }
   
   if (contexto.uploadAtrasado) {
     linhas.push(`⚠️ Upload atrasado! Último: ${contexto.ultimoUpload || 'nunca'}`);
@@ -421,10 +560,6 @@ export function montarResumoTime(contexto: ContextoTime): string {
   
   if (contexto.aptosPerpetuosAvalidos.length > 0) {
     linhas.push(`⭐ ${contexto.aptosPerpetuosAvalidos.length} APTOS PERPÉTUOS aguardando (≥3m)`);
-  }
-  
-  if (contexto.aniversariantesHoje.length > 0) {
-    linhas.push(`🎂 ${contexto.aniversariantesHoje.length} aniversariantes hoje`);
   }
   
   return linhas.join('\n');
