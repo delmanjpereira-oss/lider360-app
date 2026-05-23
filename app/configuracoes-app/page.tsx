@@ -31,24 +31,16 @@ type UploadHistorico = {
 // ============================================
 
 type MetasApp = {
-  // Produtividade
   meta_checkin_base: string;
   meta_checkin_alinhado_max: string;
   meta_p2m_base: string;
   meta_p2m_alinhado_max: string;
-  
-  // Ocupação
   meta_ocupacao_checkin: string;
   meta_ocupacao_p2m: string;
-  
-  // IMA
   meta_ima_checkin: string;
   meta_ima_p2m: string;
-  
-  // Streak / Copiloto Vivo
   streak_negativo: string;
-  
-  // Limites de análise
+  limite_tarefas_pendentes: string; // 🆕 LIMITE DE TAREFAS DO COPILOTO
   janela_performance_dias: string;
   janela_presenca_dias: string;
   presenca_red_flag_pct: string;
@@ -64,6 +56,7 @@ const METAS_DEFAULT: MetasApp = {
   meta_ima_checkin: '1567',
   meta_ima_p2m: '1567',
   streak_negativo: '5',
+  limite_tarefas_pendentes: '10',
   janela_performance_dias: '30',
   janela_presenca_dias: '60',
   presenca_red_flag_pct: '70',
@@ -71,14 +64,15 @@ const METAS_DEFAULT: MetasApp = {
 
 const METAS_INFO: Record<keyof MetasApp, { label: string; emoji: string; descricao: string; sufixo: string; categoria: string }> = {
   meta_checkin_base: { label: 'Meta Base Checkin', emoji: '📦', descricao: 'Mínima pra "Alinhado"', sufixo: 'pç/h', categoria: 'Produtividade' },
-  meta_checkin_alinhado_max: { label: 'Meta Supera Checkin', emoji: '📦', descricao: 'A partir daqui, vira "Supera"', sufixo: 'pç/h', categoria: 'Produtividade' },
+  meta_checkin_alinhado_max: { label: 'Meta Supera Checkin', emoji: '📦', descricao: 'A partir desse valor vira "Supera"', sufixo: 'pç/h', categoria: 'Produtividade' },
   meta_p2m_base: { label: 'Meta Base P2M', emoji: '🚚', descricao: 'Mínima pra "Alinhado"', sufixo: 'pç/h', categoria: 'Produtividade' },
-  meta_p2m_alinhado_max: { label: 'Meta Supera P2M', emoji: '🚚', descricao: 'A partir daqui, vira "Supera"', sufixo: 'pç/h', categoria: 'Produtividade' },
+  meta_p2m_alinhado_max: { label: 'Meta Supera P2M', emoji: '🚚', descricao: 'A partir desse valor vira "Supera"', sufixo: 'pç/h', categoria: 'Produtividade' },
   meta_ocupacao_checkin: { label: 'Ocupação Checkin', emoji: '📊', descricao: 'Mínima desejada', sufixo: '%', categoria: 'Ocupação' },
   meta_ocupacao_p2m: { label: 'Ocupação P2M', emoji: '📊', descricao: 'Mínima desejada', sufixo: '%', categoria: 'Ocupação' },
   meta_ima_checkin: { label: 'IMA Limite Checkin', emoji: '🎯', descricao: 'Máximo (menor é melhor)', sufixo: '', categoria: 'Qualidade' },
   meta_ima_p2m: { label: 'IMA Limite P2M', emoji: '🎯', descricao: 'Máximo (menor é melhor)', sufixo: '', categoria: 'Qualidade' },
   streak_negativo: { label: 'Streak de Alerta', emoji: '🚨', descricao: 'Dias seguidos abaixo da meta = ofensor crítico', sufixo: 'dias', categoria: 'Copiloto Vivo' },
+  limite_tarefas_pendentes: { label: 'Limite de Tarefas Pendentes', emoji: '🤖', descricao: 'Máx. de tarefas que IA pode gerar. Conclua pra liberar novas.', sufixo: 'tarefas', categoria: 'Copiloto Vivo' },
   janela_performance_dias: { label: 'Janela Performance', emoji: '📅', descricao: 'Dias analisados nas estatísticas', sufixo: 'dias', categoria: 'Análise' },
   janela_presenca_dias: { label: 'Janela Presença', emoji: '📅', descricao: 'Dias analisados na assiduidade', sufixo: 'dias', categoria: 'Análise' },
   presenca_red_flag_pct: { label: 'Presença Crítica', emoji: '⚠️', descricao: 'Abaixo disso vira alerta', sufixo: '%', categoria: 'Análise' },
@@ -96,16 +90,13 @@ const MESES = [
 export default function ConfiguracoesBancoPage() {
   const toast = useToast();
   
-  // 🎯 ABA ATIVA
   const [abaAtiva, setAbaAtiva] = useState<'metas' | 'banco'>('metas');
   
-  // 🎯 METAS
   const [metas, setMetas] = useState<MetasApp>(METAS_DEFAULT);
   const [metasOriginal, setMetasOriginal] = useState<MetasApp>(METAS_DEFAULT);
   const [salvandoMetas, setSalvandoMetas] = useState(false);
   const [carregandoMetas, setCarregandoMetas] = useState(true);
   
-  // Banco
   const [status, setStatus] = useState<StatusBanco>({
     totalRegistros: 0, tamanhoMB: 0, totalColabs: 0, totalIMAs: 0,
     totalDPMOs: 0, totalSemanas: 0, totalHistorico: 0, totalOcupacao: 0, totalFeedbacks: 0,
@@ -126,10 +117,6 @@ export default function ConfiguracoesBancoPage() {
   const [confirmarApagarTudo, setConfirmarApagarTudo] = useState('');
   const [apagandoTudo, setApagandoTudo] = useState(false);
 
-  // ============================================
-  // CARREGAR METAS DO SUPABASE
-  // ============================================
-  
   useEffect(() => {
     carregarMetas();
     carregarBanco();
@@ -206,10 +193,6 @@ export default function ConfiguracoesBancoPage() {
   
   const houveMudanca = JSON.stringify(metas) !== JSON.stringify(metasOriginal);
 
-  // ============================================
-  // BANCO
-  // ============================================
-  
   async function carregarBanco() {
     setLoading(true);
     try {
@@ -415,7 +398,6 @@ export default function ConfiguracoesBancoPage() {
     } catch { return iso; }
   }
 
-  // 🎯 Agrupa metas por categoria
   const metasPorCategoria: Record<string, (keyof MetasApp)[]> = {};
   (Object.keys(METAS_INFO) as (keyof MetasApp)[]).forEach(chave => {
     const cat = METAS_INFO[chave].categoria;
@@ -434,14 +416,11 @@ export default function ConfiguracoesBancoPage() {
           <p className="text-gray-400 text-sm">Metas do app + gerenciamento do banco</p>
         </div>
 
-        {/* 🎯 TABS PRINCIPAIS */}
         <div className="flex gap-2 mb-6 border-b border-[#2a2a2a]">
           <button
             onClick={() => setAbaAtiva('metas')}
             className={`px-6 py-3 font-bold text-sm transition-all border-b-2 -mb-px ${
-              abaAtiva === 'metas'
-                ? 'border-[#FFD700] text-[#FFD700]'
-                : 'border-transparent text-gray-500 hover:text-gray-300'
+              abaAtiva === 'metas' ? 'border-[#FFD700] text-[#FFD700]' : 'border-transparent text-gray-500 hover:text-gray-300'
             }`}
           >
             🎯 Metas e Limites
@@ -449,18 +428,13 @@ export default function ConfiguracoesBancoPage() {
           <button
             onClick={() => setAbaAtiva('banco')}
             className={`px-6 py-3 font-bold text-sm transition-all border-b-2 -mb-px ${
-              abaAtiva === 'banco'
-                ? 'border-orange-400 text-orange-300'
-                : 'border-transparent text-gray-500 hover:text-gray-300'
+              abaAtiva === 'banco' ? 'border-orange-400 text-orange-300' : 'border-transparent text-gray-500 hover:text-gray-300'
             }`}
           >
             🗄️ Banco de Dados
           </button>
         </div>
 
-        {/* ============================================ */}
-        {/* 🎯 ABA METAS */}
-        {/* ============================================ */}
         {abaAtiva === 'metas' && (
           <>
             {carregandoMetas ? (
@@ -470,7 +444,6 @@ export default function ConfiguracoesBancoPage() {
               </div>
             ) : (
               <>
-                {/* Aviso */}
                 <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/5 border border-blue-500/30 rounded-2xl p-4 mb-6 flex items-start gap-3">
                   <span className="text-2xl">💡</span>
                   <div className="text-sm">
@@ -482,7 +455,6 @@ export default function ConfiguracoesBancoPage() {
                   </div>
                 </div>
 
-                {/* Metas agrupadas por categoria */}
                 <div className="space-y-4 mb-6">
                   {Object.entries(metasPorCategoria).map(([categoria, chaves]) => (
                     <div key={categoria} className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
@@ -514,7 +486,7 @@ export default function ConfiguracoesBancoPage() {
                                   className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] focus:border-[#FFD700] rounded-lg px-3 py-2 text-white font-mono text-base outline-none transition-colors"
                                 />
                                 {info.sufixo && (
-                                  <span className="text-xs text-gray-400 font-bold w-12">{info.sufixo}</span>
+                                  <span className="text-xs text-gray-400 font-bold w-16">{info.sufixo}</span>
                                 )}
                               </div>
                             </div>
@@ -525,7 +497,6 @@ export default function ConfiguracoesBancoPage() {
                   ))}
                 </div>
 
-                {/* Botões de ação */}
                 <div className="sticky bottom-4 bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-[#FFD700]/30 rounded-2xl p-4 flex gap-3 flex-wrap shadow-2xl shadow-yellow-500/10">
                   {houveMudanca && (
                     <span className="text-yellow-400 font-bold text-sm flex items-center gap-2">
@@ -552,12 +523,8 @@ export default function ConfiguracoesBancoPage() {
           </>
         )}
 
-        {/* ============================================ */}
-        {/* 🗄️ ABA BANCO */}
-        {/* ============================================ */}
         {abaAtiva === 'banco' && (
           <>
-            {/* Cards de status */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
               <StatusCard icone="👥" valor={loading ? '...' : status.totalColabs} label="Colaboradores" cor="from-cyan-500/20 to-cyan-600/5" corBorda="border-cyan-500/30" />
               <StatusCard icone="🎯" valor={loading ? '...' : status.totalIMAs} label="IMAs Salvos" cor="from-yellow-500/20 to-yellow-600/5" corBorda="border-yellow-500/30" />
@@ -565,7 +532,6 @@ export default function ConfiguracoesBancoPage() {
               <StatusCard icone="📅" valor={loading ? '...' : status.totalSemanas} label="Semanas c/ Dados" cor="from-emerald-500/20 to-emerald-600/5" corBorda="border-emerald-500/30" />
             </div>
 
-            {/* Limpar por mês */}
             <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
               <div className="flex items-center gap-3 mb-5">
                 <div className="w-12 h-12 rounded-xl bg-orange-500/20 flex items-center justify-center text-2xl">🧹</div>
@@ -601,7 +567,6 @@ export default function ConfiguracoesBancoPage() {
               </button>
             </div>
 
-            {/* Limpar histórico */}
             <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-12 h-12 rounded-xl bg-rose-500/20 flex items-center justify-center text-2xl">📊</div>
@@ -615,7 +580,6 @@ export default function ConfiguracoesBancoPage() {
               </button>
             </div>
 
-            {/* Histórico de uploads */}
             <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4 group">
               <summary className="cursor-pointer p-5 flex items-center justify-between hover:bg-[#1e1e1e] transition-all rounded-xl list-none">
                 <span className="text-sm font-bold text-gray-300">📋 Histórico de Envios</span>
@@ -664,7 +628,6 @@ export default function ConfiguracoesBancoPage() {
               </div>
             </details>
 
-            {/* Duplicatas */}
             <details className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl mb-4 group">
               <summary className="cursor-pointer p-5 flex items-center justify-between hover:bg-[#1e1e1e] transition-all rounded-xl list-none">
                 <span className="text-sm font-bold text-gray-300">🔧 Detectar Duplicatas</span>
@@ -687,7 +650,6 @@ export default function ConfiguracoesBancoPage() {
               </div>
             </details>
 
-            {/* Zona perigo */}
             <div className="bg-gradient-to-br from-red-500/5 to-red-700/5 border border-red-500/30 rounded-2xl p-6">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center text-2xl">🚨</div>
