@@ -36,14 +36,32 @@ function parseVolume(str: string): number {
   return isFinite(v) ? v : 0;
 }
 
-// Converte HH e MM em string "HH:MM:00"
 function tempoParaString(h: number, m: number): string {
   const hh = String(h || 0).padStart(2, '0');
   const mm = String(m || 0).padStart(2, '0');
   return `${hh}:${mm}:00`;
 }
 
-// 🧠 Extrai tempos do texto OCR usando regex inteligente
+// 🎯 Soma 2 tempos (HH:MM) e normaliza
+function somarTempos(t1: TempoUnico, t2: TempoUnico): TempoUnico {
+  const totalMin = (t1.h * 60 + t1.m) + (t2.h * 60 + t2.m);
+  return {
+    h: Math.floor(totalMin / 60),
+    m: totalMin % 60,
+  };
+}
+
+// 🎯 Soma 2 conjuntos de Tempos
+function somarConjuntoTempos(t1: Tempos, t2: Tempos): Tempos {
+  return {
+    ociosidade: somarTempos(t1.ociosidade, t2.ociosidade),
+    efetivo: somarTempos(t1.efetivo, t2.efetivo),
+    naoSistemico: somarTempos(t1.naoSistemico, t2.naoSistemico),
+    naoDisponivel: somarTempos(t1.naoDisponivel, t2.naoDisponivel),
+  };
+}
+
+// 🧠 Extração OCR (mantém igual)
 function extrairTemposDoTexto(texto: string): Partial<Tempos> {
   const t = texto.toLowerCase().replace(/\s+/g, ' ');
   const result: Partial<Tempos> = {};
@@ -171,12 +189,16 @@ export default function CalculadoraNetPage() {
   const [mostrarOcr, setMostrarOcr] = useState(false);
   const [mostrarRegistrarTurno, setMostrarRegistrarTurno] = useState(false);
 
-  // OCR
-  const [imagemPreview, setImagemPreview] = useState<string | null>(null);
+  // 🎯 OCR - agora suporta 2 imagens
+  const [imagem1Preview, setImagem1Preview] = useState<string | null>(null);
+  const [imagem2Preview, setImagem2Preview] = useState<string | null>(null);
+  const [tempos1, setTempos1] = useState<Tempos | null>(null);
+  const [tempos2, setTempos2] = useState<Tempos | null>(null);
+  const [textoExtraido1, setTextoExtraido1] = useState('');
+  const [textoExtraido2, setTextoExtraido2] = useState('');
   const [ocrProgresso, setOcrProgresso] = useState(0);
   const [ocrStatus, setOcrStatus] = useState('');
-  const [ocrLoading, setOcrLoading] = useState(false);
-  const [textoExtraido, setTextoExtraido] = useState('');
+  const [ocrLoading, setOcrLoading] = useState<1 | 2 | false>(false);
 
   const areaRef = useRef<HTMLDivElement>(null);
 
@@ -188,13 +210,11 @@ export default function CalculadoraNetPage() {
   const volume = parseVolume(volumeStr);
   const net = totalHoras > 0 ? volume / totalHoras : 0;
 
-  // 🎯 Percentuais pro registro do turno
   const pctEfetivo = totalHoras > 0 ? (efe / totalHoras) * 100 : 0;
   const pctOcioso = totalHoras > 0 ? (ocio / totalHoras) * 100 : 0;
   const pctNaoSistemico = totalHoras > 0 ? (naoSis / totalHoras) * 100 : 0;
   const pctNaoDisponivel = totalHoras > 0 ? (naoDisp / totalHoras) * 100 : 0;
 
-  // 🎯 Dados que vão pro modal de Registrar Turno
   const dadosTurno = {
     tempo_efetivo: tempoParaString(tempos.efetivo.h, tempos.efetivo.m),
     tempo_ocioso: tempoParaString(tempos.ociosidade.h, tempos.ociosidade.m),
@@ -270,15 +290,19 @@ export default function CalculadoraNetPage() {
     }
   }
 
-  async function processarImagem(file: File) {
-    setOcrLoading(true);
+  // 🎯 Processa imagem 1 ou 2
+  async function processarImagem(file: File, slot: 1 | 2) {
+    setOcrLoading(slot);
     setOcrProgresso(0);
     setOcrStatus('Iniciando...');
-    setTextoExtraido('');
 
     try {
       const reader = new FileReader();
-      reader.onload = (e) => setImagemPreview(e.target?.result as string);
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        if (slot === 1) setImagem1Preview(dataUrl);
+        else setImagem2Preview(dataUrl);
+      };
       reader.readAsDataURL(file);
 
       const Tesseract = (await import('tesseract.js')).default;
@@ -286,7 +310,7 @@ export default function CalculadoraNetPage() {
       const worker = await Tesseract.createWorker('por', 1, {
         logger: (m: { status: string; progress: number }) => {
           if (m.status === 'recognizing text') {
-            setOcrStatus('Lendo texto da imagem...');
+            setOcrStatus(`Lendo imagem ${slot}...`);
             setOcrProgresso(Math.round(m.progress * 100));
           } else {
             setOcrStatus(m.status);
@@ -298,36 +322,40 @@ export default function CalculadoraNetPage() {
       await worker.terminate();
 
       const texto = data.text;
-      setTextoExtraido(texto);
-      console.log('📝 Texto OCR:', texto);
+      console.log(`📝 Texto OCR imagem ${slot}:`, texto);
 
       const extraidos = extrairTemposDoTexto(texto);
-      console.log('🎯 Tempos extraídos:', extraidos);
+      console.log(`🎯 Tempos imagem ${slot}:`, extraidos);
+
+      // Preenche zerado nos campos não encontrados
+      const temposCompletos: Tempos = {
+        ociosidade: extraidos.ociosidade || { h: 0, m: 0 },
+        efetivo: extraidos.efetivo || { h: 0, m: 0 },
+        naoSistemico: extraidos.naoSistemico || { h: 0, m: 0 },
+        naoDisponivel: extraidos.naoDisponivel || { h: 0, m: 0 },
+      };
+
+      if (slot === 1) {
+        setTempos1(temposCompletos);
+        setTextoExtraido1(texto);
+      } else {
+        setTempos2(temposCompletos);
+        setTextoExtraido2(texto);
+      }
 
       if (Object.keys(extraidos).length === 0) {
         if (typeof window !== 'undefined' && (window as any).showToast) {
-          (window as any).showToast(
-            'warning',
-            'Não consegui identificar os tempos. Confira o texto extraído e digite manualmente.'
-          );
+          (window as any).showToast('warning', `Imagem ${slot}: não consegui identificar tempos. Edite manualmente.`);
         }
       } else {
-        setTempos((prev) => ({ ...prev, ...extraidos }));
-        const encontrados = Object.keys(extraidos).length;
         if (typeof window !== 'undefined' && (window as any).showToast) {
-          (window as any).showToast(
-            'success',
-            `${encontrados} tempo(s) preenchido(s)! Confira e ajuste se precisar.`
-          );
+          (window as any).showToast('success', `Imagem ${slot}: ${Object.keys(extraidos).length} tempo(s) lido(s)!`);
         }
       }
-    } catch (e: unknown) {
-      console.error('Erro no OCR:', e);
+    } catch (e) {
+      console.error('Erro OCR:', e);
       if (typeof window !== 'undefined' && (window as any).showToast) {
-        (window as any).showToast(
-          'error',
-          'Erro ao processar imagem. Tente uma imagem com melhor qualidade.'
-        );
+        (window as any).showToast('error', 'Erro ao processar imagem.');
       }
     } finally {
       setOcrLoading(false);
@@ -336,15 +364,63 @@ export default function CalculadoraNetPage() {
     }
   }
 
-  function onArquivoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) processarImagem(file);
+  // 🎯 Atualiza tempo de uma imagem (edição manual)
+  function atualizarTempoSlot(slot: 1 | 2, tipo: keyof Tempos, campo: 'h' | 'm', valor: string) {
+    const num = parseInt(valor, 10);
+    const novo = isNaN(num) ? 0 : Math.max(0, campo === 'm' ? Math.min(59, num) : num);
+    
+    if (slot === 1 && tempos1) {
+      setTempos1({
+        ...tempos1,
+        [tipo]: { ...tempos1[tipo], [campo]: novo }
+      });
+    } else if (slot === 2 && tempos2) {
+      setTempos2({
+        ...tempos2,
+        [tipo]: { ...tempos2[tipo], [campo]: novo }
+      });
+    }
+  }
+
+  // 🎯 Remove imagem de um slot
+  function removerSlot(slot: 1 | 2) {
+    if (slot === 1) {
+      setImagem1Preview(null);
+      setTempos1(null);
+      setTextoExtraido1('');
+    } else {
+      setImagem2Preview(null);
+      setTempos2(null);
+      setTextoExtraido2('');
+    }
+  }
+
+  // 🎯 Soma dos tempos das duas imagens
+  const tempoFinal: Tempos | null = (() => {
+    if (!tempos1 && !tempos2) return null;
+    if (tempos1 && !tempos2) return tempos1;
+    if (!tempos1 && tempos2) return tempos2;
+    return somarConjuntoTempos(tempos1!, tempos2!);
+  })();
+
+  function aplicarNaCalculadora() {
+    if (!tempoFinal) return;
+    setTempos(tempoFinal);
+    fecharOcr();
+    if (typeof window !== 'undefined' && (window as any).showToast) {
+      const qtd = (tempos1 ? 1 : 0) + (tempos2 ? 1 : 0);
+      (window as any).showToast('success', `✅ Aplicado! ${qtd === 2 ? 'Soma das 2 imagens' : '1 imagem'} na calculadora`);
+    }
   }
 
   function fecharOcr() {
     setMostrarOcr(false);
-    setImagemPreview(null);
-    setTextoExtraido('');
+    setImagem1Preview(null);
+    setImagem2Preview(null);
+    setTempos1(null);
+    setTempos2(null);
+    setTextoExtraido1('');
+    setTextoExtraido2('');
   }
 
   return (
@@ -359,9 +435,7 @@ export default function CalculadoraNetPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ESQUERDA — Inputs */}
         <div className="lg:col-span-2 space-y-4" ref={areaRef}>
-          {/* Card de Tempos */}
           <div
             className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl overflow-hidden"
             style={{ boxShadow: '0 10px 30px -5px rgba(0,0,0,0.5)' }}
@@ -428,7 +502,6 @@ export default function CalculadoraNetPage() {
             </div>
           </div>
 
-          {/* Card de Volume */}
           <div
             className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl overflow-hidden"
             style={{ boxShadow: '0 10px 30px -5px rgba(0,0,0,0.5)' }}
@@ -448,7 +521,6 @@ export default function CalculadoraNetPage() {
             </div>
           </div>
 
-          {/* Botões */}
           <div className="flex flex-wrap gap-3">
             <button
               onClick={() => setMostrarOcr(true)}
@@ -465,7 +537,6 @@ export default function CalculadoraNetPage() {
               {gerandoImagem ? 'Gerando...' : 'Salvar PNG'}
             </button>
 
-            {/* ⭐ NOVO BOTÃO: Registrar Fim de Turno */}
             <button
               onClick={() => setMostrarRegistrarTurno(true)}
               disabled={!podeRegistrarTurno}
@@ -484,7 +555,7 @@ export default function CalculadoraNetPage() {
           </div>
         </div>
 
-        {/* DIREITA — Resultado */}
+        {/* RESULTADO */}
         <div className="lg:col-span-1">
           <div
             className="bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border border-[#2a2a2a] rounded-2xl p-5 sticky top-24"
@@ -533,15 +604,14 @@ export default function CalculadoraNetPage() {
                 NET = Volume produzido ÷ Total de horas
               </p>
               <p className="text-gray-500">
-                O total de horas é a soma das 4 categorias convertidas para hora
-                decimal.
+                O total de horas é a soma das 4 categorias convertidas para hora decimal.
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* MODAL DE OCR */}
+      {/* 🎯 MODAL DE OCR - AGORA COM 2 SLOTS */}
       {mostrarOcr && (
         <div
           className="fixed inset-0 z-[9000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
@@ -549,10 +619,9 @@ export default function CalculadoraNetPage() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-[#2a2a2a] rounded-3xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-[#2a2a2a] rounded-3xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto"
             style={{
-              boxShadow:
-                '0 30px 80px -10px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05) inset',
+              boxShadow: '0 30px 80px -10px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05) inset',
             }}
           >
             <div className="flex items-start justify-between mb-5">
@@ -561,8 +630,7 @@ export default function CalculadoraNetPage() {
                   📷 Importar de imagem
                 </h2>
                 <p className="text-gray-400 text-sm">
-                  Suba o print do painel do MELI — o app vai tentar ler os tempos
-                  automaticamente
+                  Suba 1 ou 2 imagens. <span className="text-orange-300 font-bold">Se subir 2, os tempos somam automaticamente.</span>
                 </p>
               </div>
               <button
@@ -573,98 +641,232 @@ export default function CalculadoraNetPage() {
               </button>
             </div>
 
-            {!ocrLoading && !imagemPreview && (
-              <label className="block">
-                <div className="border-2 border-dashed border-[#3a3a3a] hover:border-[#FFD700] rounded-2xl p-12 text-center cursor-pointer transition-colors bg-[#0a0a0a]/50">
-                  <span className="text-6xl block mb-4">📁</span>
-                  <p className="text-white font-bold mb-2">
-                    Clica aqui pra escolher uma imagem
-                  </p>
-                  <p className="text-gray-500 text-xs">
-                    PNG, JPG ou JPEG · idealmente sem rotação
-                  </p>
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={onArquivoChange}
-                />
-              </label>
-            )}
-
+            {/* Progress (durante OCR) */}
             {ocrLoading && (
-              <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-2xl p-8 text-center space-y-4">
-                <span className="text-5xl block soft-pulse">🔍</span>
-                <p className="text-white font-bold">{ocrStatus || 'Processando...'}</p>
-                <div className="bg-[#1a1a1a] rounded-full h-3 overflow-hidden">
+              <div className="bg-[#0a0a0a] border border-orange-500/30 rounded-2xl p-4 mb-4">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl animate-pulse">🔍</span>
+                  <p className="text-white font-bold flex-1">{ocrStatus}</p>
+                  <span className="text-orange-300 font-mono font-bold">{ocrProgresso}%</span>
+                </div>
+                <div className="bg-[#1a1a1a] rounded-full h-2 overflow-hidden">
                   <div
-                    className="bg-gradient-to-r from-[#FFD700] to-yellow-500 h-full transition-all duration-300"
+                    className="bg-gradient-to-r from-orange-500 to-yellow-500 h-full transition-all"
                     style={{ width: `${ocrProgresso}%` }}
                   ></div>
                 </div>
-                <p className="text-gray-400 text-xs">{ocrProgresso}%</p>
               </div>
             )}
 
-            {imagemPreview && !ocrLoading && (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-xs text-gray-400 mb-2 font-bold uppercase">
-                    Imagem
-                  </p>
-                  <img
-                    src={imagemPreview}
-                    alt="Preview"
-                    className="w-full rounded-xl border border-[#2a2a2a]"
-                  />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {/* SLOT 1 */}
+              <SlotImagem
+                numero={1}
+                imagemPreview={imagem1Preview}
+                tempos={tempos1}
+                textoExtraido={textoExtraido1}
+                ocrLoading={ocrLoading === 1}
+                onUpload={(file) => processarImagem(file, 1)}
+                onRemove={() => removerSlot(1)}
+                onEditTempo={(tipo, campo, valor) => atualizarTempoSlot(1, tipo, campo, valor)}
+              />
+
+              {/* SLOT 2 (opcional) */}
+              <SlotImagem
+                numero={2}
+                imagemPreview={imagem2Preview}
+                tempos={tempos2}
+                textoExtraido={textoExtraido2}
+                ocrLoading={ocrLoading === 2}
+                onUpload={(file) => processarImagem(file, 2)}
+                onRemove={() => removerSlot(2)}
+                onEditTempo={(tipo, campo, valor) => atualizarTempoSlot(2, tipo, campo, valor)}
+                opcional
+              />
+            </div>
+
+            {/* TOTAL CALCULADO (se tem pelo menos 1 imagem) */}
+            {tempoFinal && (
+              <div className="bg-gradient-to-br from-yellow-500/10 to-orange-500/5 border-2 border-yellow-500/30 rounded-2xl p-5 mb-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-2xl">🧮</span>
+                  <h3 className="font-black text-yellow-300">
+                    {tempos1 && tempos2 ? 'SOMA DOS 2 TIMES' : 'TEMPO TOTAL'}
+                  </h3>
+                  {tempos1 && tempos2 && (
+                    <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2 py-0.5 rounded-full font-bold">
+                      Time 1 + Time 2
+                    </span>
+                  )}
                 </div>
-
-                {textoExtraido && (
-                  <details className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl p-4">
-                    <summary className="cursor-pointer text-xs font-bold text-gray-400 uppercase">
-                      📝 Texto bruto extraído (clica pra ver)
-                    </summary>
-                    <pre className="text-xs text-gray-300 mt-3 whitespace-pre-wrap font-mono max-h-48 overflow-y-auto">
-                      {textoExtraido}
-                    </pre>
-                  </details>
-                )}
-
-                <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 text-xs text-blue-300">
-                  💡 Confira os campos da calculadora — se algum não foi preenchido
-                  ou ficou errado, ajuste manualmente.
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={fecharOcr}
-                    className="flex-1 bg-[#FFD700] text-black font-bold py-3 rounded-xl hover:bg-yellow-300 transition-colors"
-                  >
-                    ✓ Pronto
-                  </button>
-                  <label className="flex-1 bg-[#2a2a2a] text-white font-bold py-3 rounded-xl hover:bg-[#3a3a3a] transition-colors cursor-pointer text-center">
-                    📷 Outra imagem
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={onArquivoChange}
-                    />
-                  </label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {(Object.keys(LABELS) as (keyof Tempos)[]).map((tipo) => (
+                    <div key={tipo} className="bg-[#0a0a0a] rounded-lg p-3">
+                      <p className="text-[10px] text-gray-500 uppercase font-bold">{LABELS[tipo]}</p>
+                      <p className="text-xl font-mono font-black text-yellow-300 mt-1">
+                        {tempoFinal[tipo].h.toString().padStart(2, '0')}h{tempoFinal[tipo].m.toString().padStart(2, '0')}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
+
+            {/* BOTÕES FINAIS */}
+            <div className="flex gap-3">
+              <button
+                onClick={fecharOcr}
+                className="flex-1 bg-[#2a2a2a] hover:bg-[#3a3a3a] text-white font-bold py-3 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={aplicarNaCalculadora}
+                disabled={!tempoFinal}
+                className="flex-1 bg-gradient-to-br from-[#FFD700] to-yellow-500 text-black font-black py-3 rounded-xl hover:from-yellow-300 hover:to-yellow-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                ✅ Aplicar na Calculadora
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ⭐ MODAL DE REGISTRAR FIM DE TURNO */}
       <RegistrarTurnoModal
         isOpen={mostrarRegistrarTurno}
         onClose={() => setMostrarRegistrarTurno(false)}
         tempos={dadosTurno}
       />
+    </div>
+  );
+}
+
+// ============================================
+// COMPONENTE SLOT DE IMAGEM
+// ============================================
+function SlotImagem({
+  numero,
+  imagemPreview,
+  tempos,
+  textoExtraido,
+  ocrLoading,
+  onUpload,
+  onRemove,
+  onEditTempo,
+  opcional = false,
+}: {
+  numero: 1 | 2;
+  imagemPreview: string | null;
+  tempos: Tempos | null;
+  textoExtraido: string;
+  ocrLoading: boolean;
+  onUpload: (file: File) => void;
+  onRemove: () => void;
+  onEditTempo: (tipo: keyof Tempos, campo: 'h' | 'm', valor: string) => void;
+  opcional?: boolean;
+}) {
+  const corBase = numero === 1 ? 'orange' : 'cyan';
+  
+  if (!imagemPreview && !ocrLoading) {
+    return (
+      <label className="block cursor-pointer">
+        <div className={`border-2 border-dashed border-${corBase}-500/30 hover:border-${corBase}-500 rounded-2xl p-8 text-center transition-colors bg-[#0a0a0a]/50 h-full flex flex-col items-center justify-center`}>
+          <span className="text-5xl block mb-3">{numero === 1 ? '📁' : '➕'}</span>
+          <p className="text-white font-bold mb-1">
+            {numero === 1 ? 'Time 1' : 'Time 2'}
+          </p>
+          {opcional && (
+            <p className={`text-${corBase}-300 text-xs font-bold mb-2`}>(opcional)</p>
+          )}
+          <p className="text-gray-500 text-xs">
+            Clique pra subir imagem
+          </p>
+        </div>
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onUpload(file);
+          }}
+        />
+      </label>
+    );
+  }
+
+  if (ocrLoading) {
+    return (
+      <div className="bg-[#0a0a0a] border border-orange-500/30 rounded-2xl p-8 text-center flex flex-col items-center justify-center h-full">
+        <span className="text-5xl block mb-3 animate-pulse">🔍</span>
+        <p className="text-white font-bold">Processando imagem {numero}...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`bg-[#0a0a0a] border border-${corBase}-500/30 rounded-2xl p-4`}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className={`font-black text-${corBase}-300 flex items-center gap-2`}>
+          <span className={`bg-${corBase}-500/20 px-2 py-0.5 rounded text-xs`}>TIME {numero}</span>
+          <span className="text-xs text-gray-400 font-normal">{opcional && '(opcional)'}</span>
+        </h3>
+        <button
+          onClick={onRemove}
+          className="text-gray-500 hover:text-red-400 text-sm font-bold"
+        >
+          🗑️ Remover
+        </button>
+      </div>
+
+      {imagemPreview && (
+        <img
+          src={imagemPreview}
+          alt={`Time ${numero}`}
+          className="w-full rounded-xl border border-[#2a2a2a] mb-3 max-h-48 object-contain bg-black"
+        />
+      )}
+
+      {tempos && (
+        <div className="space-y-2">
+          <p className="text-[10px] text-gray-500 uppercase font-bold">Tempos extraídos (editáveis)</p>
+          {(Object.keys(LABELS) as (keyof Tempos)[]).map((tipo) => (
+            <div key={tipo} className="flex items-center gap-2">
+              <span className="text-xs text-gray-300 flex-1">{LABELS[tipo]}</span>
+              <input
+                type="number"
+                min="0"
+                value={tempos[tipo].h}
+                onChange={(e) => onEditTempo(tipo, 'h', e.target.value)}
+                className="w-12 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white text-center text-xs font-mono"
+                title="Horas"
+              />
+              <span className="text-gray-500 text-xs">h</span>
+              <input
+                type="number"
+                min="0"
+                max="59"
+                value={tempos[tipo].m}
+                onChange={(e) => onEditTempo(tipo, 'm', e.target.value)}
+                className="w-12 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white text-center text-xs font-mono"
+                title="Minutos"
+              />
+              <span className="text-gray-500 text-xs">min</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {textoExtraido && (
+        <details className="mt-3 bg-[#1a1a1a] rounded-lg p-2">
+          <summary className="cursor-pointer text-[10px] font-bold text-gray-500 uppercase">
+            📝 Texto OCR (debug)
+          </summary>
+          <pre className="text-[10px] text-gray-400 mt-2 whitespace-pre-wrap max-h-24 overflow-y-auto">
+            {textoExtraido.substring(0, 300)}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }
