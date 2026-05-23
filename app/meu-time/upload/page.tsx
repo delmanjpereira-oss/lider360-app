@@ -116,11 +116,17 @@ function classificar(
   return 'Sem dados';
 }
 
-// 🎯 Detecta data no nome do arquivo
-// Formatos suportados: 2026-05-16, 2026_05_16, 16-05-2026, 16_05_2026, 2026.05.16
 // 🎯 Detecta se o CSV é MENSAL (range de datas no nome)
-// Ex: "Lista 2026-04-01 al 2026-04-30 de 00_00_00 a 00_00_00.csv"
-function detectarCsvMensal(nomeArquivo: string): { mes: number; ano: number; trimestre: string } | null {
+// 🆕 NOVA LÓGICA: se começa no dia 1, é considerado mensal acumulado
+// independente do dia de fim (suporta mês parcial)
+function detectarCsvMensal(nomeArquivo: string): { 
+  mes: number; 
+  ano: number; 
+  trimestre: string;
+  diaInicio: number;
+  diaFim: number;
+  mesParcial: boolean;
+} | null {
   const nome = nomeArquivo.replace(/\.csv$/i, '');
   
   // Padrão: YYYY-MM-DD al YYYY-MM-DD (com "al" no meio)
@@ -129,34 +135,49 @@ function detectarCsvMensal(nomeArquivo: string): { mes: number; ano: number; tri
     const anoInicio = parseInt(matchMensal[1]);
     const mesInicio = parseInt(matchMensal[2]);
     const diaInicio = parseInt(matchMensal[3]);
+    const anoFim = parseInt(matchMensal[4]);
     const mesFim = parseInt(matchMensal[5]);
     const diaFim = parseInt(matchMensal[6]);
     
-    // Confirma que abrange o mês inteiro (dia 1 ao 28+)
-    if (diaInicio === 1 && diaFim >= 28 && mesInicio === mesFim) {
+    // 🆕 NOVA REGRA: 
+    // Se começa no dia 1 E é do mesmo mês/ano → MENSAL (parcial ou completo)
+    // Se o range é maior que 1 dia → também é mensal acumulado
+    const mesmoMes = mesInicio === mesFim && anoInicio === anoFim;
+    const comecaNoDiaUm = diaInicio === 1;
+    const rangeMaiorQueUmDia = diaFim > diaInicio;
+    
+    if (mesmoMes && (comecaNoDiaUm || rangeMaiorQueUmDia)) {
       let trimestre = 'Q1';
       if (mesInicio >= 4 && mesInicio <= 6) trimestre = 'Q2';
       else if (mesInicio >= 7 && mesInicio <= 9) trimestre = 'Q3';
       else if (mesInicio >= 10) trimestre = 'Q4';
       
-      return { mes: mesInicio, ano: anoInicio, trimestre };
+      // É parcial se não cobre o mês inteiro
+      const mesParcial = diaFim < 28;
+      
+      return { 
+        mes: mesInicio, 
+        ano: anoInicio, 
+        trimestre,
+        diaInicio,
+        diaFim,
+        mesParcial,
+      };
     }
   }
   
   return null;
 }
 
+// 🎯 Detecta data no nome do arquivo (modo diário)
 function detectarDataNoNome(nomeArquivo: string): string | null {
-  // Limpa o nome (remove extensão e caracteres especiais)
   const nome = nomeArquivo.replace(/\.csv$/i, '');
 
-  // Padrão 1: YYYY-MM-DD ou YYYY_MM_DD ou YYYY.MM.DD (ano primeiro)
   const padraoAno = nome.match(/(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})/);
   if (padraoAno) {
     const ano = padraoAno[1];
     const mes = padraoAno[2].padStart(2, '0');
     const dia = padraoAno[3].padStart(2, '0');
-    // Valida
     const mesNum = parseInt(mes);
     const diaNum = parseInt(dia);
     if (mesNum >= 1 && mesNum <= 12 && diaNum >= 1 && diaNum <= 31) {
@@ -164,7 +185,6 @@ function detectarDataNoNome(nomeArquivo: string): string | null {
     }
   }
 
-  // Padrão 2: DD-MM-YYYY ou DD_MM_YYYY (dia primeiro)
   const padraoDia = nome.match(/(\d{1,2})[-_.](\d{1,2})[-_.](20\d{2})/);
   if (padraoDia) {
     const dia = padraoDia[1].padStart(2, '0');
@@ -196,8 +216,16 @@ export default function UploadPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState<string | null>(null);
   
-  // 🎯 Modo MENSAL (CSV consolidado de um mês inteiro)
-  const [csvMensal, setCsvMensal] = useState<{ mes: number; ano: number; trimestre: string; nomeArquivo: string } | null>(null);
+  // 🎯 Modo MENSAL (CSV consolidado de um mês inteiro OU parcial)
+  const [csvMensal, setCsvMensal] = useState<{ 
+    mes: number; 
+    ano: number; 
+    trimestre: string; 
+    nomeArquivo: string;
+    diaInicio: number;
+    diaFim: number;
+    mesParcial: boolean;
+  } | null>(null);
 
   useEffect(() => {
     async function carregarBase() {
@@ -234,8 +262,11 @@ export default function UploadPage() {
     if (mensal) {
       setCsvMensal({ ...mensal, nomeArquivo: f.name });
       console.log('📆 CSV MENSAL detectado:', mensal);
-      if (typeof window !== 'undefined' && window.showToast) {
-        window.showToast('info', `📆 CSV Mensal detectado: ${String(mensal.mes).padStart(2, '0')}/${mensal.ano}`);
+      const tipoStr = mensal.mesParcial 
+        ? `Mês parcial (dias ${mensal.diaInicio}-${mensal.diaFim})` 
+        : 'Mês completo';
+      if (typeof window !== 'undefined' && (window as any).showToast) {
+        (window as any).showToast('info', `📆 CSV ${tipoStr}: ${String(mensal.mes).padStart(2, '0')}/${mensal.ano}`);
       }
     } else {
       setCsvMensal(null);
@@ -245,8 +276,8 @@ export default function UploadPage() {
       if (dataDetectada) {
         setDataRef(dataDetectada);
         console.log('📅 Data detectada automaticamente:', dataDetectada);
-        if (typeof window !== 'undefined' && window.showToast) {
-          window.showToast('info', `Data detectada: ${dataDetectada.split('-').reverse().join('/')}`);
+        if (typeof window !== 'undefined' && (window as any).showToast) {
+          (window as any).showToast('info', `Data detectada: ${dataDetectada.split('-').reverse().join('/')}`);
         }
       }
     }
@@ -294,7 +325,6 @@ export default function UploadPage() {
     setErro(null);
     setSucesso(null);
 
-    // Mapa do cadastro pra detectar vinculados
     const mapaCadastro: Record<string, ColaboradorMap> = {};
     colaboradores.forEach((c) => {
       mapaCadastro[normalizarIdGroot(c.id_groot)] = c;
@@ -321,7 +351,6 @@ export default function UploadPage() {
       const idGroot = normalizarIdGroot(idGrootRaw);
       const nomeCsv = pegarValor(linha, ['nome', 'agente', 'representante', 'representantes']);
 
-      // PULA linha sem ID Groot (não tem como salvar nada útil)
       if (!idGroot) {
         console.warn(`Linha ${idx + 1}: sem ID Groot, pulando.`);
         return;
@@ -330,10 +359,6 @@ export default function UploadPage() {
       const cadastro = mapaCadastro[idGroot];
       const vinculado = !!cadastro;
       const nomeOficial = cadastro?.nome || nomeCsv || 'Sem nome';
-
-      console.log(
-        `Linha ${idx + 1}: ID=${idGroot} | ${vinculado ? '✅ Vinculado a ' + cadastro!.nome : '⏳ Aguardando cadastro'}`
-      );
 
       const processo = processoSelecionado;
 
@@ -388,7 +413,6 @@ export default function UploadPage() {
 
     console.log('✅ Total de registros pra salvar:', registrosBrutos.length);
 
-    // Calcula NET média do time (TODOS, vinculados ou não)
     const netPorProc: Record<string, { volume: number; horas: number }> = {};
     registrosBrutos.forEach((r) => {
       const horas = hmsToSeconds(r.tempoProcesso) / 3600;
@@ -403,8 +427,6 @@ export default function UploadPage() {
       const a = netPorProc[proc];
       netMedia[proc] = a.horas > 0 ? a.volume / a.horas : 0;
     });
-
-    console.log('📈 NET média por processo:', netMedia);
 
     const finais: RegistroProcessado[] = registrosBrutos.map((r) => {
       const horas = hmsToSeconds(r.tempoProcesso) / 3600;
@@ -434,9 +456,6 @@ export default function UploadPage() {
     }
   }
 
-  // 🎯 Salva CSV MENSAL com subtração inteligente
-  // Lógica: pega o total do mês, subtrai o que já tem no histórico diário,
-  // e salva o RESTANTE como "fonte mensal" pra calibração
   async function salvarMensal() {
     if (!processado.length || !arquivo || !csvMensal) return;
     console.log('📆 Salvando CSV MENSAL...');
@@ -445,11 +464,10 @@ export default function UploadPage() {
     setSucesso(null);
 
     try {
-      const { mes, ano, trimestre } = csvMensal;
-      const primeiroDia = `${ano}-${String(mes).padStart(2, '0')}-01`;
-      const ultimoDia = `${ano}-${String(mes).padStart(2, '0')}-31`;
+      const { mes, ano, trimestre, diaInicio, diaFim } = csvMensal;
+      const primeiroDia = `${ano}-${String(mes).padStart(2, '0')}-${String(diaInicio).padStart(2, '0')}`;
+      const ultimoDia = `${ano}-${String(mes).padStart(2, '0')}-${String(diaFim).padStart(2, '0')}`;
 
-      // 🔍 Busca o que JÁ existe no histórico daquele mês/processo
       const { data: historicoExistente } = await supabase
         .from('historico')
         .select('id_groot, prod_liquida, unidades, data_referencia')
@@ -459,7 +477,6 @@ export default function UploadPage() {
 
       console.log(`📊 Histórico existente: ${historicoExistente?.length || 0} registros em ${mes}/${ano}`);
 
-      // Agrupa histórico por id_groot
       const histPorColab: Record<string, { unidades: number; dias: number; somaLiquida: number }> = {};
       (historicoExistente || []).forEach((h) => {
         if (!h.id_groot) return;
@@ -471,11 +488,13 @@ export default function UploadPage() {
         histPorColab[h.id_groot].somaLiquida += Number(h.prod_liquida) || 0;
       });
 
-      // 🎯 Processa cada colaborador do CSV mensal
       const registrosParaSalvar: any[] = [];
       let complementados = 0;
       let novos = 0;
       let ignorados = 0;
+
+      // 🆕 Calcula dias úteis estimados (até a data fim do range)
+      const diasUteisEstimados = diaFim - diaInicio + 1;
 
       processado.forEach((r) => {
         if (!r.idGroot) {
@@ -486,24 +505,19 @@ export default function UploadPage() {
         const existente = histPorColab[r.idGroot];
 
         if (existente && existente.unidades >= r.unidades) {
-          // Já tem MAIS no histórico do que o CSV mensal mostra → ignora
           console.log(`⏭️ ${r.nomeOficial}: histórico (${existente.unidades}) >= CSV (${r.unidades}), ignora`);
           ignorados++;
           return;
         }
 
-        // Calcula o RESTANTE (CSV - já tem)
         const unidadesRestantes = existente
           ? Math.max(0, r.unidades - existente.unidades)
           : r.unidades;
 
-        // Dias estimados ainda não cobertos (assume 22 dias úteis no mês)
-        const diasUteisEstimados = 22;
         const diasComplementares = existente
           ? Math.max(0, diasUteisEstimados - existente.dias)
           : diasUteisEstimados;
 
-        // Líquida média do restante (mantém a do CSV se não souber)
         const liquidaRestante = r.prodLiquida;
 
         registrosParaSalvar.push({
@@ -522,7 +536,6 @@ export default function UploadPage() {
 
         if (existente) {
           complementados++;
-          console.log(`🔀 ${r.nomeOficial}: já tinha ${existente.unidades}, complementando com ${unidadesRestantes}`);
         } else {
           novos++;
         }
@@ -534,7 +547,6 @@ export default function UploadPage() {
         return;
       }
 
-      // 🗑️ Apaga registros mensais antigos do mesmo mês/processo (evita duplicatas)
       await supabase
         .from('produtividade_mensal')
         .delete()
@@ -542,14 +554,12 @@ export default function UploadPage() {
         .eq('ano', ano)
         .eq('processo', processoSelecionado);
 
-      // 💾 Insere os novos
       const { error: errInsert } = await supabase
         .from('produtividade_mensal')
         .insert(registrosParaSalvar);
 
       if (errInsert) throw new Error(errInsert.message);
 
-      // Registra o upload
       const uploadId = 'UP-' + Math.random().toString(36).substring(2, 10).toUpperCase();
       await supabase.from('uploads').insert({
         upload_id: uploadId,
@@ -562,11 +572,10 @@ export default function UploadPage() {
         modelo_csv: 'mensal_consolidado',
       });
 
+      const tipoLabel = csvMensal.mesParcial ? `(parcial: dias ${diaInicio}-${diaFim})` : '(mês completo)';
       setSucesso(
-        `✅ CSV MENSAL salvo! ${registrosParaSalvar.length} registros: ${novos} novos, ${complementados} complementaram histórico, ${ignorados} ignorados (já tinha tudo).`
+        `✅ CSV MENSAL ${tipoLabel} salvo! ${registrosParaSalvar.length} registros: ${novos} novos, ${complementados} complementaram histórico, ${ignorados} ignorados.`
       );
-      
-      console.log('📆 RESUMO MENSAL:', { novos, complementados, ignorados, total: registrosParaSalvar.length });
     } catch (e: any) {
       setErro('Erro ao salvar: ' + e.message);
       console.error('❌ Erro mensal:', e);
@@ -583,8 +592,6 @@ export default function UploadPage() {
     setSucesso(null);
 
     try {
-      // 🎯 Apaga registros antigos do MESMO DIA + MESMO PROCESSO + MESMOS IDS
-      // Isso evita duplicatas quando você sobe o CSV 2x do mesmo dia/processo
       const idsParaApagar = processado
         .filter((r) => r.idGroot)
         .map((r) => r.idGroot);
@@ -599,12 +606,9 @@ export default function UploadPage() {
         
         if (errDelete) {
           console.error('Erro deletando duplicatas:', errDelete);
-        } else {
-          console.log(`🗑️ Limpou registros antigos: ${dataRef} + ${processoSelecionado} (${idsParaApagar.length} IDs)`);
         }
       }
 
-      // Também apaga registros sem id_groot do mesmo dia/processo/arquivo
       await supabase
         .from('historico')
         .delete()
@@ -620,7 +624,6 @@ export default function UploadPage() {
       else if (mes >= 7 && mes <= 9) quarter = 'Q3';
       else if (mes >= 10) quarter = 'Q4';
 
-      // Insere TODOS os registros (vinculados ou não)
       const linhasInsert = processado.map((r) => ({
         data_referencia: dataRef,
         id_groot: r.idGroot,
@@ -641,8 +644,6 @@ export default function UploadPage() {
         trimestre: quarter,
         ano_referencia: dataObj.getFullYear(),
       }));
-
-      console.log('💾 Inserindo', linhasInsert.length, 'registros...');
 
       const { error: errInsert } = await supabase
         .from('historico')
@@ -667,7 +668,7 @@ export default function UploadPage() {
       let mensagem = `✅ ${processado.length} registros salvos no banco!`;
       if (vinc > 0) mensagem += ` (${vinc} já vinculados ao cadastro)`;
       if (naoVinc > 0)
-        mensagem += ` ${naoVinc} aguardando cadastro — vincularão automaticamente quando você cadastrar essas pessoas.`;
+        mensagem += ` ${naoVinc} aguardando cadastro.`;
 
       setSucesso(mensagem);
 
@@ -707,7 +708,7 @@ export default function UploadPage() {
           📤 Upload <span className="text-[#FFD700]">CSV</span>
         </h1>
         <p className="text-gray-400">
-          Envio diário de dados de produtividade — Líquida, Ocupação, IMA
+          Envio diário ou mensal de dados de produtividade
         </p>
       </div>
 
@@ -722,6 +723,52 @@ export default function UploadPage() {
         <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-start gap-3">
           <span className="text-2xl">❌</span>
           <p className="text-red-300 text-sm">{erro}</p>
+        </div>
+      )}
+
+      {/* 🎯 AVISO CSV MENSAL DETECTADO - logo no topo */}
+      {csvMensal && (
+        <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border-2 border-purple-500/40 rounded-2xl p-5">
+          <h3 className="text-purple-300 font-black text-lg mb-2 flex items-center gap-2">
+            📆 CSV MENSAL detectado!
+          </h3>
+          <div className="bg-[#0a0a0a] rounded-xl p-4 mb-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase font-bold">Período</p>
+              <p className="text-lg font-mono font-bold text-purple-300">
+                {String(csvMensal.diaInicio).padStart(2, '0')} a {String(csvMensal.diaFim).padStart(2, '0')}
+              </p>
+              <p className="text-xs text-gray-400">
+                de {String(csvMensal.mes).padStart(2, '0')}/{csvMensal.ano}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase font-bold">Tipo</p>
+              <p className="text-lg font-mono font-bold text-purple-300">
+                {csvMensal.mesParcial ? '🟡 Parcial' : '✅ Completo'}
+              </p>
+              <p className="text-xs text-gray-400">
+                {csvMensal.mesParcial 
+                  ? `${csvMensal.diaFim - csvMensal.diaInicio + 1} dias` 
+                  : 'Mês inteiro'}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase font-bold">Trimestre</p>
+              <p className="text-lg font-mono font-bold text-purple-300">{csvMensal.trimestre}</p>
+            </div>
+          </div>
+          <ul className="text-xs text-purple-200/80 space-y-1 list-disc pl-5">
+            <li>Salva na tabela <code className="bg-purple-500/20 px-1 rounded">produtividade_mensal</code> (acumulado mensal)</li>
+            <li>Se já tem histórico diário, o app <strong>subtrai</strong> e salva só o restante</li>
+            <li>Usado pra <strong>calibração trimestral</strong>, não polui o detalhe diário</li>
+            {csvMensal.mesParcial && (
+              <li className="text-yellow-300">
+                ⚠️ <strong>Mês parcial:</strong> cobre só {csvMensal.diaFim - csvMensal.diaInicio + 1} dias 
+                (até dia {csvMensal.diaFim}). Se subir de novo no fim do mês, vai atualizar.
+              </li>
+            )}
+          </ul>
         </div>
       )}
 
@@ -778,20 +825,40 @@ export default function UploadPage() {
         <h2 className="text-lg font-bold text-[#FFD700]">2️⃣ Selecionar arquivo</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-bold text-gray-300 mb-2">
-              Data de referência <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="date"
-              value={dataRef}
-              onChange={(e) => setDataRef(e.target.value)}
-              className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-white focus:border-[#FFD700] focus:outline-none"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              ✨ Detectada automaticamente pelo nome do arquivo (se tiver data)
-            </p>
-          </div>
+          {/* Data ref - só aparece se NÃO for mensal */}
+          {!csvMensal && (
+            <div>
+              <label className="block text-sm font-bold text-gray-300 mb-2">
+                Data de referência <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="date"
+                value={dataRef}
+                onChange={(e) => setDataRef(e.target.value)}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-white focus:border-[#FFD700] focus:outline-none"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                ✨ Detectada automaticamente pelo nome do arquivo
+              </p>
+            </div>
+          )}
+
+          {/* Info mensal - aparece se for mensal */}
+          {csvMensal && (
+            <div>
+              <label className="block text-sm font-bold text-purple-300 mb-2">
+                📆 Período do mês
+              </label>
+              <div className="w-full bg-purple-500/10 border border-purple-500/30 rounded-lg px-4 py-3">
+                <p className="text-purple-200 font-mono font-bold">
+                  {String(csvMensal.diaInicio).padStart(2, '0')}/{String(csvMensal.mes).padStart(2, '0')} até {String(csvMensal.diaFim).padStart(2, '0')}/{String(csvMensal.mes).padStart(2, '0')}/{csvMensal.ano}
+                </p>
+              </div>
+              <p className="text-xs text-purple-400 mt-1">
+                ✨ Detectado pelo nome do arquivo
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-bold text-gray-300 mb-2">
@@ -819,9 +886,6 @@ export default function UploadPage() {
             <p className="text-gray-400">
               📊 {linhas.length} linhas detectadas | {cabecalhos.length} colunas
             </p>
-            <p className="text-gray-500 text-xs">
-              Cabeçalhos: {cabecalhos.join(', ')}
-            </p>
           </div>
         )}
       </div>
@@ -836,7 +900,7 @@ export default function UploadPage() {
               : 'bg-[#FFD700]/50 text-black/70 hover:bg-[#FFD700]/70'
           }`}
         >
-          📤 Enviar
+          📤 Processar
         </button>
       )}
 
@@ -853,7 +917,6 @@ export default function UploadPage() {
           </p>
           <p className={colaboradores.length > 0 ? 'text-green-400' : 'text-yellow-400'}>
             {colaboradores.length > 0 ? '✅' : '⚠️'} Colaboradores cadastrados ({colaboradores.length})
-            {colaboradores.length === 0 && ' — OK, vai salvar mesmo assim'}
           </p>
           <p
             className={
@@ -873,16 +936,22 @@ export default function UploadPage() {
             <h2 className="text-lg font-bold text-[#FFD700]">
               3️⃣ Preview ({processado.length} registros)
             </h2>
-            <span className={`text-xs px-3 py-1 rounded-full font-bold ${
-              processoSelecionado === 'Checkin' ? 'bg-cyan-500/20 text-cyan-400' :
-              processoSelecionado === 'P2M' ? 'bg-orange-500/20 text-orange-400' :
-              'bg-emerald-500/20 text-emerald-400'
-            }`}>
-              {processoSelecionado}
-            </span>
+            <div className="flex gap-2">
+              {csvMensal && (
+                <span className="text-xs px-3 py-1 rounded-full font-bold bg-purple-500/20 text-purple-300">
+                  📆 MENSAL
+                </span>
+              )}
+              <span className={`text-xs px-3 py-1 rounded-full font-bold ${
+                processoSelecionado === 'Checkin' ? 'bg-cyan-500/20 text-cyan-400' :
+                processoSelecionado === 'P2M' ? 'bg-orange-500/20 text-orange-400' :
+                'bg-emerald-500/20 text-emerald-400'
+              }`}>
+                {processoSelecionado}
+              </span>
+            </div>
           </div>
 
-          {/* Resumo vinculação */}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
               <p className="text-xs text-green-400 font-bold mb-1">
@@ -895,11 +964,6 @@ export default function UploadPage() {
                 ⏳ Aguardando cadastro
               </p>
               <p className="text-2xl font-black text-white">{totalAguardando}</p>
-              {totalAguardando > 0 && (
-                <p className="text-xs text-blue-300 mt-1">
-                  Vão vincular automaticamente quando você cadastrar
-                </p>
-              )}
             </div>
           </div>
 
@@ -911,6 +975,7 @@ export default function UploadPage() {
                   <th className="py-2 pr-2">Nome</th>
                   <th className="py-2 pr-2">ID Groot</th>
                   <th className="py-2 pr-2 text-right">Líquida</th>
+                  <th className="py-2 pr-2 text-right">Unid.</th>
                   <th className="py-2 pr-2 text-right">Imp.NET</th>
                   <th className="py-2 pr-2">Meta</th>
                 </tr>
@@ -929,6 +994,9 @@ export default function UploadPage() {
                     <td className="py-2 pr-2 text-gray-500 font-mono text-xs">{r.idGroot}</td>
                     <td className="py-2 pr-2 text-right text-white font-mono">
                       {r.prodLiquida.toFixed(0)}
+                    </td>
+                    <td className="py-2 pr-2 text-right text-gray-300 font-mono">
+                      {r.unidades.toLocaleString('pt-BR')}
                     </td>
                     <td
                       className={`py-2 pr-2 text-right font-mono ${
@@ -968,9 +1036,9 @@ export default function UploadPage() {
             <button
               onClick={salvarMensal}
               disabled={salvando}
-              className="w-full bg-purple-500 text-white font-bold py-4 rounded-lg hover:bg-purple-400 transition-colors text-lg disabled:opacity-50"
+              className="w-full bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-bold py-4 rounded-lg transition-all text-lg disabled:opacity-50 shadow-lg shadow-purple-500/30"
             >
-              {salvando ? '💾 Salvando...' : `📆 Salvar CSV MENSAL (${csvMensal.mes}/${csvMensal.ano}) - ${processado.length} colabs`}
+              {salvando ? '💾 Salvando...' : `📆 Salvar Mensal (${String(csvMensal.mes).padStart(2,'0')}/${csvMensal.ano}) - ${processado.length} colabs`}
             </button>
           ) : (
             <button
@@ -978,48 +1046,27 @@ export default function UploadPage() {
               disabled={salvando}
               className="w-full bg-green-500 text-white font-bold py-4 rounded-lg hover:bg-green-400 transition-colors text-lg disabled:opacity-50"
             >
-              {salvando ? '💾 Salvando...' : `✅ Confirmar envio (${processado.length} registros)`}
+              {salvando ? '💾 Salvando...' : `✅ Confirmar envio diário (${processado.length} registros)`}
             </button>
           )}
         </div>
       )}
 
-      {/* Aviso CSV MENSAL detectado */}
-      {csvMensal && (
-        <div className="bg-purple-500/10 border-2 border-purple-500/40 rounded-2xl p-4 mb-4">
-          <h3 className="text-purple-300 font-black text-base mb-2 flex items-center gap-2">
-            📆 CSV MENSAL detectado!
-          </h3>
-          <p className="text-sm text-purple-200 mb-2">
-            Esse CSV é do mês <strong>{String(csvMensal.mes).padStart(2, '0')}/{csvMensal.ano}</strong> ({csvMensal.trimestre}).
-          </p>
-          <ul className="text-xs text-purple-200/80 space-y-1 list-disc pl-5">
-            <li>Os dados vão pra tabela <code className="bg-purple-500/20 px-1 rounded">produtividade_mensal</code> (não duplica o histórico diário)</li>
-            <li>Se já tem dados diários do mês, o app <strong>subtrai</strong> e salva só o restante</li>
-            <li>Usado apenas pra <strong>calibração</strong>, não aparece no detalhe diário do colaborador</li>
-          </ul>
-        </div>
-      )}
-
       {/* Como funciona */}
       <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
-        <p className="font-bold mb-2">💡 Como funciona a vinculação:</p>
+        <p className="font-bold mb-2">💡 Como funciona a detecção automática:</p>
         <ul className="space-y-1 list-disc pl-5 text-xs">
           <li>
-            <strong>Todos</strong> os registros do CSV são salvos no banco, com nome
-            e ID Groot do CSV.
+            <strong>CSV Diário</strong> (ex: <code className="bg-blue-500/10 px-1 rounded">arquivo_2026-05-21.csv</code>): salva no histórico do dia.
           </li>
           <li>
-            Se o colaborador <strong>já tá cadastrado</strong> em MEU TIME → aparece ✅
-            (vinculado automaticamente).
+            <strong>CSV Mensal Parcial</strong> (ex: <code className="bg-blue-500/10 px-1 rounded">2026-05-01 al 2026-05-23.csv</code>): vai pra calibração mensal.
           </li>
           <li>
-            Se <strong>ainda não tá cadastrado</strong> → aparece ⏳ (aguardando). Os
-            dados ficam guardados.
+            <strong>CSV Mensal Completo</strong> (ex: <code className="bg-blue-500/10 px-1 rounded">2026-04-01 al 2026-04-30.csv</code>): vai pra calibração mensal.
           </li>
-          <li>
-            Quando você <strong>cadastrar</strong> o colaborador com o mesmo ID
-            Groot, o histórico antigo aparece automaticamente no perfil dele.
+          <li className="text-yellow-300">
+            🔍 A regra é simples: <strong>se tiver "al" no nome com 2 datas</strong>, é mensal.
           </li>
         </ul>
       </div>
