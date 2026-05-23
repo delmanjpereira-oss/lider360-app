@@ -27,6 +27,7 @@ type Metas = {
 };
 
 const METAS_KEY = 'lider360_boletim_metas_v3';
+const LIMITE_2_COLUNAS = 15; // 🎯 Acima disso, divide em 2 colunas (só quando 1 setor)
 
 const METAS_PADRAO: Metas = {
   checkinLiq: 296,
@@ -38,7 +39,6 @@ const METAS_PADRAO: Metas = {
   totalPecas: 0,
 };
 
-// 🎯 EXATAMENTE igual o upload-page.tsx
 function parseNumber(value: string): number {
   if (!value) return 0;
   let s = String(value).trim().replace(/\s/g, '').replace('%', '');
@@ -99,7 +99,6 @@ export default function BoletimPage() {
   const [dataRef, setDataRef] = useState(new Date().toLocaleDateString('pt-BR'));
   const [montou, setMontou] = useState(false);
   
-  // 🎯 Realizado editável manualmente (null = usa cálculo automático)
   const [netRealizadoManual, setNetRealizadoManual] = useState<number | null>(null);
   const [pecasRealizadoManual, setPecasRealizadoManual] = useState<number | null>(null);
   
@@ -133,7 +132,6 @@ export default function BoletimPage() {
 
         (result.data as Record<string, string>[]).forEach((row) => {
           if (tipo === 'ocupacao') {
-            // CSV Totefullness — formato diferente
             const id = pegarValor(row, ['user_id', 'User_Id', 'USER_ID', 'id_groot', 'id', 'Id_Groot']);
             const idLimpo = normalizarIdGroot(id);
             if (!idLimpo) return;
@@ -142,7 +140,6 @@ export default function BoletimPage() {
             const ocup = parseNumber(ocupTxt);
             if (ocup > 0) linhas.push({ id: idLimpo, liquida: 0, qtd: 0, ocupacao: ocup });
           } else {
-            // 🎯 EXATAMENTE igual ao upload-page.tsx do "Meu Time"
             const idGrootRaw = pegarValor(row, ['id_groot', 'id groot', 'groot', 'id']);
             const idGroot = normalizarIdGroot(idGrootRaw);
             if (!idGroot) return;
@@ -191,7 +188,6 @@ export default function BoletimPage() {
     ? Math.round((totalLiqCheckin + totalLiqP2M) / totalColabs)
     : 0;
 
-  // 🎯 Realizado FINAL: usa manual se setado, senão usa calculado
   const netRealizado = netRealizadoManual !== null ? netRealizadoManual : netCalculado;
   const pecasCalculado = totalVolP2M;
   const totalPecasRealizado = pecasRealizadoManual !== null ? pecasRealizadoManual : pecasCalculado;
@@ -212,7 +208,6 @@ export default function BoletimPage() {
   const linhasUnificadas: LinhaUnificada[] = (() => {
     const mapa: Record<string, LinhaUnificada> = {};
 
-    // 🎯 Cada chave do mapa = ID + Processo (assim Check-in e P2M coexistem)
     dados.checkin.forEach((l) => {
       const chave = `${l.id}_CK`;
       mapa[chave] = {
@@ -239,13 +234,11 @@ export default function BoletimPage() {
       };
     });
 
-    // Ocupação só pra P2M
     dados.ocupacao.forEach((o) => {
       const chaveP2M = `${o.id}_P2M`;
       if (mapa[chaveP2M]) {
         mapa[chaveP2M].ocupacao = o.ocupacao;
       } else {
-        // Tem ocupação mas não tem produtividade P2M
         mapa[chaveP2M] = {
           id: o.id,
           processo: 'P2M',
@@ -261,10 +254,20 @@ export default function BoletimPage() {
     return Object.values(mapa).sort((a, b) => b.liquida - a.liquida);
   })();
 
-  function corCelula(valor: number, meta: number): string {
-    if (valor === 0) return 'text-gray-500';
-    return valor >= meta ? 'text-green-400' : 'text-red-400';
-  }
+  // 🎯 DETECÇÃO DE LAYOUT
+  const checkins = linhasUnificadas.filter((l) => l.processo === 'CK');
+  const p2ms = linhasUnificadas.filter((l) => l.processo === 'P2M');
+  const setoresAtivos = [
+    checkins.length > 0 && 'CK',
+    p2ms.length > 0 && 'P2M',
+  ].filter(Boolean);
+  
+  // 🎯 DIVIDIR EM 2 COLUNAS: só 1 setor + mais de 15 pessoas
+  const apenas1Setor = setoresAtivos.length === 1;
+  const dividirEm2Colunas = apenas1Setor && (
+    (setoresAtivos[0] === 'CK' && checkins.length > LIMITE_2_COLUNAS) ||
+    (setoresAtivos[0] === 'P2M' && p2ms.length > LIMITE_2_COLUNAS)
+  );
 
   async function salvarPNG() {
     if (!boletimRef.current) return;
@@ -311,6 +314,87 @@ export default function BoletimPage() {
 
   if (!montou) return null;
 
+  // 🎯 Função pra dividir array em duas metades
+  function dividirEmDuas<T>(arr: T[]): [T[], T[]] {
+    const meio = Math.ceil(arr.length / 2);
+    return [arr.slice(0, meio), arr.slice(meio)];
+  }
+
+  // 🎯 Componente que renderiza linha da tabela P2M
+  function LinhaP2M({ l, idx }: { l: LinhaUnificada; idx: number }) {
+    const corLiq = l.liquida === 0 ? 'bg-gray-100 text-gray-500' : l.liquida >= l.metaLiq ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+    const corVol = l.qtd === 0 ? 'bg-gray-100 text-gray-500' : l.qtd >= l.metaVol ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+    const corOcup = l.ocupacao === 0 ? 'bg-gray-100 text-gray-500' : l.ocupacao >= metas.ocupMeta ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+    const falta = Math.max(0, l.metaVol - l.qtd);
+    const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+
+    return (
+      <tr key={`p2m-${l.id}-${idx}`} className="border-b border-gray-300" style={{ height: '36px' }}>
+        <td className="px-4 text-center text-gray-800 font-bold text-sm" style={{ verticalAlign: 'middle', lineHeight: '1' }}>{l.id}</td>
+        <td className={`px-4 text-center font-bold text-sm ${corLiq}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
+          {l.liquida > 0 ? l.liquida : '-'}
+        </td>
+        <td className={`px-4 text-center font-bold text-sm ${corVol}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
+          {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
+        </td>
+        <td className={`px-4 text-center font-bold text-sm ${corFalta}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
+          {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
+        </td>
+        <td className={`px-4 text-center font-bold text-sm ${corOcup}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
+          {l.ocupacao > 0 ? `${l.ocupacao.toFixed(0)}%` : '-'}
+        </td>
+      </tr>
+    );
+  }
+
+  // 🎯 Componente que renderiza linha da tabela Checkin
+  function LinhaCK({ l, idx }: { l: LinhaUnificada; idx: number }) {
+    const corLiq = l.liquida === 0 ? 'bg-gray-100 text-gray-500' : l.liquida >= l.metaLiq ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+    const corVol = l.qtd === 0 ? 'bg-gray-100 text-gray-500' : l.qtd >= l.metaVol ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+    const falta = Math.max(0, l.metaVol - l.qtd);
+    const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+
+    return (
+      <tr key={`ck-${l.id}-${idx}`} className="border-b border-gray-300" style={{ height: '36px' }}>
+        <td className="px-4 text-center text-gray-800 font-bold text-sm" style={{ verticalAlign: 'middle', lineHeight: '1' }}>{l.id}</td>
+        <td className={`px-4 text-center font-bold text-sm ${corLiq}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
+          {l.liquida > 0 ? l.liquida : '-'}
+        </td>
+        <td className={`px-4 text-center font-bold text-sm ${corVol}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
+          {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
+        </td>
+        <td className={`px-4 text-center font-bold text-sm ${corFalta}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
+          {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
+        </td>
+      </tr>
+    );
+  }
+
+  // 🎯 Header da tabela P2M (compartilhado entre as 2 colunas)
+  const HeaderP2M = () => (
+    <thead>
+      <tr className="bg-[#FFD700]" style={{ height: '40px' }}>
+        <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>ID</th>
+        <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Líquida</th>
+        <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Qtd de Peças</th>
+        <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Falta</th>
+        <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Ocupação</th>
+      </tr>
+    </thead>
+  );
+
+  // 🎯 Header da tabela Checkin (compartilhado entre as 2 colunas)
+  const HeaderCK = () => (
+    <thead>
+      <tr className="bg-[#FFD700]" style={{ height: '40px' }}>
+        <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>ID</th>
+        <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Líquida</th>
+        <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Qtd de Peças</th>
+        <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Falta</th>
+      </tr>
+    </thead>
+  );
+
   return (
     <div className="p-6 space-y-6 min-h-screen bg-[#0a0a0a]">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -322,6 +406,19 @@ export default function BoletimPage() {
           className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:border-[#FFD700] focus:outline-none"
         />
       </div>
+
+      {/* 🎯 ALERTA do layout adaptativo */}
+      {dividirEm2Colunas && (
+        <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/5 border border-blue-500/30 rounded-xl p-3 flex items-center gap-3">
+          <span className="text-2xl">💡</span>
+          <div className="flex-1 text-sm">
+            <p className="text-blue-300 font-bold">Layout otimizado ativo</p>
+            <p className="text-gray-400 text-xs">
+              {setoresAtivos[0] === 'P2M' ? p2ms.length : checkins.length} pessoas em {setoresAtivos[0] === 'P2M' ? 'P2M' : 'Checkin'} — dividindo em 2 colunas pra melhor visualização
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* CHECK-IN */}
@@ -371,7 +468,7 @@ export default function BoletimPage() {
           </div>
         </div>
 
-        {/* P2M (com Ocupação junto) */}
+        {/* P2M */}
         <div className="bg-gradient-to-br from-orange-500/10 to-orange-600/5 border border-orange-500/30 rounded-2xl p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -637,106 +734,117 @@ export default function BoletimPage() {
         </div>
 
         {linhasUnificadas.length > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* CHECK-IN TABLE */}
-            {linhasUnificadas.filter((l) => l.processo === 'CK').length > 0 && (
-              <div className="bg-white rounded-xl overflow-hidden border-2 border-cyan-500/40">
-                <div className="bg-cyan-500 px-4 py-2">
-                  <h3 className="text-black font-black text-sm uppercase flex items-center gap-2">
-                    📦 CHECK-IN
-                    <span className="text-xs font-normal opacity-80">
-                      · {linhasUnificadas.filter((l) => l.processo === 'CK').length} colaboradores · Meta Líq: {metas.checkinLiq} · Meta Vol: {metas.checkinVol.toLocaleString('pt-BR')}
-                    </span>
-                  </h3>
-                </div>
-                <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr className="bg-[#FFD700]" style={{ height: '40px' }}>
-                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>ID</th>
-                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Líquida</th>
-                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Qtd de Peças</th>
-                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Falta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {linhasUnificadas.filter((l) => l.processo === 'CK').map((l) => {
-                      const corLiq = l.liquida === 0 ? 'bg-gray-100 text-gray-500' : l.liquida >= l.metaLiq ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-                      const corVol = l.qtd === 0 ? 'bg-gray-100 text-gray-500' : l.qtd >= l.metaVol ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-                      const falta = Math.max(0, l.metaVol - l.qtd);
-                      const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-
-                      return (
-                        <tr key={`ck-${l.id}`} className="border-b border-gray-300" style={{ height: '36px' }}>
-                          <td className="px-4 text-center text-gray-800 font-bold text-sm" style={{ verticalAlign: 'middle', lineHeight: '1' }}>{l.id}</td>
-                          <td className={`px-4 text-center font-bold text-sm ${corLiq}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
-                            {l.liquida > 0 ? l.liquida : '-'}
-                          </td>
-                          <td className={`px-4 text-center font-bold text-sm ${corVol}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
-                            {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
-                          </td>
-                          <td className={`px-4 text-center font-bold text-sm ${corFalta}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
-                            {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* P2M TABLE */}
-            {linhasUnificadas.filter((l) => l.processo === 'P2M').length > 0 && (
+          <>
+            {/* 🎯 LAYOUT ADAPTATIVO */}
+            {dividirEm2Colunas && setoresAtivos[0] === 'P2M' ? (
+              /* SÓ P2M COM 15+ → 2 COLUNAS */
               <div className="bg-white rounded-xl overflow-hidden border-2 border-orange-500/40">
                 <div className="bg-orange-500 px-4 py-2">
                   <h3 className="text-black font-black text-sm uppercase flex items-center gap-2">
                     🚚 P2M
                     <span className="text-xs font-normal opacity-80">
-                      · {linhasUnificadas.filter((l) => l.processo === 'P2M').length} colaboradores · Meta Líq: {metas.p2mLiq} · Meta Vol: {metas.p2mVol.toLocaleString('pt-BR')} · Meta Oc: {metas.ocupMeta}%
+                      · {p2ms.length} colaboradores · Meta Líq: {metas.p2mLiq} · Meta Vol: {metas.p2mVol.toLocaleString('pt-BR')} · Meta Oc: {metas.ocupMeta}%
                     </span>
                   </h3>
                 </div>
-                <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr className="bg-[#FFD700]" style={{ height: '40px' }}>
-                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>ID</th>
-                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Líquida</th>
-                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Qtd de Peças</th>
-                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Falta</th>
-                      <th className="px-4 text-center text-black font-black uppercase text-xs" style={{ verticalAlign: 'middle', lineHeight: '1' }}>Ocupação</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {linhasUnificadas.filter((l) => l.processo === 'P2M').map((l) => {
-                      const corLiq = l.liquida === 0 ? 'bg-gray-100 text-gray-500' : l.liquida >= l.metaLiq ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-                      const corVol = l.qtd === 0 ? 'bg-gray-100 text-gray-500' : l.qtd >= l.metaVol ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-                      const corOcup = l.ocupacao === 0 ? 'bg-gray-100 text-gray-500' : l.ocupacao >= metas.ocupMeta ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
-                      const falta = Math.max(0, l.metaVol - l.qtd);
-                      const corFalta = falta === 0 ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900';
+                <div className="grid grid-cols-2 gap-0">
+                  {(() => {
+                    const [primeira, segunda] = dividirEmDuas(p2ms);
+                    return (
+                      <>
+                        <table className="w-full text-sm border-r border-gray-300" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                          <HeaderP2M />
+                          <tbody>
+                            {primeira.map((l, idx) => <LinhaP2M key={`p2m-1-${l.id}-${idx}`} l={l} idx={idx} />)}
+                          </tbody>
+                        </table>
+                        <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                          <HeaderP2M />
+                          <tbody>
+                            {segunda.map((l, idx) => <LinhaP2M key={`p2m-2-${l.id}-${idx}`} l={l} idx={idx} />)}
+                          </tbody>
+                        </table>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            ) : dividirEm2Colunas && setoresAtivos[0] === 'CK' ? (
+              /* SÓ CHECKIN COM 15+ → 2 COLUNAS */
+              <div className="bg-white rounded-xl overflow-hidden border-2 border-cyan-500/40">
+                <div className="bg-cyan-500 px-4 py-2">
+                  <h3 className="text-black font-black text-sm uppercase flex items-center gap-2">
+                    📦 CHECK-IN
+                    <span className="text-xs font-normal opacity-80">
+                      · {checkins.length} colaboradores · Meta Líq: {metas.checkinLiq} · Meta Vol: {metas.checkinVol.toLocaleString('pt-BR')}
+                    </span>
+                  </h3>
+                </div>
+                <div className="grid grid-cols-2 gap-0">
+                  {(() => {
+                    const [primeira, segunda] = dividirEmDuas(checkins);
+                    return (
+                      <>
+                        <table className="w-full text-sm border-r border-gray-300" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                          <HeaderCK />
+                          <tbody>
+                            {primeira.map((l, idx) => <LinhaCK key={`ck-1-${l.id}-${idx}`} l={l} idx={idx} />)}
+                          </tbody>
+                        </table>
+                        <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                          <HeaderCK />
+                          <tbody>
+                            {segunda.map((l, idx) => <LinhaCK key={`ck-2-${l.id}-${idx}`} l={l} idx={idx} />)}
+                          </tbody>
+                        </table>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            ) : (
+              /* LAYOUT NORMAL: 2 setores lado a lado OU 1 setor com poucas pessoas */
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {checkins.length > 0 && (
+                  <div className="bg-white rounded-xl overflow-hidden border-2 border-cyan-500/40">
+                    <div className="bg-cyan-500 px-4 py-2">
+                      <h3 className="text-black font-black text-sm uppercase flex items-center gap-2">
+                        📦 CHECK-IN
+                        <span className="text-xs font-normal opacity-80">
+                          · {checkins.length} colaboradores · Meta Líq: {metas.checkinLiq} · Meta Vol: {metas.checkinVol.toLocaleString('pt-BR')}
+                        </span>
+                      </h3>
+                    </div>
+                    <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                      <HeaderCK />
+                      <tbody>
+                        {checkins.map((l, idx) => <LinhaCK key={`ck-${l.id}-${idx}`} l={l} idx={idx} />)}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
-                      return (
-                        <tr key={`p2m-${l.id}`} className="border-b border-gray-300" style={{ height: '36px' }}>
-                          <td className="px-4 text-center text-gray-800 font-bold text-sm" style={{ verticalAlign: 'middle', lineHeight: '1' }}>{l.id}</td>
-                          <td className={`px-4 text-center font-bold text-sm ${corLiq}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
-                            {l.liquida > 0 ? l.liquida : '-'}
-                          </td>
-                          <td className={`px-4 text-center font-bold text-sm ${corVol}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
-                            {l.qtd > 0 ? l.qtd.toLocaleString('pt-BR') : '-'}
-                          </td>
-                          <td className={`px-4 text-center font-bold text-sm ${corFalta}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
-                            {falta > 0 ? falta.toLocaleString('pt-BR') : '0'}
-                          </td>
-                          <td className={`px-4 text-center font-bold text-sm ${corOcup}`} style={{ verticalAlign: 'middle', lineHeight: '1' }}>
-                            {l.ocupacao > 0 ? `${l.ocupacao.toFixed(0)}%` : '-'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                {p2ms.length > 0 && (
+                  <div className="bg-white rounded-xl overflow-hidden border-2 border-orange-500/40">
+                    <div className="bg-orange-500 px-4 py-2">
+                      <h3 className="text-black font-black text-sm uppercase flex items-center gap-2">
+                        🚚 P2M
+                        <span className="text-xs font-normal opacity-80">
+                          · {p2ms.length} colaboradores · Meta Líq: {metas.p2mLiq} · Meta Vol: {metas.p2mVol.toLocaleString('pt-BR')} · Meta Oc: {metas.ocupMeta}%
+                        </span>
+                      </h3>
+                    </div>
+                    <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                      <HeaderP2M />
+                      <tbody>
+                        {p2ms.map((l, idx) => <LinhaP2M key={`p2m-${l.id}-${idx}`} l={l} idx={idx} />)}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </>
         ) : (
           <div className="text-center py-12 bg-[#0a0a0a]/30 rounded-xl border-2 border-dashed border-[#2a2a2a]">
             <div className="text-5xl mb-3">📂</div>
