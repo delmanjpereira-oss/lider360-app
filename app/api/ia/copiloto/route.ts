@@ -16,19 +16,24 @@ const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 // ============================================
-// PROMPT MESTRE - Copiloto Vivo
+// PROMPT MESTRE - Copiloto Vivo (com presença)
 // ============================================
 
 function montarPromptColab(colab: ColabContexto, contexto: ContextoTime): string {
   const a = colab.analiseCarreira;
+  const p = colab.presencaQuarter;
   
   return `Você é o motor de inteligência do Copiloto Vivo de gestão de desempenho do MELI.
-Sua função é gerar uma TAREFA INTELIGENTE pro Team Leader agir.
+Sua função é gerar uma TAREFA INTELIGENTE pro Team Leader avaliar.
 
-📊 CONTEXTO GERAL DO TIME (${contexto.hoje} - ${contexto.quarter}):
+⚠️ IMPORTANTE: A IA MOSTRA OS DADOS. O TL DECIDE.
+NUNCA bloqueie promoção automaticamente. NUNCA diga "não pode ser promovido". 
+Apresente os fatos cruzados e deixe a decisão ao TL.
+
+📊 CONTEXTO DO TIME (${contexto.hoje} - ${contexto.quarter}):
 - ${contexto.colabsAtivos} colabs ativos
 - ${contexto.totalSuperas} Superas | ${contexto.totalAlinhados} Alinhados | ${contexto.totalOfensores} Ofensores
-- Streak alerta configurado: ${contexto.metas.streak_negativo} dias
+- Streak crítico configurado: ${contexto.metas.streak_negativo} dias
 
 👤 COLABORADOR EM ANÁLISE:
 Nome: ${colab.nome}
@@ -53,6 +58,18 @@ Líquida média: ${colab.liquidaMedia30d} pç/h
 Taxa de sucesso: ${colab.taxaSucesso}%
 Distribuição: ${colab.diasSuperaMes} Superas | ${colab.diasAlinhadoMes} Alinhados | ${colab.diasAbaixoMes} Abaixo
 
+📋 PRESENÇA DO QUARTER (${contexto.quarter}):
+Total de dias registrados: ${p.totalDias}
+✅ Presenças: ${p.presencas}
+🩺 Atestados (FJ): ${p.atestados}
+🔴 Faltas Injustificadas (FI): ${p.faltasInjustificadas}
+🟡 BH planejado: ${p.bhPlanejado}
+🟠 BH NÃO planejado: ${p.bhNaoPlanejado}
+🤝 Sinergia Externa (SIE): ${p.sinergiaExterna}
+📋 Outras justificadas: ${p.outrasJustificadas}
+🚫 Abandono: ${p.abandono}
+📉 ABS do Q: ${p.pctAbs}%
+
 🚨 STREAK NEGATIVO: ${colab.streakNegativo} dias seguidos abaixo
 (limite crítico: ${contexto.metas.streak_negativo} dias)
 
@@ -66,26 +83,37 @@ ${colab.isAniversarioHoje ? '🎂 Aniversário hoje' : ''}
 INSTRUÇÕES PARA A TAREFA:
 ================================================
 
-Você deve gerar uma resposta JSON com:
+Gere um JSON com:
 
-1. **diagnostico**: O QUE aconteceu (2-3 linhas, factual, claro)
-2. **analise_ia**: POR QUE — sua análise INOVADORA cruzando dados (3-4 linhas)
-   • Olhe padrões: a queda coincide com mudança no processo? streak após uma data específica?
-   • Compare com a média do time
-   • Identifique gargalo técnico, comportamental ou de carreira
+1. **diagnostico**: O QUE aconteceu (2-3 linhas, factual)
+   - Inclua performance + presença + tempo de carreira
+
+2. **analise_ia**: POR QUE — sua análise INOVADORA cruzando TUDO (3-4 linhas)
+   • Cruze performance + presença + carreira
+   • Se tem atestados/faltas, INCLUA na análise (não esconde)
+   • Identifique padrões (ex: "faltas sempre em segunda")
+   • Compare com média do time
+   • Identifique gargalo técnico, comportamental ou de saúde
+
 3. **hipotese**: Causa raiz provável (1-2 linhas)
-4. **prioridade**: 'critica' | 'alta' | 'media' | 'baixa'
-5. **tipo**: 'Janela Promocional', 'Feedback Ofensor', 'Janela Prejudicada', 'Apto Perpétuo', 'Reconhecimento Supera', 'Aniversário'
-6. **acao_sugerida**: O QUE o TL deve fazer (1 linha, ação concreta)
 
-REGRAS:
+4. **prioridade**: 'critica' | 'alta' | 'media' | 'baixa'
+
+5. **tipo**: 'Janela Promocional', 'Feedback Ofensor', 'Janela Prejudicada', 'Apto Perpétuo', 'Reconhecimento Supera', 'Aniversário'
+
+6. **acao_sugerida**: O QUE o TL deve avaliar/conversar (1 linha)
+   - Use linguagem como "Avaliar...", "Conversar sobre...", "Considerar..."
+   - NUNCA: "promover" ou "não promover" como ordem
+
+REGRAS CRÍTICAS:
 - Tom profissional, clínico, sênior
-- Cruze informações (carreira + performance + streak)
+- IA MOSTRA, TL DECIDE — nunca decida por ele
+- Se houver dados de presença relevantes (atestados, faltas), MENCIONE
+- Cruze informações sempre
 - NÃO invente dados que não estão no contexto
 - Seja específico (use números, datas, nomes de mês)
-- Foque em FAZER O TL AGIR com precisão
 
-Retorne APENAS um JSON válido, sem markdown, sem explicações fora do JSON:
+Retorne APENAS um JSON válido, sem markdown:
 
 {
   "diagnostico": "...",
@@ -131,7 +159,7 @@ async function analisarColabComIA(
         messages: [
           {
             role: 'system',
-            content: 'Você é um analista sênior de gestão de pessoas e desempenho. Responda SEMPRE em JSON válido, sem markdown.',
+            content: 'Você é um analista sênior de gestão de pessoas e desempenho. Responda SEMPRE em JSON válido, sem markdown. Sua função é APRESENTAR DADOS, não decidir pelo TL.',
           },
           {
             role: 'user',
@@ -179,42 +207,9 @@ async function salvarTarefa(
   try {
     const gatilhoOrigem = determinarGatilho(colab);
     const idTarefa = `TASK-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`.toUpperCase();
+    const p = colab.presencaQuarter;
     
-    // Verifica se JÁ existe tarefa pendente do mesmo gatilho
-    const { data: existente } = await supabase
-      .from('tarefas')
-      .select('id, criado_em')
-      .eq('id_groot', colab.id_groot)
-      .eq('gatilho_origem', gatilhoOrigem)
-      .eq('status', 'Pendente')
-      .limit(1)
-      .single();
-    
-    if (existente) {
-      // Já tem tarefa pendente do mesmo motivo — só atualiza a análise
-      const { error } = await supabase
-        .from('tarefas')
-        .update({
-          diagnostico: analise.diagnostico,
-          analise_ia: analise.analise_ia,
-          hipotese: analise.hipotese,
-          prioridade: analise.prioridade,
-          motivo: analise.acao_sugerida,
-          contexto_dados: {
-            streakNegativo: colab.streakNegativo,
-            ultimoStatus: colab.ultimoStatus,
-            mesesNaCarreira: colab.analiseCarreira.mesesNaCarreira,
-            statusCarreira: colab.analiseCarreira.status,
-            quarter: contexto.quarter,
-            atualizado: new Date().toISOString(),
-          },
-        })
-        .eq('id', existente.id);
-      
-      return !error;
-    }
-    
-    // Cria nova
+    // Cria nova tarefa (anti-duplicata já feito no priorizador)
     const { error } = await supabase
       .from('tarefas')
       .insert({
@@ -239,10 +234,31 @@ async function salvarTarefa(
           statusCarreira: colab.analiseCarreira.status,
           quarter: contexto.quarter,
           mesNaJanela: colab.analiseCarreira.mesNaJanela,
+          // 🆕 SNAPSHOT DE PRESENÇA
+          presencaQuarter: {
+            presencas: p.presencas,
+            atestados: p.atestados,
+            faltasInjustificadas: p.faltasInjustificadas,
+            bhPlanejado: p.bhPlanejado,
+            bhNaoPlanejado: p.bhNaoPlanejado,
+            pctAbs: p.pctAbs,
+          },
+          performance: {
+            liquidaMedia: colab.liquidaMedia30d,
+            taxaSucesso: colab.taxaSucesso,
+            diasSupera: colab.diasSuperaMes,
+            diasAlinhado: colab.diasAlinhadoMes,
+            diasAbaixo: colab.diasAbaixoMes,
+          },
         },
       });
     
-    return !error;
+    if (error) {
+      console.error(`❌ Erro insert pro ${colab.nome}:`, error);
+      return false;
+    }
+    
+    return true;
     
   } catch (e: any) {
     console.error(`❌ Erro salvando tarefa pro ${colab.nome}:`, e.message);
@@ -270,10 +286,32 @@ export async function POST() {
     // 1. Coleta contexto do time
     const contexto = await coletarContextoTime();
     
-    // 2. Filtra quem precisa de análise IA
+    // 🛑 2. SE LIMITE ATINGIDO, retorna sem chamar IA
+    if (contexto.limiteAtingido) {
+      console.log(`🛑 Limite atingido: ${contexto.tarefasPendentesAtual}/${contexto.metas.limite_tarefas_pendentes}`);
+      return NextResponse.json({
+        ok: true,
+        message: `Limite de ${contexto.metas.limite_tarefas_pendentes} tarefas atingido. Conclua pra liberar análises.`,
+        analisados: 0,
+        limiteAtingido: true,
+        contexto: {
+          totalAtivos: contexto.colabsAtivos,
+          tarefasPendentes: contexto.tarefasPendentesAtual,
+          limite: contexto.metas.limite_tarefas_pendentes,
+          vagasDisponiveis: 0,
+          ofensoresCriticos: contexto.ofensoresCriticos.length,
+          janelasIminentes: contexto.janelaPromocaoIminente.length,
+          janelasPrejudicadas: contexto.janelaPrejudicada.length,
+          aptosPerpetuos: contexto.aptosPerpetuosAvalidos.length,
+          quarter: contexto.quarter,
+        },
+      });
+    }
+    
+    // 3. Filtra prioritários (já respeita limite + anti-duplicata)
     const prioritarios = priorizarParaAnaliseIA(contexto);
     
-    console.log(`📋 ${prioritarios.length} colabs prioritários pra análise`);
+    console.log(`📋 ${prioritarios.length} colab(s) prioritários (vagas: ${contexto.vagasDisponiveis})`);
     
     if (prioritarios.length === 0) {
       return NextResponse.json({
@@ -282,14 +320,19 @@ export async function POST() {
         analisados: 0,
         contexto: {
           totalAtivos: contexto.colabsAtivos,
-          ofensoresCriticos: 0,
-          janelasIminentes: 0,
+          tarefasPendentes: contexto.tarefasPendentesAtual,
+          limite: contexto.metas.limite_tarefas_pendentes,
+          vagasDisponiveis: contexto.vagasDisponiveis,
+          ofensoresCriticos: contexto.ofensoresCriticos.length,
+          janelasIminentes: contexto.janelaPromocaoIminente.length,
+          janelasPrejudicadas: contexto.janelaPrejudicada.length,
+          aptosPerpetuos: contexto.aptosPerpetuosAvalidos.length,
           quarter: contexto.quarter,
         },
       });
     }
     
-    // 3. Roda IA em PARALELO (mais rápido)
+    // 4. Roda IA em PARALELO (mais rápido)
     const resultados = await Promise.allSettled(
       prioritarios.map(async (colab) => {
         console.log(`🧠 Analisando ${colab.nome}...`);
@@ -304,7 +347,7 @@ export async function POST() {
       })
     );
     
-    // 4. Conta resultados
+    // 5. Conta resultados
     const sucessos = resultados.filter(
       (r) => r.status === 'fulfilled' && r.value.sucesso
     ).length;
@@ -322,6 +365,9 @@ export async function POST() {
       total: prioritarios.length,
       contexto: {
         totalAtivos: contexto.colabsAtivos,
+        tarefasPendentes: contexto.tarefasPendentesAtual + sucessos,
+        limite: contexto.metas.limite_tarefas_pendentes,
+        vagasDisponiveis: Math.max(0, contexto.vagasDisponiveis - sucessos),
         ofensoresCriticos: contexto.ofensoresCriticos.length,
         janelasIminentes: contexto.janelaPromocaoIminente.length,
         janelasPrejudicadas: contexto.janelaPrejudicada.length,
@@ -353,6 +399,6 @@ export async function GET() {
     endpoints: {
       analise: 'POST /api/ia/copiloto',
     },
-    descricao: 'Analisa colabs prioritários com IA e gera tarefas inteligentes automaticamente.',
+    descricao: 'Analisa colabs prioritários com IA. Respeita limite de tarefas. Mostra dados, TL decide.',
   });
 }
