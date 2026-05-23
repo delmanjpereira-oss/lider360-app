@@ -37,10 +37,7 @@ const MAPA_STATUS: Record<string, ConfigStatus> = {
 };
 
 function configStatus(status: string): ConfigStatus {
-  // Match exato primeiro
   if (MAPA_STATUS[status]) return MAPA_STATUS[status];
-  
-  // Match parcial (caso tenha variações)
   const sUpper = status.toUpperCase();
   if (sUpper.includes('PRESENTE')) return MAPA_STATUS['P - Presente'];
   if (sUpper.includes('DSR')) return MAPA_STATUS['DSR - Escala'];
@@ -53,8 +50,6 @@ function configStatus(status: string): ConfigStatus {
       ? MAPA_STATUS['BH - Banco de Horas não planejado']
       : MAPA_STATUS['BH - Banco de Horas planejado'];
   }
-  
-  // Fallback
   return { contaPresenca: false, contaAbs: false, categoria: 'justificado', emoji: '❓', cor: 'gray' };
 }
 
@@ -67,14 +62,12 @@ function detectarDelimitador(texto: string): string {
   const tabs = (primeiraLinha.match(/\t/g) || []).length;
   const pontosVirgula = (primeiraLinha.match(/;/g) || []).length;
   const virgulas = (primeiraLinha.match(/,/g) || []).length;
-  
   if (tabs >= 10) return '\t';
   if (pontosVirgula > virgulas) return ';';
   return ',';
 }
 
 function parsearData(s: string): string | null {
-  // DD/MM/YYYY → YYYY-MM-DD
   const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) return null;
   const dia = m[1].padStart(2, '0');
@@ -83,11 +76,9 @@ function parsearData(s: string): string | null {
 }
 
 function parsearLinhaCSV(linha: string, delim: string): string[] {
-  // Parser CSV simples que respeita aspas
   const cells: string[] = [];
   let atual = '';
   let dentroAspas = false;
-  
   for (let i = 0; i < linha.length; i++) {
     const c = linha[i];
     if (c === '"') {
@@ -125,6 +116,9 @@ type ColabPreview = {
   id_groot: string;
   nome: string;
   processo: string;
+  dataEntradaCSV: string | null;
+  dataAdmissaoAtual: string | null;
+  precisaAtualizarData: boolean;
   totalDias: number;
   presencas: number;
   faltas: number;
@@ -132,7 +126,6 @@ type ColabPreview = {
   descansos: number;
   pctAbs: number;
   registros: RegistroPresenca[];
-  encontradoNoMeuTime: boolean;
 };
 
 // ============================================
@@ -147,6 +140,7 @@ export default function ImportarPresencaPage() {
   const [colabsPreview, setColabsPreview] = useState<ColabPreview[]>([]);
   const [totalLinhasIgnoradas, setTotalLinhasIgnoradas] = useState(0);
   const [periodo, setPeriodo] = useState<{ inicio: string; fim: string } | null>(null);
+  const [datasAtualizar, setDatasAtualizar] = useState(0);
   const [erro, setErro] = useState('');
 
   async function selecionarArquivo(e: React.ChangeEvent<HTMLInputElement>) {
@@ -163,15 +157,10 @@ export default function ImportarPresencaPage() {
       const delim = detectarDelimitador(texto);
       const linhas = texto.split(/\r?\n/).filter(l => l.trim());
       
-      if (linhas.length < 2) {
-        throw new Error('CSV vazio ou sem dados');
-      }
+      if (linhas.length < 2) throw new Error('CSV vazio ou sem dados');
       
-      // 1. Parser do header
       const header = parsearLinhaCSV(linhas[0], delim);
-      console.log('📋 Header:', header);
       
-      // 2. Identifica colunas fixas (por nome)
       const idxIdGroot = header.findIndex(h => 
         h.toUpperCase().replace(/[_ ]/g, '') === 'IDGROOT' || 
         h.toLowerCase() === 'id_groot'
@@ -183,13 +172,11 @@ export default function ImportarPresencaPage() {
       const idxDataEntrada = header.findIndex(h => 
         h.toLowerCase().includes('data de entrada') || h.toLowerCase() === 'data_entrada'
       );
-      const idxStatus = header.findIndex(h => h.toLowerCase() === 'status');
       
       if (idxIdGroot === -1 || idxNome === -1) {
-        throw new Error(`Colunas necessárias não encontradas. Esperado: ID_GROOT e Nome Completo. Encontradas: ${header.slice(0, 18).join(', ')}`);
+        throw new Error(`Colunas não encontradas. Encontradas: ${header.slice(0, 18).join(', ')}`);
       }
       
-      // 3. Identifica colunas de DATAS (DD/MM/YYYY)
       const colunasDatas: { idx: number; dataIso: string; dataBR: string }[] = [];
       for (let i = 0; i < header.length; i++) {
         const dataIso = parsearData(header[i]);
@@ -199,28 +186,27 @@ export default function ImportarPresencaPage() {
       }
       
       if (colunasDatas.length === 0) {
-        throw new Error('Nenhuma coluna de data encontrada no formato DD/MM/YYYY');
+        throw new Error('Nenhuma coluna de data encontrada (DD/MM/YYYY)');
       }
       
-      console.log(`📅 ${colunasDatas.length} dias detectados (${colunasDatas[0].dataBR} → ${colunasDatas[colunasDatas.length-1].dataBR})`);
-      
-      // Define período
       setPeriodo({
         inicio: colunasDatas[0].dataIso,
         fim: colunasDatas[colunasDatas.length - 1].dataIso,
       });
       
-      // 4. Busca colabs do MEU TIME (filtragem)
+      // 🎯 Busca colabs do MEU TIME com data_admissao atual
       const { data: meuTime } = await supabase
         .from('colaboradores')
-        .select('id_groot, nome, status')
-        .eq('status', 'Ativo');
+        .select('id_groot, nome, status, data_admissao');
       
-      const idsMeuTime = new Set((meuTime || []).map((c: any) => String(c.id_groot)));
+      const meuTimeMap: Record<string, any> = {};
+      (meuTime || []).forEach((c: any) => {
+        meuTimeMap[String(c.id_groot)] = c;
+      });
       
-      // 5. Processa cada linha (colab)
       const colabsMap: Record<string, ColabPreview> = {};
       let ignorados = 0;
+      let precisaAtualizar = 0;
       
       for (let i = 1; i < linhas.length; i++) {
         const cells = parsearLinhaCSV(linhas[i], delim);
@@ -229,8 +215,8 @@ export default function ImportarPresencaPage() {
         const idGroot = String(cells[idxIdGroot]).trim().replace(/\D/g, '');
         if (!idGroot) continue;
         
-        const encontrado = idsMeuTime.has(idGroot);
-        if (!encontrado) {
+        const colabBanco = meuTimeMap[idGroot];
+        if (!colabBanco) {
           ignorados++;
           continue;
         }
@@ -238,9 +224,17 @@ export default function ImportarPresencaPage() {
         const nome = cells[idxNome]?.trim() || 'Sem nome';
         const processo = idxProcesso >= 0 ? cells[idxProcesso]?.trim() || '' : '';
         const dataEntradaBR = idxDataEntrada >= 0 ? cells[idxDataEntrada]?.trim() : '';
-        const dataEntrada = parsearData(dataEntradaBR);
+        const dataEntradaISO = parsearData(dataEntradaBR);
         
-        // Processa cada coluna de data
+        // 🎯 Verifica se data_admissao precisa atualizar
+        const dataAdmissaoAtual = colabBanco.data_admissao || null;
+        const precisaAtualizarData = !!(
+          dataEntradaISO && 
+          dataAdmissaoAtual !== dataEntradaISO &&
+          dataAdmissaoAtual !== dataEntradaBR
+        );
+        if (precisaAtualizarData) precisaAtualizar++;
+        
         const registros: RegistroPresenca[] = [];
         let presencas = 0, faltas = 0, justificados = 0, descansos = 0;
         
@@ -259,7 +253,7 @@ export default function ImportarPresencaPage() {
             id_groot: idGroot,
             nome_colab: nome,
             processo,
-            data_entrada: dataEntrada,
+            data_entrada: dataEntradaISO,
             data_referencia: cd.dataIso,
             status_meli: statusBruto,
             status_app: config.categoria === 'presenca' ? 'presente' 
@@ -274,13 +268,16 @@ export default function ImportarPresencaPage() {
           });
         }
         
-        const totalContabilizado = presencas + faltas + justificados; // exclui descansos
+        const totalContabilizado = presencas + faltas + justificados;
         const pctAbs = totalContabilizado > 0 ? (faltas / totalContabilizado) * 100 : 0;
         
         colabsMap[idGroot] = {
           id_groot: idGroot,
           nome,
           processo,
+          dataEntradaCSV: dataEntradaISO,
+          dataAdmissaoAtual,
+          precisaAtualizarData,
           totalDias: registros.length,
           presencas,
           faltas,
@@ -288,7 +285,6 @@ export default function ImportarPresencaPage() {
           descansos,
           pctAbs: Number(pctAbs.toFixed(1)),
           registros,
-          encontradoNoMeuTime: true,
         };
       }
       
@@ -296,9 +292,10 @@ export default function ImportarPresencaPage() {
       
       setColabsPreview(lista);
       setTotalLinhasIgnoradas(ignorados);
+      setDatasAtualizar(precisaAtualizar);
       
       if (lista.length === 0) {
-        setErro('Nenhum colab do CSV bate com o "Meu Time" cadastrado. Verifique os IDs Groot.');
+        setErro('Nenhum colab do CSV bate com o "Meu Time" cadastrado.');
       }
       
     } catch (e: any) {
@@ -315,14 +312,24 @@ export default function ImportarPresencaPage() {
     setImportando(true);
     
     try {
-      // 🗑️ Apaga registros antigos do período (substitui)
+      // 1️⃣ ATUALIZA data_admissao dos colabs que mudaram
+      for (const c of colabsPreview) {
+        if (c.precisaAtualizarData && c.dataEntradaCSV) {
+          await supabase
+            .from('colaboradores')
+            .update({ data_admissao: c.dataEntradaCSV })
+            .eq('id_groot', c.id_groot);
+        }
+      }
+      
+      // 2️⃣ Apaga registros do período (substitui)
       await supabase
         .from('presenca')
         .delete()
         .gte('data_referencia', periodo.inicio)
         .lte('data_referencia', periodo.fim);
       
-      // 💾 Insere todos os registros novos
+      // 3️⃣ Insere todos os registros novos
       const todosRegistros = colabsPreview.flatMap(c => c.registros);
       
       const registrosParaInserir = todosRegistros.map(r => ({
@@ -338,7 +345,6 @@ export default function ImportarPresencaPage() {
         registrado_por: 'csv_meli',
       }));
       
-      // Insere em lotes de 500
       const LOTE = 500;
       for (let i = 0; i < registrosParaInserir.length; i += LOTE) {
         const lote = registrosParaInserir.slice(i, i + LOTE);
@@ -347,7 +353,9 @@ export default function ImportarPresencaPage() {
       }
       
       if (typeof window !== 'undefined' && (window as any).showToast) {
-        (window as any).showToast('success', `🎉 ${colabsPreview.length} colabs importados! ${todosRegistros.length} dias registrados`);
+        (window as any).showToast('success', 
+          `🎉 ${colabsPreview.length} colabs · ${todosRegistros.length} dias · ${datasAtualizar} datas atualizadas`
+        );
       }
       
       setTimeout(() => router.push('/presenca'), 1500);
@@ -360,7 +368,6 @@ export default function ImportarPresencaPage() {
     }
   }
 
-  // Stats agregadas
   const stats = {
     total: colabsPreview.length,
     presencas: colabsPreview.reduce((s, c) => s + c.presencas, 0),
@@ -380,26 +387,22 @@ export default function ImportarPresencaPage() {
           📥 Importar <span className="text-[#FFD700]">Presença</span>
         </h1>
         <p className="text-gray-400">
-          Sobe o CSV da plataforma MELI - o app filtra automaticamente só pelo seu time
+          Sobe o CSV do MELI - app filtra só o seu time e atualiza tudo
         </p>
       </div>
 
-      {/* Instruções */}
       <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/5 border border-blue-500/30 rounded-2xl p-6">
         <h2 className="text-lg font-bold text-blue-300 mb-3 flex items-center gap-2">
-          💡 Como funciona
+          💡 O que o app vai fazer
         </h2>
         <ol className="space-y-2 text-sm text-gray-300 list-decimal pl-5">
-          <li>Exporta da plataforma MELI o arquivo "<strong>BRRC01 | Pessoas - Lista de Presença</strong>"</li>
-          <li>Sobe o CSV aqui (TAB-separated ou CSV padrão)</li>
-          <li>O app detecta as colunas automaticamente: <code className="bg-[#0a0a0a] px-1.5 rounded text-blue-300">ID_GROOT</code>, <code className="bg-[#0a0a0a] px-1.5 rounded text-blue-300">Nome</code>, <code className="bg-[#0a0a0a] px-1.5 rounded text-blue-300">Datas</code></li>
-          <li>Filtra <strong>SÓ</strong> os colabs do seu time (42 ativos)</li>
-          <li>Calcula % de absenteísmo e estatísticas</li>
-          <li>Você confirma e o app salva tudo no banco</li>
+          <li>Identifica os colabs do seu time pelo <code className="bg-[#0a0a0a] px-1.5 rounded text-blue-300">ID_GROOT</code></li>
+          <li>Salva presença/falta/atestado de cada dia</li>
+          <li><strong className="text-yellow-300">Atualiza data de admissão</strong> de cada colab automaticamente</li>
+          <li>Copiloto IA usa esses dados pra análise de carreira/janela</li>
         </ol>
       </div>
 
-      {/* Upload */}
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
         <label className="block">
           <div className="border-2 border-dashed border-[#2a2a2a] hover:border-[#FFD700]/40 rounded-2xl p-8 text-center cursor-pointer transition-all">
@@ -410,7 +413,7 @@ export default function ImportarPresencaPage() {
             <p className="text-xs text-gray-500">
               {arquivo 
                 ? `${(arquivo.size / 1024).toFixed(1)} KB - clique pra trocar`
-                : 'CSV da plataforma MELI (Pessoas - Lista de Presença)'}
+                : 'CSV do MELI (Pessoas - Lista de Presença)'}
             </p>
             <input
               type="file"
@@ -423,7 +426,6 @@ export default function ImportarPresencaPage() {
         </label>
       </div>
 
-      {/* Loading */}
       {parseando && (
         <div className="text-center py-8">
           <span className="text-5xl block mb-3 animate-pulse">⏳</span>
@@ -431,17 +433,14 @@ export default function ImportarPresencaPage() {
         </div>
       )}
 
-      {/* Erro */}
       {erro && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4">
           <p className="text-red-300 font-bold">❌ {erro}</p>
         </div>
       )}
 
-      {/* Preview */}
       {colabsPreview.length > 0 && !parseando && (
         <>
-          {/* Período + ignorados */}
           {periodo && (
             <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 rounded-2xl p-4">
               <p className="text-purple-300 font-bold mb-1 flex items-center gap-2">
@@ -450,15 +449,17 @@ export default function ImportarPresencaPage() {
               <p className="text-white text-lg font-mono">
                 {periodo.inicio.split('-').reverse().join('/')} → {periodo.fim.split('-').reverse().join('/')}
               </p>
-              {totalLinhasIgnoradas > 0 && (
-                <p className="text-xs text-gray-400 mt-2">
-                  ℹ️ {totalLinhasIgnoradas} colab(s) do CSV foram ignorados (não estão no seu time)
-                </p>
-              )}
+              <div className="flex gap-2 mt-2 flex-wrap text-xs">
+                {totalLinhasIgnoradas > 0 && (
+                  <span className="text-gray-400">ℹ️ {totalLinhasIgnoradas} colab(s) fora do seu time (ignorados)</span>
+                )}
+                {datasAtualizar > 0 && (
+                  <span className="text-yellow-300 font-bold">📅 {datasAtualizar} data(s) de admissão serão atualizadas</span>
+                )}
+              </div>
             </div>
           )}
 
-          {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
               <span className="text-2xl block mb-1">👥</span>
@@ -487,10 +488,9 @@ export default function ImportarPresencaPage() {
             </div>
           </div>
 
-          {/* Lista por colab */}
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              📋 Preview por Colaborador (ordenado por % ABS)
+              📋 Preview por Colaborador
             </h3>
             
             <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
@@ -498,16 +498,21 @@ export default function ImportarPresencaPage() {
                 <div 
                   key={c.id_groot}
                   className={`p-3 rounded-xl border ${
-                    c.pctAbs > 10 
-                      ? 'bg-red-500/5 border-red-500/30'
-                      : c.pctAbs > 5
-                      ? 'bg-yellow-500/5 border-yellow-500/30'
-                      : 'bg-green-500/5 border-green-500/30'
+                    c.pctAbs > 10 ? 'bg-red-500/5 border-red-500/30'
+                    : c.pctAbs > 5 ? 'bg-yellow-500/5 border-yellow-500/30'
+                    : 'bg-green-500/5 border-green-500/30'
                   }`}
                 >
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-white font-bold truncate">{c.nome}</p>
+                      <p className="text-white font-bold truncate flex items-center gap-2">
+                        {c.nome}
+                        {c.precisaAtualizarData && (
+                          <span className="text-[10px] bg-yellow-500/30 text-yellow-200 px-1.5 py-0.5 rounded font-bold">
+                            📅 atualizar data
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-gray-500 font-mono">
                         ID: {c.id_groot} {c.processo && `· ${c.processo}`}
                       </p>
@@ -542,15 +547,9 @@ export default function ImportarPresencaPage() {
             </div>
           </div>
 
-          {/* Botões de ação */}
           <div className="flex gap-3 flex-wrap sticky bottom-4">
             <button
-              onClick={() => {
-                setArquivo(null);
-                setColabsPreview([]);
-                setErro('');
-                setPeriodo(null);
-              }}
+              onClick={() => { setArquivo(null); setColabsPreview([]); setErro(''); setPeriodo(null); }}
               disabled={importando}
               className="flex-1 bg-[#1a1a1a] hover:bg-[#222] border border-[#2a2a2a] text-white font-bold py-3 px-6 rounded-xl transition-all disabled:opacity-50"
             >
@@ -561,11 +560,7 @@ export default function ImportarPresencaPage() {
               disabled={importando}
               className="flex-1 bg-gradient-to-br from-[#FFD700] to-yellow-500 hover:from-yellow-300 hover:to-yellow-400 text-black font-black py-3 px-6 rounded-xl shadow-lg shadow-[#FFD700]/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {importando ? (
-                <><span className="animate-spin">⏳</span> Importando...</>
-              ) : (
-                <>✅ Confirmar Importação ({stats.total} colabs)</>
-              )}
+              {importando ? <><span className="animate-spin">⏳</span> Importando...</> : <>✅ Confirmar ({stats.total} colabs)</>}
             </button>
           </div>
         </>
