@@ -13,7 +13,7 @@ import { SpaceBackground } from './components/SpaceBackground';
 // ============================================
 export const metadata: Metadata = {
   title: 'LIDER 360',
-  description: 'Sistema completo de gestão do time MELI - LIDER 360',
+  description: 'Sistema completo de gestão do time MELI',
   manifest: '/manifest.json',
   applicationName: 'LIDER 360',
   appleWebApp: {
@@ -22,33 +22,12 @@ export const metadata: Metadata = {
     title: 'LIDER 360',
   },
   icons: {
-    icon: [
-      { url: '/favicon-16.png', sizes: '16x16', type: 'image/png' },
-      { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
-      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-    ],
-    apple: [
-      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
-    ],
-    shortcut: '/icon-192.png',
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
   },
   formatDetection: {
     telephone: false,
-  },
-  openGraph: {
-    type: 'website',
-    locale: 'pt_BR',
-    title: 'LIDER 360',
-    description: 'Sistema completo de gestão do time MELI',
-    images: [
-      {
-        url: '/icon-512.png',
-        width: 512,
-        height: 512,
-        alt: 'LIDER 360',
-      },
-    ],
   },
 };
 
@@ -77,9 +56,6 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="LIDER 360" />
-        
-        {/* 🎨 Splash Screen iOS */}
-        <link rel="apple-touch-startup-image" href="/icon-512.png" />
       </head>
       <body className="bg-[#0a0a0a] text-white min-h-screen relative overflow-x-hidden">
         {/* 🌌 Fundo espacial fixo */}
