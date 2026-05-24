@@ -4,10 +4,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 
-// ============================================
-// 🏠 PÁGINA HOME DO MOBILE
-// ============================================
-
 type Tarefa = {
   id: number;
   id_tarefa: string;
@@ -16,13 +12,6 @@ type Tarefa = {
   prioridade: string;
   motivo: string | null;
   criado_em: string;
-};
-
-type Colab = {
-  id: number;
-  id_groot: string;
-  nome: string;
-  processo: string | null;
 };
 
 function getSaudacao(): string {
@@ -39,7 +28,6 @@ export default function MobileHomePage() {
   const [totalColabs, setTotalColabs] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // Atualiza relógio
   useEffect(() => {
     const atualizar = () => {
       const now = new Date();
@@ -65,7 +53,6 @@ export default function MobileHomePage() {
   async function carregar() {
     setLoading(true);
     try {
-      // Tarefas críticas pendentes
       const { data: tars } = await supabase
         .from('tarefas')
         .select('id, id_tarefa, nome, tipo, prioridade, motivo, criado_em')
@@ -74,7 +61,6 @@ export default function MobileHomePage() {
         .order('criado_em', { ascending: false })
         .limit(3);
       
-      // Total de colabs ativos
       const { count } = await supabase
         .from('colaboradores')
         .select('id', { count: 'exact', head: true })
@@ -131,7 +117,6 @@ export default function MobileHomePage() {
           ⚡ Ações Rápidas
         </h3>
         <div className="grid grid-cols-2 gap-3">
-          {/* Feedback */}
           <Link
             href="/mobile/feedback"
             className="bg-gradient-to-br from-[#FFD700]/10 to-yellow-600/5 border border-[#FFD700]/30 rounded-2xl p-4 active:scale-95 transition-all"
@@ -141,7 +126,6 @@ export default function MobileHomePage() {
             <p className="text-[10px] text-gray-500 mt-0.5">Registrar agora</p>
           </Link>
           
-          {/* Agenda */}
           <Link
             href="/mobile/agenda"
             className="bg-gradient-to-br from-blue-500/10 to-cyan-600/5 border border-blue-500/30 rounded-2xl p-4 active:scale-95 transition-all"
@@ -151,7 +135,6 @@ export default function MobileHomePage() {
             <p className="text-[10px] text-gray-500 mt-0.5">Tarefas + alarmes</p>
           </Link>
           
-          {/* Copiloto */}
           <Link
             href="/mobile/copiloto"
             className="bg-gradient-to-br from-purple-500/10 to-pink-600/5 border border-purple-500/30 rounded-2xl p-4 active:scale-95 transition-all"
@@ -165,7 +148,6 @@ export default function MobileHomePage() {
             </p>
           </Link>
           
-          {/* Time */}
           <Link
             href="/mobile/time"
             className="bg-gradient-to-br from-green-500/10 to-emerald-600/5 border border-green-500/30 rounded-2xl p-4 active:scale-95 transition-all"
@@ -224,16 +206,6 @@ export default function MobileHomePage() {
           </div>
         </div>
       )}
-
-      {/* ATALHO PRA VERSÃO WEB */}
-      <Link
-        href="/"
-        className="block bg-[#1a1a1a]/50 border border-[#2a2a2a] rounded-xl p-3 text-center"
-      >
-        <p className="text-xs text-gray-400">
-          💻 Quer a versão completa? <span className="text-[#FFD700] font-bold">Abrir web</span>
-        </p>
-      </Link>
     </div>
   );
 }
