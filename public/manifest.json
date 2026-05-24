@@ -1,8 +1,9 @@
 {
   "name": "LIDER 360",
   "short_name": "LIDER 360",
-  "description": "Sistema completo de gestão do time MELI",
-  "start_url": "/",
+  "description": "App de gestão portátil do líder",
+  "start_url": "/mobile",
+  "id": "/mobile",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#FFD700",
@@ -20,24 +21,24 @@
   ],
   "shortcuts": [
     {
+      "name": "Feedback Rápido",
+      "short_name": "Feedback",
+      "description": "Registrar feedback",
+      "url": "/mobile/feedback",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Agenda",
+      "short_name": "Agenda",
+      "description": "Tarefas e alarmes",
+      "url": "/mobile/agenda",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
       "name": "Copiloto IA",
-      "short_name": "Copiloto",
-      "description": "Tarefas inteligentes da IA",
-      "url": "/copiloto",
-      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
-    },
-    {
-      "name": "Meu Time",
-      "short_name": "Time",
-      "description": "Lista de colaboradores",
-      "url": "/meu-time",
-      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
-    },
-    {
-      "name": "Boletim",
-      "short_name": "Boletim",
-      "description": "Boletim diário",
-      "url": "/boletim",
+      "short_name": "IA",
+      "description": "Tarefas inteligentes",
+      "url": "/mobile/copiloto",
       "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     }
   ],
