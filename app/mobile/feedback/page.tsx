@@ -1,11 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 
 // ============================================
-// ✍️ FEEDBACK COM VOZ - MOBILE
+// ✍️ FEEDBACK COM VOZ - MOBILE (v2 fix duplicação)
 // ============================================
 
 type Colab = {
@@ -30,12 +29,17 @@ export default function FeedbackMobilePage() {
   const [tipo, setTipo] = useState<TipoFeedback>('construtivo');
   const [texto, setTexto] = useState('');
   
-  // Gravação de voz
+  // 🎤 Gravação de voz (refatorado)
   const [gravando, setGravando] = useState(false);
-  const [transcricaoAtiva, setTranscricaoAtiva] = useState('');
+  const [interimText, setInterimText] = useState(''); // Texto temporário sendo falado
   const [tempoGravacao, setTempoGravacao] = useState(0);
+  const [vozSuportada, setVozSuportada] = useState(true);
+  
+  // Refs - controlam o reconhecimento sem causar re-render
   const recognitionRef = useRef<any>(null);
   const tempoInterval = useRef<NodeJS.Timeout | null>(null);
+  const textoAcumuladoRef = useRef(''); // Buffer dos textos finais
+  const gravandoRef = useRef(false); // Sincronizado com state
   
   const [salvando, setSalvando] = useState(false);
   const [sucesso, setSucesso] = useState(false);
@@ -53,63 +57,91 @@ export default function FeedbackMobilePage() {
     })();
   }, []);
 
-  // Setup do reconhecimento de voz
+  // Setup do reconhecimento - 1 única vez
   useEffect(() => {
     if (typeof window === 'undefined') return;
     
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
-      console.warn('Reconhecimento de voz não suportado neste navegador');
+      setVozSuportada(false);
       return;
     }
     
     const recognition = new SpeechRecognition();
+    
+    // 🎯 CONFIGURAÇÃO CORRIGIDA
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'pt-BR';
+    recognition.maxAlternatives = 1;
     
+    // 🎯 onresult CORRIGIDO - não duplica!
     recognition.onresult = (event: any) => {
-      let textoFinal = '';
-      let textoInterim = '';
+      let textoFinalNovo = '';
+      let textoInterimAtual = '';
       
+      // Itera APENAS pelos resultados NÃO processados ainda (event.resultIndex)
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcricao = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          textoFinal += transcricao + ' ';
+        const resultado = event.results[i];
+        const transcricao = resultado[0].transcript;
+        
+        if (resultado.isFinal) {
+          // Texto final - vai pro buffer permanente
+          textoFinalNovo += transcricao;
         } else {
-          textoInterim += transcricao;
+          // Texto interim - só pra mostrar visualmente
+          textoInterimAtual += transcricao;
         }
       }
       
-      if (textoFinal) {
-        setTexto((prev) => prev + textoFinal);
+      // Atualiza buffer permanente (só finais)
+      if (textoFinalNovo) {
+        textoAcumuladoRef.current += textoFinalNovo + ' ';
+        setTexto(textoAcumuladoRef.current);
+        // Limpa o interim - já foi finalizado
+        setInterimText('');
+      } else {
+        // Atualiza apenas o que tá sendo falado AGORA
+        setInterimText(textoInterimAtual);
       }
-      setTranscricaoAtiva(textoInterim);
     };
     
     recognition.onerror = (event: any) => {
       console.error('Erro reconhecimento:', event.error);
+      
       if (event.error === 'no-speech') {
-        // Ignora - microfone sem áudio
+        // Ignora - sem áudio detectado
+        return;
       } else if (event.error === 'not-allowed') {
         setErro('Permissão de microfone negada. Habilite nas configurações.');
-        pararGravacao();
+        pararGravacaoInterno();
+      } else if (event.error === 'aborted') {
+        // Foi parado manualmente
+        return;
+      } else {
+        setErro('Erro: ' + event.error);
       }
     };
     
     recognition.onend = () => {
-      // Se ainda tá gravando, reinicia (continuous)
-      if (gravando) {
+      // Se ainda DEVE estar gravando (não foi parado pelo usuário), reinicia
+      if (gravandoRef.current) {
         try {
           recognition.start();
-        } catch (e) {}
+        } catch (e) {
+          console.warn('Não conseguiu reiniciar:', e);
+        }
+      } else {
+        // Foi parado de verdade - limpa interim
+        setInterimText('');
       }
     };
     
     recognitionRef.current = recognition;
     
     return () => {
+      gravandoRef.current = false;
       try {
         recognition.stop();
       } catch (e) {}
@@ -118,12 +150,15 @@ export default function FeedbackMobilePage() {
 
   function iniciarGravacao() {
     if (!recognitionRef.current) {
-      setErro('Seu navegador não suporta reconhecimento de voz. Use Chrome.');
+      setErro('Reconhecimento de voz não disponível. Use Chrome ou Safari.');
       return;
     }
     
     setErro('');
     setTempoGravacao(0);
+    
+    // 🎯 IMPORTANTE: sincroniza ref ANTES do start
+    gravandoRef.current = true;
     
     try {
       recognitionRef.current.start();
@@ -138,25 +173,48 @@ export default function FeedbackMobilePage() {
       }, 1000);
     } catch (e: any) {
       console.error(e);
-      setErro('Erro ao iniciar gravação: ' + e.message);
+      gravandoRef.current = false;
+      setGravando(false);
+      
+      // Se já tava rodando, tenta parar e reiniciar
+      if (e.message?.includes('already started')) {
+        try {
+          recognitionRef.current.stop();
+          setTimeout(() => iniciarGravacao(), 200);
+        } catch (e2) {}
+      } else {
+        setErro('Erro ao iniciar: ' + e.message);
+      }
     }
   }
 
-  function pararGravacao() {
+  function pararGravacaoInterno() {
+    gravandoRef.current = false;
+    setGravando(false);
+    setInterimText('');
+    
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
       } catch (e) {}
     }
-    setGravando(false);
-    setTranscricaoAtiva('');
     
     if (tempoInterval.current) {
       clearInterval(tempoInterval.current);
       tempoInterval.current = null;
     }
-    
+  }
+
+  function pararGravacao() {
+    pararGravacaoInterno();
     if (navigator.vibrate) navigator.vibrate([50, 50, 50]);
+  }
+
+  function limparTexto() {
+    if (!confirm('Limpar todo o texto?')) return;
+    setTexto('');
+    textoAcumuladoRef.current = '';
+    setInterimText('');
   }
 
   async function salvar() {
@@ -169,6 +227,9 @@ export default function FeedbackMobilePage() {
       setErro('Feedback muito curto (mínimo 10 caracteres)');
       return;
     }
+    
+    // Para gravação se ainda tiver
+    pararGravacaoInterno();
     
     setSalvando(true);
     setErro('');
@@ -191,13 +252,14 @@ export default function FeedbackMobilePage() {
       
       if (error) throw new Error(error.message);
       
-      // Vibração de sucesso
       if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
       
       setSucesso(true);
       setTimeout(() => {
         setColabSelecionado(null);
         setTexto('');
+        textoAcumuladoRef.current = '';
+        setInterimText('');
         setBusca('');
         setSucesso(false);
         setTipo('construtivo');
@@ -232,7 +294,6 @@ export default function FeedbackMobilePage() {
 
   return (
     <div className="space-y-4">
-      {/* Título */}
       <div>
         <h2 className="text-2xl font-black text-white">✍️ Feedback</h2>
         <p className="text-xs text-gray-400">Registre na hora, salva no perfil</p>
@@ -255,7 +316,7 @@ export default function FeedbackMobilePage() {
           
           {colabsFiltrados.length > 0 && (
             <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden">
-              {colabsFiltrados.slice(0, 6).map((c) => (
+              {colabsFiltrados.slice(0, 8).map((c) => (
                 <button
                   key={c.id}
                   onClick={() => {
@@ -289,7 +350,6 @@ export default function FeedbackMobilePage() {
       {/* PASSO 2: Tipo + Texto */}
       {colabSelecionado && (
         <>
-          {/* Colab selecionado */}
           <div className="bg-gradient-to-br from-[#FFD700]/10 to-yellow-600/5 border border-[#FFD700]/30 rounded-xl p-3 flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-[#FFD700]/20 flex items-center justify-center text-[#FFD700] font-black text-xs">
               {colabSelecionado.nome.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()}
@@ -299,7 +359,13 @@ export default function FeedbackMobilePage() {
               <p className="text-[10px] text-gray-500">{colabSelecionado.processo}</p>
             </div>
             <button 
-              onClick={() => { setColabSelecionado(null); setTexto(''); }}
+              onClick={() => { 
+                setColabSelecionado(null); 
+                setTexto(''); 
+                textoAcumuladoRef.current = '';
+                setInterimText('');
+                pararGravacaoInterno();
+              }}
               className="text-gray-400 text-sm font-bold"
             >
               Trocar
@@ -340,47 +406,80 @@ export default function FeedbackMobilePage() {
             </div>
           </div>
 
-          {/* Gravação de voz */}
+          {/* Mensagem + Voz */}
           <div>
-            <label className="block text-xs font-bold text-gray-400 uppercase mb-2">
-              3. Mensagem
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-gray-400 uppercase">
+                3. Mensagem
+              </label>
+              {texto.length > 0 && (
+                <button
+                  onClick={limparTexto}
+                  className="text-[10px] text-red-400 font-bold"
+                >
+                  🗑️ Limpar
+                </button>
+              )}
+            </div>
             
             {/* Botão de gravar */}
-            {!gravando ? (
-              <button
-                onClick={iniciarGravacao}
-                className="w-full bg-gradient-to-br from-purple-500/20 to-pink-500/10 border-2 border-purple-500/40 rounded-xl py-4 mb-3 active:scale-95 transition-all"
-              >
-                <div className="text-4xl mb-1">🎤</div>
-                <p className="text-purple-300 font-bold text-sm">Gravar voz</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">Transcreve automaticamente</p>
-              </button>
-            ) : (
-              <div className="w-full bg-gradient-to-br from-red-500/20 to-rose-600/10 border-2 border-red-500/60 rounded-xl py-4 mb-3 text-center animate-pulse">
-                <div className="text-4xl mb-1">🔴</div>
-                <p className="text-red-300 font-bold text-sm">Gravando...</p>
-                <p className="text-xs font-mono text-white mt-1">
-                  {String(Math.floor(tempoGravacao / 60)).padStart(2, '0')}:
-                  {String(tempoGravacao % 60).padStart(2, '0')}
+            {vozSuportada && (
+              <>
+                {!gravando ? (
+                  <button
+                    onClick={iniciarGravacao}
+                    className="w-full bg-gradient-to-br from-purple-500/20 to-pink-500/10 border-2 border-purple-500/40 rounded-xl py-4 mb-3 active:scale-95 transition-all"
+                  >
+                    <div className="text-4xl mb-1">🎤</div>
+                    <p className="text-purple-300 font-bold text-sm">Gravar voz</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">Transcreve em tempo real</p>
+                  </button>
+                ) : (
+                  <div className="w-full bg-gradient-to-br from-red-500/20 to-rose-600/10 border-2 border-red-500/60 rounded-xl py-4 mb-3 text-center">
+                    <div className="text-4xl mb-1 animate-pulse">🔴</div>
+                    <p className="text-red-300 font-bold text-sm">Gravando...</p>
+                    <p className="text-xs font-mono text-white mt-1">
+                      {String(Math.floor(tempoGravacao / 60)).padStart(2, '0')}:
+                      {String(tempoGravacao % 60).padStart(2, '0')}
+                    </p>
+                    <button
+                      onClick={pararGravacao}
+                      className="mt-3 bg-red-500/30 hover:bg-red-500/40 border border-red-500/60 text-white font-bold px-6 py-2 rounded-lg text-sm"
+                    >
+                      ⏹️ Parar
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+            
+            {!vozSuportada && (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 mb-3 text-center">
+                <p className="text-xs text-yellow-300">
+                  🎤 Reconhecimento de voz não disponível neste navegador. Use Chrome ou Safari.
                 </p>
-                <button
-                  onClick={pararGravacao}
-                  className="mt-3 bg-red-500/30 hover:bg-red-500/40 border border-red-500/60 text-white font-bold px-6 py-2 rounded-lg text-sm"
-                >
-                  ⏹️ Parar
-                </button>
               </div>
             )}
             
-            {/* Texto + transcrição em tempo real */}
+            {/* Textarea principal - SÓ texto finalizado */}
             <textarea
-              value={texto + (transcricaoAtiva ? ' ' + transcricaoAtiva : '')}
-              onChange={(e) => setTexto(e.target.value)}
+              value={texto}
+              onChange={(e) => {
+                setTexto(e.target.value);
+                textoAcumuladoRef.current = e.target.value;
+              }}
               placeholder="Digite ou grave a mensagem..."
-              rows={6}
+              rows={5}
               className="w-full bg-[#1a1a1a] border-2 border-[#2a2a2a] focus:border-[#FFD700] rounded-xl px-4 py-3 text-white text-sm outline-none resize-none"
             />
+            
+            {/* Texto sendo falado AGORA (interim) - separado e em itálico */}
+            {gravando && interimText && (
+              <div className="mt-2 px-4 py-2 bg-purple-500/10 border border-purple-500/30 rounded-xl">
+                <p className="text-purple-300 text-xs font-bold uppercase mb-1">🎤 Falando agora...</p>
+                <p className="text-gray-300 text-sm italic">{interimText}</p>
+              </div>
+            )}
             
             <p className="text-[10px] text-gray-500 mt-1 text-right">
               {texto.length} caracteres
