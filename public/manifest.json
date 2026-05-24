@@ -1,7 +1,7 @@
 {
   "name": "LIDER 360",
   "short_name": "LIDER 360",
-  "description": "App de gestão de desempenho do MELI - LIDER 360",
+  "description": "Sistema completo de gestão do time MELI",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
@@ -12,28 +12,10 @@
   "categories": ["productivity", "business"],
   "icons": [
     {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icon-512-maskable.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "/apple-touch-icon.png",
-      "sizes": "180x180",
-      "type": "image/png",
-      "purpose": "any"
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ],
   "shortcuts": [
@@ -42,21 +24,21 @@
       "short_name": "Copiloto",
       "description": "Tarefas inteligentes da IA",
       "url": "/copiloto",
-      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     },
     {
       "name": "Meu Time",
       "short_name": "Time",
       "description": "Lista de colaboradores",
       "url": "/meu-time",
-      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     },
     {
       "name": "Boletim",
       "short_name": "Boletim",
-      "description": "Boletim diário do time",
+      "description": "Boletim diário",
       "url": "/boletim",
-      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     }
   ],
   "prefer_related_applications": false
