@@ -31,60 +31,60 @@ type Colaborador = {
 };
 
 // ============================================
-// MAPEAMENTO DE STATUS → COR/EMOJI
+// CATEGORIZAÇÃO DE STATUS
 // ============================================
 
-function corDoStatus(motivo: string | null, status: string): { cor: string; emoji: string; label: string } {
+type TipoDia = 'presente' | 'falta' | 'atestado' | 'bh_plan' | 'bh_n_plan' | 'sinergia' | 'descanso' | 'outro';
+
+function classificarStatus(motivo: string | null, status: string): TipoDia {
   if (!motivo) {
-    if (status === 'presente') return { cor: 'bg-green-500/80', emoji: '✅', label: 'Presente' };
-    if (status === 'falta') return { cor: 'bg-red-500/80', emoji: '🔴', label: 'Falta' };
-    if (status === 'justificado') return { cor: 'bg-blue-500/80', emoji: '🩺', label: 'Justificado' };
-    if (status === 'descanso') return { cor: 'bg-gray-500/40', emoji: '🟦', label: 'Descanso' };
-    return { cor: 'bg-gray-700/40', emoji: '·', label: 'Sem dado' };
+    if (status === 'presente') return 'presente';
+    if (status === 'falta') return 'falta';
+    if (status === 'descanso') return 'descanso';
+    return 'outro';
   }
   
   const m = motivo.toLowerCase();
   
-  if (m.includes('p - presente')) return { cor: 'bg-green-500/80', emoji: '✅', label: 'Presente' };
-  if (m.includes('dsr - escala')) return { cor: 'bg-gray-500/40', emoji: '🟦', label: 'Descanso' };
-  if (m.includes('fi - falta')) return { cor: 'bg-red-500/80', emoji: '🔴', label: 'Falta Injustif.' };
-  if (m.includes('fj - atestado')) return { cor: 'bg-blue-500/80', emoji: '🩺', label: 'Atestado' };
-  if (m.includes('fj - falecimento')) return { cor: 'bg-purple-500/60', emoji: '🕊️', label: 'Falecimento' };
-  if (m.includes('bh - banco de horas n')) return { cor: 'bg-orange-500/70', emoji: '🟠', label: 'BH não plan.' };
-  if (m.includes('bh - banco de horas plan')) return { cor: 'bg-yellow-500/60', emoji: '🟡', label: 'BH planejado' };
-  if (m.includes('sie - sinergia')) return { cor: 'bg-purple-500/70', emoji: '🤝', label: 'Sinergia' };
-  if (m.includes('fe - férias') || m.includes('fe - ferias')) return { cor: 'bg-cyan-500/60', emoji: '🌴', label: 'Férias' };
-  if (m.includes('ce - curso')) return { cor: 'bg-cyan-500/60', emoji: '🎓', label: 'Curso' };
-  if (m.includes('tr - treinamento')) return { cor: 'bg-cyan-500/60', emoji: '🎓', label: 'Treinamento' };
-  if (m.includes('ab - abandono')) return { cor: 'bg-red-700/80', emoji: '🚫', label: 'Abandono' };
-  if (m.includes('af - ')) return { cor: 'bg-gray-500/60', emoji: '🏥', label: 'Afastamento' };
-  if (m.includes('de - desligado')) return { cor: 'bg-gray-500/60', emoji: '🚪', label: 'Desligado' };
-  if (m.includes('htf')) return { cor: 'bg-gray-500/60', emoji: '🔄', label: 'Transferido' };
+  if (m.includes('p - presente') || status === 'presente') return 'presente';
+  if (m.includes('dsr - escala')) return 'descanso';
+  if (m.includes('fi - falta')) return 'falta';
+  if (m.includes('atestado')) return 'atestado';
+  if (m.includes('bh - banco de horas n')) return 'bh_n_plan';
+  if (m.includes('bh - banco de horas plan')) return 'bh_plan';
+  if (m.includes('sinergia')) return 'sinergia';
+  if (m.includes('falecimento')) return 'outro';
+  if (m.includes('férias') || m.includes('ferias')) return 'outro';
+  if (m.includes('curso') || m.includes('treinamento')) return 'outro';
+  if (m.includes('abandono')) return 'falta';
+  if (m.includes('afastamento')) return 'outro';
   
-  return { cor: 'bg-gray-700/40', emoji: '·', label: motivo };
+  return 'outro';
 }
 
+const CORES_TIPO: Record<TipoDia, { bg: string; border: string; text: string; emoji: string; label: string }> = {
+  presente:  { bg: 'bg-green-500/10',  border: 'border-green-500/30',  text: 'text-green-300',  emoji: '✅', label: 'Presente' },
+  falta:     { bg: 'bg-red-500/10',    border: 'border-red-500/30',    text: 'text-red-300',    emoji: '🔴', label: 'Falta' },
+  atestado:  { bg: 'bg-blue-500/10',   border: 'border-blue-500/30',   text: 'text-blue-300',   emoji: '🩺', label: 'Atestado' },
+  bh_plan:   { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-300', emoji: '🟡', label: 'BH plan.' },
+  bh_n_plan: { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-300', emoji: '🟠', label: 'BH não plan.' },
+  sinergia:  { bg: 'bg-purple-500/10', border: 'border-purple-500/30', text: 'text-purple-300', emoji: '🤝', label: 'Sinergia' },
+  descanso:  { bg: 'bg-gray-500/10',   border: 'border-gray-500/30',   text: 'text-gray-400',   emoji: '🟦', label: 'Descanso' },
+  outro:     { bg: 'bg-gray-700/10',   border: 'border-gray-700/30',   text: 'text-gray-400',   emoji: '·',  label: 'Outro' },
+};
+
 // ============================================
-// HELPERS DE DATA
+// HELPERS
 // ============================================
 
 const MESES_NOMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
                      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
-function formatarDataBR(iso: string | null): string {
-  if (!iso) return '-';
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return iso;
-  return `${m[3]}/${m[2]}/${m[1]}`;
-}
+const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
-function calcularMesesNaEmpresa(dataAdmissao: string | null): number {
-  if (!dataAdmissao) return 0;
-  const data = new Date(dataAdmissao + 'T12:00:00');
-  if (isNaN(data.getTime())) return 0;
-  const hoje = new Date();
-  const meses = (hoje.getFullYear() - data.getFullYear()) * 12 + (hoje.getMonth() - data.getMonth());
-  return Math.max(0, meses);
+function formatarDataLonga(data: string): string {
+  const d = new Date(data + 'T12:00:00');
+  return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
 }
 
 // ============================================
@@ -96,17 +96,14 @@ export default function PresencaPage() {
   const [registros, setRegistros] = useState<Presenca[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Filtros
-  const [filtroBusca, setFiltroBusca] = useState('');
-  const [filtroProcesso, setFiltroProcesso] = useState<string>('todos');
-  const [filtroMes, setFiltroMes] = useState<string>(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const hoje = new Date();
+  const [anoMes, setAnoMes] = useState({
+    ano: hoje.getFullYear(),
+    mes: hoje.getMonth() + 1,
   });
-  const [filtroABS, setFiltroABS] = useState<'todos' | 'altos'>('todos');
   
-  // Modal detalhe colab
-  const [colabAberto, setColabAberto] = useState<Colaborador | null>(null);
+  // Modal do dia
+  const [diaAberto, setDiaAberto] = useState<string | null>(null);
   
   // Última importação
   const [ultimaImportacao, setUltimaImportacao] = useState<{ data: string; total: number } | null>(null);
@@ -118,7 +115,6 @@ export default function PresencaPage() {
 
   async function carregar() {
     setLoading(true);
-    
     const [{ data: colabsData }, { data: presData }] = await Promise.all([
       supabase
         .from('colaboradores')
@@ -127,11 +123,10 @@ export default function PresencaPage() {
         .order('nome'),
       supabase
         .from('presenca')
-        .select('id, id_groot, nome_colab, processo, data_referencia, status, motivo, categoria, conta_abs, conta_presenca')
+        .select('*')
         .order('data_referencia', { ascending: false })
         .limit(20000),
     ]);
-    
     setColaboradores(colabsData as Colaborador[] || []);
     setRegistros(presData as Presenca[] || []);
     setLoading(false);
@@ -144,115 +139,109 @@ export default function PresencaPage() {
       .eq('registrado_por', 'csv_meli')
       .order('criado_em', { ascending: false })
       .limit(1);
-    
     if (data && data.length > 0) {
       const { count } = await supabase
         .from('presenca')
         .select('id', { count: 'exact', head: true })
         .eq('registrado_por', 'csv_meli');
-      
-      setUltimaImportacao({
-        data: data[0].criado_em,
-        total: count || 0,
-      });
+      setUltimaImportacao({ data: data[0].criado_em, total: count || 0 });
     }
   }
 
   // ============================================
-  // PROCESSA STATS POR COLAB (mês selecionado)
+  // AGRUPA REGISTROS POR DIA
   // ============================================
   
-  type ColabStats = {
-    colab: Colaborador;
-    presencas: number;
+  type ResumoDia = {
+    data: string;
+    presentes: number;
     faltas: number;
     atestados: number;
     bhPlan: number;
     bhNaoPlan: number;
-    outrosJustif: number;
+    sinergia: number;
     descansos: number;
+    outros: number;
+    total: number;
     pctAbs: number;
-    registrosMes: Presenca[];
   };
   
-  const colabsComStats = useMemo<ColabStats[]>(() => {
-    const [ano, mes] = filtroMes.split('-');
-    const inicio = `${ano}-${mes}-01`;
-    const ultimoDia = new Date(Number(ano), Number(mes), 0).getDate();
-    const fim = `${ano}-${mes}-${String(ultimoDia).padStart(2, '0')}`;
+  const resumosPorDia = useMemo<Record<string, ResumoDia>>(() => {
+    const inicio = `${anoMes.ano}-${String(anoMes.mes).padStart(2, '0')}-01`;
+    const ultimoDia = new Date(anoMes.ano, anoMes.mes, 0).getDate();
+    const fim = `${anoMes.ano}-${String(anoMes.mes).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
     
-    return colaboradores.map(c => {
-      const regs = registros.filter(r => 
-        r.id_groot === c.id_groot &&
-        r.data_referencia >= inicio &&
-        r.data_referencia <= fim &&
-        r.status !== 'descartado'
-      );
-      
-      let presencas = 0, faltas = 0, atestados = 0;
-      let bhPlan = 0, bhNaoPlan = 0, outrosJustif = 0, descansos = 0;
-      
-      regs.forEach(r => {
-        const m = (r.motivo || '').toLowerCase();
-        const cat = (r.categoria || '').toLowerCase();
-        
-        if (r.status === 'presente' || cat === 'p') presencas++;
-        else if (m.includes('atestado')) atestados++;
-        else if (cat === 'fi' || m.includes('falta injust')) faltas++;
-        else if (m.includes('banco de horas n')) bhNaoPlan++;
-        else if (m.includes('banco de horas plan')) bhPlan++;
-        else if (r.status === 'descanso' || m.includes('dsr')) descansos++;
-        else if (r.status === 'justificado') outrosJustif++;
-      });
-      
-      const totalContab = presencas + faltas + atestados + bhPlan + bhNaoPlan + outrosJustif;
-      const ausencias = faltas + bhNaoPlan;
-      const pctAbs = totalContab > 0 ? (ausencias / totalContab) * 100 : 0;
-      
-      return {
-        colab: c,
-        presencas, faltas, atestados, bhPlan, bhNaoPlan, outrosJustif, descansos,
-        pctAbs: Number(pctAbs.toFixed(1)),
-        registrosMes: regs,
-      };
-    });
-  }, [colaboradores, registros, filtroMes]);
-  
-  // Aplica filtros
-  const colabsFiltrados = colabsComStats.filter(cs => {
-    if (filtroBusca) {
-      const busca = filtroBusca.toLowerCase();
-      if (!cs.colab.nome.toLowerCase().includes(busca) && !cs.colab.id_groot.toLowerCase().includes(busca)) {
-        return false;
+    const regsDoMes = registros.filter(r => 
+      r.data_referencia >= inicio && 
+      r.data_referencia <= fim &&
+      r.status !== 'descartado'
+    );
+    
+    const resumo: Record<string, ResumoDia> = {};
+    
+    regsDoMes.forEach(r => {
+      const data = r.data_referencia;
+      if (!resumo[data]) {
+        resumo[data] = {
+          data, presentes: 0, faltas: 0, atestados: 0,
+          bhPlan: 0, bhNaoPlan: 0, sinergia: 0, descansos: 0, outros: 0,
+          total: 0, pctAbs: 0,
+        };
       }
-    }
-    if (filtroProcesso !== 'todos' && cs.colab.processo !== filtroProcesso) return false;
-    if (filtroABS === 'altos' && cs.pctAbs < 10) return false;
-    return true;
-  });
+      
+      const tipo = classificarStatus(r.motivo, r.status);
+      
+      if (tipo === 'presente') resumo[data].presentes++;
+      else if (tipo === 'falta') resumo[data].faltas++;
+      else if (tipo === 'atestado') resumo[data].atestados++;
+      else if (tipo === 'bh_plan') resumo[data].bhPlan++;
+      else if (tipo === 'bh_n_plan') resumo[data].bhNaoPlan++;
+      else if (tipo === 'sinergia') resumo[data].sinergia++;
+      else if (tipo === 'descanso') resumo[data].descansos++;
+      else resumo[data].outros++;
+      
+      resumo[data].total++;
+    });
+    
+    // Calcula ABS por dia (faltas + BH não plan / total - descansos)
+    Object.keys(resumo).forEach(d => {
+      const r = resumo[d];
+      const contabilizado = r.presentes + r.faltas + r.atestados + r.bhPlan + r.bhNaoPlan + r.sinergia + r.outros;
+      const ausencias = r.faltas + r.bhNaoPlan;
+      r.pctAbs = contabilizado > 0 ? Number(((ausencias / contabilizado) * 100).toFixed(1)) : 0;
+    });
+    
+    return resumo;
+  }, [registros, anoMes]);
   
-  // Lista de processos únicos
-  const processos = Array.from(new Set(colaboradores.map(c => c.processo).filter(Boolean))) as string[];
+  // Stats agregadas do mês
+  const statsMes = useMemo(() => {
+    const dias = Object.values(resumosPorDia);
+    return {
+      diasComDados: dias.length,
+      totalPresencas: dias.reduce((s, d) => s + d.presentes, 0),
+      totalFaltas: dias.reduce((s, d) => s + d.faltas, 0),
+      totalAtestados: dias.reduce((s, d) => s + d.atestados, 0),
+      totalBHNaoPlan: dias.reduce((s, d) => s + d.bhNaoPlan, 0),
+      absMedio: dias.length > 0 
+        ? Number((dias.reduce((s, d) => s + d.pctAbs, 0) / dias.length).toFixed(1))
+        : 0,
+    };
+  }, [resumosPorDia]);
   
-  // Stats gerais
-  const statsGerais = {
-    total: colabsFiltrados.length,
-    abs: colabsFiltrados.length > 0 
-      ? (colabsFiltrados.reduce((s, c) => s + c.pctAbs, 0) / colabsFiltrados.length).toFixed(1)
-      : '0',
-    totalFaltas: colabsFiltrados.reduce((s, c) => s + c.faltas, 0),
-    totalAtestados: colabsFiltrados.reduce((s, c) => s + c.atestados, 0),
-    altosAbs: colabsFiltrados.filter(c => c.pctAbs > 10).length,
-  };
+  // ============================================
+  // CONSTRÓI CALENDÁRIO DO MÊS
+  // ============================================
   
-  // Lista de meses pra filtro
-  const mesesDisponiveis: { value: string; label: string }[] = [];
-  const hoje = new Date();
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
-    const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const label = `${MESES_NOMES[d.getMonth()]}/${d.getFullYear()}`;
-    mesesDisponiveis.push({ value: v, label });
+  const diasNoMes = new Date(anoMes.ano, anoMes.mes, 0).getDate();
+  const primeiroDiaSemana = new Date(anoMes.ano, anoMes.mes - 1, 1).getDay();
+  
+  function navegarMes(delta: number) {
+    let novoMes = anoMes.mes + delta;
+    let novoAno = anoMes.ano;
+    if (novoMes < 1) { novoMes = 12; novoAno--; }
+    if (novoMes > 12) { novoMes = 1; novoAno++; }
+    setAnoMes({ ano: novoAno, mes: novoMes });
   }
 
   return (
@@ -264,7 +253,7 @@ export default function PresencaPage() {
             📋 Lista de <span className="text-[#FFD700]">Presença</span>
           </h1>
           <p className="text-gray-400">
-            Dashboard automático · Importação CSV do MELI
+            Calendário mensal · Click no dia pra ver detalhes
           </p>
         </div>
 
@@ -295,10 +284,7 @@ export default function PresencaPage() {
               })}
             </p>
           </div>
-          <Link 
-            href="/presenca/importar" 
-            className="text-purple-300 hover:text-purple-200 text-xs font-bold underline"
-          >
+          <Link href="/presenca/importar" className="text-purple-300 hover:text-purple-200 text-xs font-bold underline">
             🔄 Importar nova
           </Link>
         </div>
@@ -308,12 +294,8 @@ export default function PresencaPage() {
       {!loading && registros.length === 0 && (
         <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/5 border-2 border-dashed border-blue-500/30 rounded-2xl p-12 text-center">
           <span className="text-6xl block mb-3">📥</span>
-          <h3 className="text-xl font-bold text-white mb-2">
-            Nenhum dado de presença ainda
-          </h3>
-          <p className="text-gray-400 text-sm mb-4">
-            Importe o CSV do MELI pra começar a acompanhar
-          </p>
+          <h3 className="text-xl font-bold text-white mb-2">Nenhum dado de presença ainda</h3>
+          <p className="text-gray-400 text-sm mb-4">Importe o CSV do MELI pra começar</p>
           <Link
             href="/presenca/importar"
             className="inline-block bg-gradient-to-br from-purple-500 to-pink-600 text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-purple-500/30"
@@ -323,134 +305,199 @@ export default function PresencaPage() {
         </div>
       )}
 
-      {/* Stats gerais */}
+      {/* Stats do mês */}
       {registros.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
-            <span className="text-2xl block mb-1">👥</span>
-            <p className="text-2xl font-black text-white">{statsGerais.total}</p>
-            <p className="text-xs text-gray-400">Colabs ativos</p>
+            <span className="text-2xl block mb-1">📅</span>
+            <p className="text-2xl font-black text-white">{statsMes.diasComDados}</p>
+            <p className="text-xs text-gray-400">Dias c/ dados</p>
           </div>
-          <div className={`bg-gradient-to-br border rounded-2xl p-4 ${
-            Number(statsGerais.abs) < 5 ? 'from-green-500/10 to-emerald-600/5 border-green-500/30' :
-            Number(statsGerais.abs) < 10 ? 'from-yellow-500/10 to-amber-600/5 border-yellow-500/30' :
-            'from-red-500/10 to-rose-600/5 border-red-500/30'
-          }`}>
-            <span className="text-2xl block mb-1">
-              {Number(statsGerais.abs) < 5 ? '✅' : Number(statsGerais.abs) < 10 ? '🟡' : '🔴'}
-            </span>
-            <p className={`text-2xl font-black ${
-              Number(statsGerais.abs) < 5 ? 'text-green-400' :
-              Number(statsGerais.abs) < 10 ? 'text-yellow-400' :
-              'text-red-400'
-            }`}>{statsGerais.abs}%</p>
-            <p className="text-xs text-gray-400">ABS médio</p>
+          <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4">
+            <span className="text-2xl block mb-1">✅</span>
+            <p className="text-2xl font-black text-green-400">{statsMes.totalPresencas}</p>
+            <p className="text-xs text-green-300">Presenças</p>
           </div>
           <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4">
             <span className="text-2xl block mb-1">🔴</span>
-            <p className="text-2xl font-black text-red-400">{statsGerais.totalFaltas}</p>
-            <p className="text-xs text-red-300">Faltas no mês</p>
+            <p className="text-2xl font-black text-red-400">{statsMes.totalFaltas}</p>
+            <p className="text-xs text-red-300">Faltas</p>
           </div>
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4">
             <span className="text-2xl block mb-1">🩺</span>
-            <p className="text-2xl font-black text-blue-400">{statsGerais.totalAtestados}</p>
+            <p className="text-2xl font-black text-blue-400">{statsMes.totalAtestados}</p>
             <p className="text-xs text-blue-300">Atestados</p>
           </div>
-          <div className="bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4">
-            <span className="text-2xl block mb-1">⚠️</span>
-            <p className="text-2xl font-black text-orange-400">{statsGerais.altosAbs}</p>
-            <p className="text-xs text-orange-300">ABS &gt; 10%</p>
+          <div className={`border rounded-2xl p-4 ${
+            statsMes.absMedio < 5 ? 'bg-green-500/10 border-green-500/30' :
+            statsMes.absMedio < 10 ? 'bg-yellow-500/10 border-yellow-500/30' :
+            'bg-red-500/10 border-red-500/30'
+          }`}>
+            <span className="text-2xl block mb-1">
+              {statsMes.absMedio < 5 ? '✅' : statsMes.absMedio < 10 ? '🟡' : '🔴'}
+            </span>
+            <p className={`text-2xl font-black ${
+              statsMes.absMedio < 5 ? 'text-green-400' :
+              statsMes.absMedio < 10 ? 'text-yellow-400' :
+              'text-red-400'
+            }`}>{statsMes.absMedio}%</p>
+            <p className="text-xs text-gray-400">ABS médio</p>
           </div>
         </div>
       )}
 
-      {/* Filtros */}
+      {/* CALENDÁRIO GIGANTE */}
       {registros.length > 0 && (
-        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Mês */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 font-bold">📅</span>
-              <select
-                value={filtroMes}
-                onChange={(e) => setFiltroMes(e.target.value)}
-                className="bg-[#0a0a0a] border border-[#2a2a2a] focus:border-[#FFD700] rounded-lg px-3 py-2 text-white text-sm outline-none"
-              >
-                {mesesDisponiveis.map(m => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-            
-            {/* Processo */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 font-bold">🏷️</span>
-              <select
-                value={filtroProcesso}
-                onChange={(e) => setFiltroProcesso(e.target.value)}
-                className="bg-[#0a0a0a] border border-[#2a2a2a] focus:border-[#FFD700] rounded-lg px-3 py-2 text-white text-sm outline-none"
-              >
-                <option value="todos">Todos processos</option>
-                {processos.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            
-            {/* Filtro ABS alto */}
+        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-3xl p-6">
+          {/* Navegação do mês */}
+          <div className="flex items-center justify-between mb-6">
             <button
-              onClick={() => setFiltroABS(filtroABS === 'altos' ? 'todos' : 'altos')}
-              className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${
-                filtroABS === 'altos'
-                  ? 'bg-red-500/20 text-red-300 border border-red-500/40'
-                  : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a]'
-              }`}
+              onClick={() => navegarMes(-1)}
+              className="w-12 h-12 rounded-xl bg-[#0a0a0a] hover:bg-[#222] border border-[#2a2a2a] text-white font-bold text-xl transition-all hover:-translate-x-0.5"
             >
-              ⚠️ Só ABS &gt; 10%
+              ←
             </button>
-            
-            {/* Busca */}
-            <div className="flex-1 min-w-[200px]">
-              <input
-                type="text"
-                placeholder="🔎 Buscar colab..."
-                value={filtroBusca}
-                onChange={(e) => setFiltroBusca(e.target.value)}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] focus:border-[#FFD700] rounded-lg px-4 py-2 text-white text-sm outline-none"
-              />
+            <div className="text-center">
+              <h2 className="text-2xl font-black text-white">
+                {MESES_NOMES[anoMes.mes - 1]}
+              </h2>
+              <p className="text-sm text-gray-400 font-bold">{anoMes.ano}</p>
             </div>
+            <button
+              onClick={() => navegarMes(1)}
+              className="w-12 h-12 rounded-xl bg-[#0a0a0a] hover:bg-[#222] border border-[#2a2a2a] text-white font-bold text-xl transition-all hover:translate-x-0.5"
+            >
+              →
+            </button>
+          </div>
+
+          {/* Cabeçalho dos dias */}
+          <div className="grid grid-cols-7 gap-2 mb-2">
+            {['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'].map(d => (
+              <div key={d} className="text-center text-xs font-bold text-gray-500 py-2">
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {/* Grade do calendário */}
+          <div className="grid grid-cols-7 gap-2">
+            {/* Espaços vazios antes do dia 1 */}
+            {Array.from({ length: primeiroDiaSemana }).map((_, i) => (
+              <div key={`empty-${i}`} />
+            ))}
+
+            {/* Dias do mês */}
+            {Array.from({ length: diasNoMes }).map((_, i) => {
+              const dia = i + 1;
+              const dataISO = `${anoMes.ano}-${String(anoMes.mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+              const resumo = resumosPorDia[dataISO];
+              const dataObj = new Date(anoMes.ano, anoMes.mes - 1, dia);
+              const ehFimDeSemana = dataObj.getDay() === 0 || dataObj.getDay() === 6;
+              const ehHoje = dataISO === hoje.toISOString().split('T')[0];
+              
+              const temAusencias = resumo && (resumo.faltas > 0 || resumo.bhNaoPlan > 0 || resumo.atestados > 0);
+              const corBorda = !resumo ? 'border-[#2a2a2a]' 
+                             : resumo.pctAbs > 10 ? 'border-red-500/40'
+                             : resumo.pctAbs > 5 ? 'border-yellow-500/40'
+                             : 'border-green-500/30';
+              
+              return (
+                <button
+                  key={dia}
+                  onClick={() => resumo && setDiaAberto(dataISO)}
+                  disabled={!resumo}
+                  className={`group min-h-[110px] p-2 rounded-xl border-2 transition-all text-left ${corBorda} ${
+                    ehFimDeSemana ? 'bg-[#0a0a0a]/50' : 'bg-[#0a0a0a]'
+                  } ${
+                    ehHoje ? 'ring-2 ring-[#FFD700]/60' : ''
+                  } ${
+                    resumo ? 'hover:-translate-y-0.5 hover:shadow-lg cursor-pointer' : 'opacity-40 cursor-default'
+                  }`}
+                >
+                  {/* Número do dia */}
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-lg font-black ${
+                      ehHoje ? 'text-[#FFD700]' : 'text-white'
+                    }`}>
+                      {dia}
+                    </span>
+                    {resumo && resumo.pctAbs > 0 && (
+                      <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full ${
+                        resumo.pctAbs > 10 ? 'bg-red-500/20 text-red-300' :
+                        resumo.pctAbs > 5 ? 'bg-yellow-500/20 text-yellow-300' :
+                        'bg-green-500/20 text-green-300'
+                      }`}>
+                        {resumo.pctAbs}%
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Ausências/eventos do dia */}
+                  {resumo && (
+                    <div className="space-y-1">
+                      {resumo.faltas > 0 && (
+                        <div className="flex items-center gap-1 text-[10px]">
+                          <span className="text-red-400 font-bold">🔴 {resumo.faltas}</span>
+                          <span className="text-gray-500 text-[9px]">falta{resumo.faltas > 1 ? 's' : ''}</span>
+                        </div>
+                      )}
+                      {resumo.atestados > 0 && (
+                        <div className="flex items-center gap-1 text-[10px]">
+                          <span className="text-blue-400 font-bold">🩺 {resumo.atestados}</span>
+                          <span className="text-gray-500 text-[9px]">atest.</span>
+                        </div>
+                      )}
+                      {resumo.bhNaoPlan > 0 && (
+                        <div className="flex items-center gap-1 text-[10px]">
+                          <span className="text-orange-400 font-bold">🟠 {resumo.bhNaoPlan}</span>
+                          <span className="text-gray-500 text-[9px]">BH n/p</span>
+                        </div>
+                      )}
+                      {!temAusencias && resumo.presentes > 0 && (
+                        <div className="text-[10px] text-green-400 font-bold">
+                          ✅ {resumo.presentes} pres.
+                        </div>
+                      )}
+                      {resumo.outros > 0 && (
+                        <div className="text-[10px] text-gray-400">
+                          + {resumo.outros} outros
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          
+          {/* Legenda */}
+          <div className="mt-6 pt-4 border-t border-[#2a2a2a] flex items-center justify-center gap-4 flex-wrap text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-green-500/40 border border-green-500/60" />
+              <span className="text-gray-400">ABS &lt; 5%</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-yellow-500/40 border border-yellow-500/60" />
+              <span className="text-gray-400">5-10%</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-red-500/40 border border-red-500/60" />
+              <span className="text-gray-400">&gt; 10%</span>
+            </div>
+            <div className="text-gray-500">·</div>
+            <span className="text-gray-500">🔴 falta · 🩺 atestado · 🟠 BH n/p</span>
           </div>
         </div>
       )}
 
-      {/* Loading */}
-      {loading ? (
-        <div className="text-center py-12">
-          <span className="text-6xl block mb-4 animate-pulse">⏳</span>
-          <p className="text-gray-400">Carregando...</p>
-        </div>
-      ) : registros.length === 0 ? null : colabsFiltrados.length === 0 ? (
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
-          <span className="text-6xl block mb-4">🔍</span>
-          <p className="text-gray-400">Nenhum colab com esses filtros</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {colabsFiltrados.map(cs => (
-            <CardColabDashboard
-              key={cs.colab.id_groot}
-              stats={cs}
-              mes={filtroMes}
-              onClick={() => setColabAberto(cs.colab)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Modal detalhe */}
-      {colabAberto && (
-        <ModalDetalheColab
-          colab={colabAberto}
-          registros={registros.filter(r => r.id_groot === colabAberto.id_groot)}
-          onClose={() => setColabAberto(null)}
+      {/* Modal de detalhe do dia */}
+      {diaAberto && (
+        <ModalDetalheDia
+          data={diaAberto}
+          registros={registros.filter(r => r.data_referencia === diaAberto && r.status !== 'descartado')}
+          colaboradores={colaboradores}
+          onClose={() => setDiaAberto(null)}
         />
       )}
     </div>
@@ -458,140 +505,40 @@ export default function PresencaPage() {
 }
 
 // ============================================
-// CARD COLAB COM CALENDÁRIO
+// MODAL DO DIA - LISTA DETALHADA
 // ============================================
 
-function CardColabDashboard({ 
-  stats, mes, onClick
+function ModalDetalheDia({ 
+  data, registros, colaboradores, onClose 
 }: { 
-  stats: any;
-  mes: string;
-  onClick: () => void;
-}) {
-  const [ano, mesNum] = mes.split('-').map(Number);
-  const diasNoMes = new Date(ano, mesNum, 0).getDate();
-  const primeiroDiaSemana = new Date(ano, mesNum - 1, 1).getDay(); // 0=Dom
-  
-  // Mapa de registros por dia
-  const regsPorDia: Record<number, any> = {};
-  stats.registrosMes.forEach((r: any) => {
-    const dia = Number(r.data_referencia.split('-')[2]);
-    regsPorDia[dia] = r;
-  });
-  
-  const corABS = stats.pctAbs > 10 ? 'red' : stats.pctAbs > 5 ? 'yellow' : 'green';
-  const mesesEmpresa = calcularMesesNaEmpresa(stats.colab.data_admissao);
-  
-  return (
-    <div 
-      className={`bg-gradient-to-br border rounded-2xl p-5 hover:-translate-y-0.5 hover:shadow-xl transition-all cursor-pointer ${
-        corABS === 'red' ? 'from-red-500/5 to-rose-500/5 border-red-500/30 hover:border-red-500/50' :
-        corABS === 'yellow' ? 'from-yellow-500/5 to-amber-500/5 border-yellow-500/30 hover:border-yellow-500/50' :
-        'from-[#1a1a1a] to-[#141414] border-[#2a2a2a] hover:border-[#3a3a3a]'
-      }`}
-      onClick={onClick}
-    >
-      <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-sm flex-shrink-0 ${
-            corABS === 'red' ? 'bg-red-500/30 text-red-200' :
-            corABS === 'yellow' ? 'bg-yellow-500/30 text-yellow-200' :
-            'bg-cyan-500/30 text-cyan-200'
-          }`}>
-            {stats.colab.nome.split(' ').slice(0, 2).map((n: string) => n[0]).join('').toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-white font-bold truncate">{stats.colab.nome}</p>
-            <p className="text-xs text-gray-500">
-              {stats.colab.processo} · ID {stats.colab.id_groot}
-              {stats.colab.data_admissao && ` · ${mesesEmpresa}m na empresa`}
-            </p>
-          </div>
-        </div>
-        
-        {/* Stats compactas */}
-        <div className="flex items-center gap-3 text-xs">
-          <div className="text-center">
-            <p className="text-green-400 font-bold">{stats.presencas}</p>
-            <p className="text-[10px] text-gray-500">Pres.</p>
-          </div>
-          <div className="text-center">
-            <p className="text-red-400 font-bold">{stats.faltas}</p>
-            <p className="text-[10px] text-gray-500">Falt.</p>
-          </div>
-          <div className="text-center">
-            <p className="text-blue-400 font-bold">{stats.atestados}</p>
-            <p className="text-[10px] text-gray-500">Atest.</p>
-          </div>
-          <div className="text-center">
-            <p className="text-orange-400 font-bold">{stats.bhNaoPlan}</p>
-            <p className="text-[10px] text-gray-500">BH n/p</p>
-          </div>
-          <div className="text-center">
-            <span className={`text-base font-black px-3 py-1 rounded-full ${
-              corABS === 'red' ? 'bg-red-500/20 text-red-300' :
-              corABS === 'yellow' ? 'bg-yellow-500/20 text-yellow-300' :
-              'bg-green-500/20 text-green-300'
-            }`}>
-              {stats.pctAbs}%
-            </span>
-            <p className="text-[10px] text-gray-500 mt-1">ABS</p>
-          </div>
-        </div>
-      </div>
-      
-      {/* Calendário */}
-      <div className="grid grid-cols-7 gap-1">
-        {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((d, i) => (
-          <div key={i} className="text-[10px] text-gray-500 text-center font-bold pb-1">
-            {d}
-          </div>
-        ))}
-        
-        {Array.from({ length: primeiroDiaSemana }).map((_, i) => (
-          <div key={`empty-${i}`} />
-        ))}
-        
-        {Array.from({ length: diasNoMes }).map((_, i) => {
-          const dia = i + 1;
-          const reg = regsPorDia[dia];
-          const info = reg ? corDoStatus(reg.motivo, reg.status) : { cor: 'bg-gray-800/40', emoji: '·', label: 'Sem dado' };
-          
-          return (
-            <div
-              key={dia}
-              title={`${dia}/${mesNum}: ${info.label}`}
-              className={`aspect-square rounded ${info.cor} flex items-center justify-center text-[10px] font-bold text-white relative hover:scale-110 transition-transform`}
-            >
-              {dia}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ============================================
-// MODAL DE DETALHE
-// ============================================
-
-function ModalDetalheColab({ 
-  colab, registros, onClose 
-}: { 
-  colab: Colaborador; 
+  data: string; 
   registros: Presenca[]; 
+  colaboradores: Colaborador[];
   onClose: () => void;
 }) {
-  const ordenados = [...registros].sort((a, b) => b.data_referencia.localeCompare(a.data_referencia));
+  // Agrupa por tipo
+  type Grupo = { tipo: TipoDia; items: Presenca[] };
+  const grupos: Grupo[] = [
+    { tipo: 'falta', items: [] },
+    { tipo: 'atestado', items: [] },
+    { tipo: 'bh_n_plan', items: [] },
+    { tipo: 'bh_plan', items: [] },
+    { tipo: 'sinergia', items: [] },
+    { tipo: 'outro', items: [] },
+    { tipo: 'descanso', items: [] },
+    { tipo: 'presente', items: [] },
+  ];
   
-  const stats = {
-    total: ordenados.filter(r => r.status !== 'descartado').length,
-    presencas: ordenados.filter(r => r.status === 'presente').length,
-    faltas: ordenados.filter(r => (r.motivo || '').toLowerCase().includes('fi - falta')).length,
-    atestados: ordenados.filter(r => (r.motivo || '').toLowerCase().includes('atestado')).length,
-  };
+  registros.forEach(r => {
+    const tipo = classificarStatus(r.motivo, r.status);
+    const g = grupos.find(g => g.tipo === tipo);
+    if (g) g.items.push(r);
+  });
   
+  function getColab(idGroot: string): Colaborador | null {
+    return colaboradores.find(c => c.id_groot === idGroot) || null;
+  }
+
   return (
     <div 
       className="fixed inset-0 z-[9000] flex items-end md:items-center justify-center p-0 md:p-4 bg-black/80 backdrop-blur-sm"
@@ -599,14 +546,16 @@ function ModalDetalheColab({
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border-2 border-[#FFD700]/30 rounded-t-3xl md:rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+        className="bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border-2 border-[#FFD700]/30 rounded-t-3xl md:rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
       >
+        {/* Header */}
         <div className="sticky top-0 bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border-b border-[#2a2a2a] p-5 flex items-start justify-between gap-3 z-10">
           <div className="flex-1 min-w-0">
-            <h2 className="text-2xl font-black text-white">{colab.nome}</h2>
+            <h2 className="text-2xl font-black text-white capitalize">
+              {formatarDataLonga(data)}
+            </h2>
             <p className="text-xs text-gray-500 mt-1">
-              {colab.processo} · ID {colab.id_groot}
-              {colab.data_admissao && ` · Admissão: ${formatarDataBR(colab.data_admissao)}`}
+              {registros.length} registro(s) · {grupos.filter(g => g.items.length > 0).length} categoria(s)
             </p>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#2a2a2a] hover:bg-[#3a3a3a] text-white flex items-center justify-center">
@@ -615,62 +564,52 @@ function ModalDetalheColab({
         </div>
         
         <div className="p-5 space-y-4">
-          {/* Stats gerais */}
-          <div className="grid grid-cols-4 gap-2">
-            <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl p-3 text-center">
-              <p className="text-2xl font-black text-white">{stats.total}</p>
-              <p className="text-[10px] text-gray-500">Total dias</p>
-            </div>
-            <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3 text-center">
-              <p className="text-2xl font-black text-green-400">{stats.presencas}</p>
-              <p className="text-[10px] text-green-300">Presenças</p>
-            </div>
-            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-center">
-              <p className="text-2xl font-black text-red-400">{stats.faltas}</p>
-              <p className="text-[10px] text-red-300">Faltas</p>
-            </div>
-            <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 text-center">
-              <p className="text-2xl font-black text-blue-400">{stats.atestados}</p>
-              <p className="text-[10px] text-blue-300">Atestados</p>
-            </div>
-          </div>
-
-          {/* Link pro perfil completo */}
-          <Link
-            href={`/meu-time/${colab.id}`}
-            className="block bg-[#0a0a0a] hover:bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-3 text-center text-sm text-blue-300 font-bold transition-all"
-          >
-            👤 Ver perfil completo →
-          </Link>
-          
-          {/* Lista dos últimos dias */}
-          <div>
-            <p className="text-xs font-bold text-gray-400 uppercase mb-2">📅 Últimos 30 dias</p>
-            <div className="space-y-1 max-h-96 overflow-y-auto pr-2">
-              {ordenados.slice(0, 30).map(r => {
-                const info = corDoStatus(r.motivo, r.status);
-                return (
-                  <div 
-                    key={r.id}
-                    className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-2 flex items-center gap-3 text-sm"
-                  >
-                    <div className={`w-2 h-2 rounded-full ${info.cor}`} />
-                    <span className="text-gray-400 font-mono text-xs">
-                      {formatarDataBR(r.data_referencia)}
-                    </span>
-                    <span className="flex-1 text-white text-xs">
-                      {info.emoji} {info.label}
-                    </span>
-                    {r.conta_abs && (
-                      <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded font-bold">
-                        ABS
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          {grupos.filter(g => g.items.length > 0).map(grupo => {
+            const cor = CORES_TIPO[grupo.tipo];
+            return (
+              <div key={grupo.tipo} className={`${cor.bg} ${cor.border} border rounded-2xl overflow-hidden`}>
+                <div className={`px-4 py-3 ${cor.bg} border-b ${cor.border} flex items-center justify-between`}>
+                  <h3 className={`font-black ${cor.text} flex items-center gap-2`}>
+                    <span className="text-xl">{cor.emoji}</span>
+                    {cor.label}
+                  </h3>
+                  <span className={`text-2xl font-black ${cor.text}`}>{grupo.items.length}</span>
+                </div>
+                <div className="p-2 space-y-1">
+                  {grupo.items.map(r => {
+                    const colab = getColab(r.id_groot);
+                    return (
+                      <div
+                        key={r.id}
+                        className="bg-[#0a0a0a]/50 rounded-lg p-2.5 flex items-center gap-3 hover:bg-[#0a0a0a] transition-all"
+                      >
+                        <div className={`w-8 h-8 rounded-lg ${cor.bg} flex items-center justify-center ${cor.text} font-black text-[10px] flex-shrink-0`}>
+                          {(r.nome_colab || colab?.nome || r.id_groot).split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white font-bold text-sm truncate">
+                            {r.nome_colab || colab?.nome || `ID ${r.id_groot}`}
+                          </p>
+                          <p className="text-[10px] text-gray-500 truncate">
+                            {r.processo || colab?.processo} · ID {r.id_groot}
+                            {r.motivo && ` · ${r.motivo}`}
+                          </p>
+                        </div>
+                        {colab && (
+                          <Link
+                            href={`/meu-time/${colab.id}`}
+                            className="text-xs text-blue-300 hover:text-blue-200 font-bold flex-shrink-0"
+                          >
+                            ver →
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
