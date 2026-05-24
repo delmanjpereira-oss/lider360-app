@@ -6,7 +6,7 @@
   "id": "/mobile",
   "display": "standalone",
   "background_color": "#08080c",
-  "theme_color": "#FFD700",
+  "theme_color": "#0a0a0a",
   "orientation": "portrait-primary",
   "scope": "/",
   "lang": "pt-BR",
