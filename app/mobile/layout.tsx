@@ -60,8 +60,7 @@ export default function MobileLayout({
       
       {/* OVERLAY MOBILE - cobre tudo */}
       <div 
-        className="fixed inset-0 bg-[#0a0a0a] text-white z-[9999] flex flex-col"
-        style={{ height: '100vh', height: '100dvh' }}
+        className="fixed inset-0 bg-[#0a0a0a] text-white z-[9999] flex flex-col h-screen"
       >
         {/* TOPBAR FIXO */}
         <header className="flex-shrink-0 bg-[#0a0a0a] border-b border-[#2a2a2a]">
