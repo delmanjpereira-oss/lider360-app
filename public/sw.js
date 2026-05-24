@@ -1,49 +1,45 @@
 // ============================================
-// 🚀 LIDER 360 - SERVICE WORKER
+// 🚀 LIDER 360 - SERVICE WORKER (Online-First)
 // ============================================
-// Habilita:
-// - Cache offline
-// - Notificações push
-// - Atualizações automáticas
+// Estratégia: SEMPRE busca da internet primeiro
+// Cache só pra emergência (sem internet)
+// Dados de API/Supabase NUNCA são cacheados
 // ============================================
 
-const VERSAO_CACHE = 'lider360-v1.0.0';
-const CACHE_RUNTIME = 'lider360-runtime';
+const VERSAO = 'lider360-v2.0.0';
+const CACHE_EMERGENCIA = 'lider360-fallback';
 
-// Recursos pra cachear na instalação
-const RECURSOS_ESSENCIAIS = [
+// Só cacheia o mínimo absoluto (pra abrir offline)
+const RECURSOS_MINIMOS = [
   '/',
-  '/manifest.json',
   '/icon.svg',
+  '/manifest.json',
 ];
 
 // ============================================
 // INSTALAÇÃO
 // ============================================
 self.addEventListener('install', (event) => {
-  console.log('🚀 SW: Instalando v1.0.0');
+  console.log('🚀 SW v2: Instalando');
   
   event.waitUntil(
-    caches.open(VERSAO_CACHE).then((cache) => {
-      console.log('📦 SW: Cache aberto');
-      return cache.addAll(RECURSOS_ESSENCIAIS).catch((err) => {
-        console.warn('⚠️ SW: Falha ao cachear alguns recursos', err);
-      });
+    caches.open(CACHE_EMERGENCIA).then((cache) => {
+      return cache.addAll(RECURSOS_MINIMOS).catch(() => {});
     }).then(() => self.skipWaiting())
   );
 });
 
 // ============================================
-// ATIVAÇÃO - Limpa caches antigos
+// ATIVAÇÃO - Limpa caches antigos AGRESSIVAMENTE
 // ============================================
 self.addEventListener('activate', (event) => {
-  console.log('✨ SW: Ativando v1.0.0');
+  console.log('✨ SW v2: Ativando - limpando caches antigos');
   
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
-          .filter((name) => name !== VERSAO_CACHE && name !== CACHE_RUNTIME)
+          .filter((name) => name !== CACHE_EMERGENCIA)
           .map((name) => {
             console.log('🗑️ SW: Apagando cache antigo', name);
             return caches.delete(name);
@@ -54,58 +50,57 @@ self.addEventListener('activate', (event) => {
 });
 
 // ============================================
-// FETCH - Estratégia: Network First com fallback
+// FETCH - SEMPRE ONLINE PRIMEIRO
 // ============================================
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   
-  // Ignora requests pra outras origens (Supabase, Groq, etc)
-  if (!request.url.startsWith(self.location.origin)) {
-    return;
-  }
+  // ❌ NUNCA INTERCEPTAR:
+  // - APIs (Supabase, Groq, Next.js API routes)
+  // - Recursos de outras origens
+  // - Métodos não-GET
   
-  // Ignora métodos não-GET
-  if (request.method !== 'GET') {
-    return;
-  }
-  
-  // Ignora rotas de API e arquivos do Next.js internos
   if (
+    request.method !== 'GET' ||
+    !request.url.startsWith(self.location.origin) ||
     request.url.includes('/api/') ||
+    request.url.includes('supabase') ||
+    request.url.includes('groq') ||
     request.url.includes('/_next/data') ||
     request.url.includes('/_next/webpack') ||
     request.url.includes('chrome-extension')
   ) {
-    return;
+    return; // Deixa o navegador lidar normalmente
   }
   
+  // ✅ Pra páginas HTML e assets estáticos:
+  // SEMPRE busca network primeiro, cache só como fallback
   event.respondWith(
-    // Tenta network primeiro
     fetch(request)
       .then((response) => {
-        // Se deu certo, salva no cache e retorna
+        // Atualiza cache de emergência em segundo plano
         if (response && response.status === 200) {
           const clone = response.clone();
-          caches.open(CACHE_RUNTIME).then((cache) => {
+          caches.open(CACHE_EMERGENCIA).then((cache) => {
             cache.put(request, clone).catch(() => {});
           });
         }
         return response;
       })
       .catch(() => {
-        // Se network falhou, tenta o cache
+        // Sem internet? Tenta o cache de emergência
         return caches.match(request).then((cached) => {
           if (cached) {
-            console.log('📦 SW: Servindo do cache:', request.url);
+            console.log('📦 SW: Sem internet - servindo do cache', request.url);
             return cached;
           }
           
-          // Se nem cache tem e é uma página HTML, retorna a home
+          // Se é página HTML e não tem cache, retorna a home cacheada
           if (request.headers.get('accept')?.includes('text/html')) {
             return caches.match('/');
           }
           
-          return new Response('Offline e sem cache', { 
+          return new Response('Sem conexão e sem cache', { 
             status: 503, 
             statusText: 'Offline' 
           });
@@ -118,12 +113,9 @@ self.addEventListener('fetch', (event) => {
 // NOTIFICAÇÕES PUSH
 // ============================================
 self.addEventListener('push', (event) => {
-  console.log('🔔 SW: Notificação push recebida');
-  
   let dados = { 
     titulo: 'LIDER 360',
     corpo: 'Você tem uma notificação',
-    icone: '/icon.svg',
     url: '/'
   };
   
@@ -135,26 +127,21 @@ self.addEventListener('push', (event) => {
     }
   }
   
-  const options = {
-    body: dados.corpo,
-    icon: dados.icone,
-    badge: '/icon.svg',
-    vibrate: [200, 100, 200],
-    requireInteraction: dados.critica || false,
-    data: {
-      url: dados.url,
-      timestamp: Date.now(),
-    },
-    actions: [
-      { action: 'abrir', title: '👀 Ver' },
-      { action: 'fechar', title: 'Fechar' },
-    ],
-    tag: dados.tag || 'lider360-notif',
-    renotify: true,
-  };
-  
   event.waitUntil(
-    self.registration.showNotification(dados.titulo, options)
+    self.registration.showNotification(dados.titulo, {
+      body: dados.corpo,
+      icon: '/icon.svg',
+      badge: '/icon.svg',
+      vibrate: [200, 100, 200],
+      requireInteraction: dados.critica || false,
+      data: { url: dados.url },
+      actions: [
+        { action: 'abrir', title: '👀 Ver' },
+        { action: 'fechar', title: 'Fechar' },
+      ],
+      tag: dados.tag || 'lider360-notif',
+      renotify: true,
+    })
   );
 });
 
@@ -162,27 +149,21 @@ self.addEventListener('push', (event) => {
 // CLICK NA NOTIFICAÇÃO
 // ============================================
 self.addEventListener('notificationclick', (event) => {
-  console.log('👆 SW: Click na notificação');
-  
   event.notification.close();
   
-  if (event.action === 'fechar') {
-    return;
-  }
+  if (event.action === 'fechar') return;
   
   const urlAlvo = event.notification.data?.url || '/';
   
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then((clientList) => {
-        // Se já tem janela aberta, foca nela
         for (const client of clientList) {
           if (client.url.includes(self.location.origin) && 'focus' in client) {
             client.navigate(urlAlvo);
             return client.focus();
           }
         }
-        // Senão, abre nova
         if (self.clients.openWindow) {
           return self.clients.openWindow(urlAlvo);
         }
@@ -197,10 +178,6 @@ self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
-  
-  if (event.data?.type === 'GET_VERSION') {
-    event.ports[0].postMessage({ version: VERSAO_CACHE });
-  }
 });
 
-console.log('🚀 LIDER 360 Service Worker carregado');
+console.log('🚀 LIDER 360 SW v2 carregado - Modo Online-First');
