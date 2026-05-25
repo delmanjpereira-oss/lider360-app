@@ -11,13 +11,8 @@ const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
 export const maxDuration = 60;
 
-// ============================================
-// API DO COPILOTO VIVO
-// ============================================
-
 export async function POST() {
   try {
-    // 1️⃣ Coleta contexto COMPLETO (mensal + diário + presença)
     const { colabs, metas, limiteAtingido } = await coletarContextoCompleto();
     
     if (limiteAtingido) {
@@ -32,38 +27,34 @@ export async function POST() {
       return NextResponse.json({ sucesso: true, tarefas_geradas: 0 });
     }
     
-    // 2️⃣ Filtra colabs SEM tarefa pendente (anti-duplicação)
-    const colabsComVaga = colabs.filter(c => c.tarefasPendentes === 0);
+    // Filtra colabs sem tarefa pendente E com algum dado
+    const colabsComVaga = colabs.filter(c => 
+      c.tarefasPendentes === 0 && c.fonteDados !== 'nenhum'
+    );
     
     if (colabsComVaga.length === 0) {
       return NextResponse.json({ 
         sucesso: true, 
         tarefas_geradas: 0,
-        motivo: 'Todos colabs já têm tarefa pendente'
+        motivo: 'Todos colabs já têm tarefa pendente OU sem dados'
       });
     }
     
-    // 3️⃣ Limita análise pela quantidade de vagas
     const vagasDisponiveis = colabsComVaga[0]?.vagasNoLimite || 10;
     const colabsAnalisar = colabsComVaga.slice(0, Math.min(vagasDisponiveis, 20));
     
-    // 4️⃣ Constrói prompt RICO com dados mensais
     const prompt = construirPrompt(colabsAnalisar, metas);
-    
-    // 5️⃣ Chama Groq
     const tarefasGeradas = await chamarIA(prompt);
     
     if (!tarefasGeradas || tarefasGeradas.length === 0) {
       return NextResponse.json({ sucesso: true, tarefas_geradas: 0 });
     }
     
-    // 6️⃣ Salva tarefas no Supabase
     let inseridas = 0;
     for (const tarefa of tarefasGeradas) {
       const colab = colabs.find(c => c.id_groot === tarefa.id_groot);
       if (!colab) continue;
       
-      // Anti-duplicata final
       const { count } = await supabase
         .from('tarefas')
         .select('id', { count: 'exact', head: true })
@@ -72,11 +63,10 @@ export async function POST() {
       
       if ((count || 0) > 0) continue;
       
-      // Snapshot dos dados pra contexto
       const contextoDados = {
-        mensalAtual: colab.mensalAtual,
-        historicoMensal: colab.historicoMensal,
+        fonteDados: colab.fonteDados,
         diarioRecente: colab.diarioRecente,
+        mensalAtual: colab.mensalAtual,
         presencaQuarter: colab.presencaQuarter,
         analiseCarreira: colab.analiseCarreira,
         imaUltimo: colab.imaUltimo,
@@ -96,7 +86,7 @@ export async function POST() {
         analise_ia: tarefa.analise_ia || null,
         hipotese: tarefa.hipotese || null,
         motivo: tarefa.acao_sugerida || null,
-        gatilho_origem: tarefa.gatilho || 'analise_mensal',
+        gatilho_origem: tarefa.gatilho || colab.fonteDados,
         feedback_obrigatorio: tarefa.feedback_obrigatorio !== false,
         contexto_dados: contextoDados,
         gerado_por_ia: true,
@@ -123,7 +113,7 @@ export async function POST() {
 }
 
 // ============================================
-// CONSTRUIR PROMPT - com dados MENSAIS
+// PROMPT - DIÁRIO base, MENSAL fallback
 // ============================================
 
 function construirPrompt(colabs: any[], metas: Record<string, number>): string {
@@ -135,47 +125,39 @@ function construirPrompt(colabs: any[], metas: Record<string, number>): string {
     let descricao = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
     descricao += `👤 ${c.nome} | ID: ${c.id_groot} | ${c.processo || 'sem processo'}\n`;
     descricao += `   ${c.cargo || 'sem cargo'} | ${c.carreira || 'sem carreira'}\n`;
+    descricao += `   🔍 Fonte: ${c.fonteDados.toUpperCase()}\n`;
     
-    // 🎯 DADOS MENSAIS (foco principal)
+    // 📅 DIÁRIO (FONTE PRINCIPAL)
+    if (c.diarioRecente && c.diarioRecente.dias_com_dado > 0) {
+      descricao += `\n📅 PERFORMANCE DIÁRIA (últimos 30 dias):\n`;
+      descricao += `   • Líquida média: ${c.diarioRecente.liquida_media.toFixed(0)} pç/h\n`;
+      descricao += `   • Supera média: ${c.diarioRecente.supera_media.toFixed(1)}%\n`;
+      descricao += `   • Dias com dado: ${c.diarioRecente.dias_com_dado}\n`;
+      if (c.diarioRecente.ultimo_dia) {
+        descricao += `   • Último dia: ${c.diarioRecente.ultimo_dia}\n`;
+      }
+      
+      // Compara com meta
+      const meta = c.processo === 'P2M' ? META_LIQUIDA_P2M : META_LIQUIDA_CHECKIN;
+      const pctMeta = ((c.diarioRecente.liquida_media / meta) * 100).toFixed(1);
+      descricao += `   • % da meta (${meta}): ${pctMeta}%\n`;
+    }
+    
+    // 📊 MENSAL (FALLBACK ou complementar)
     if (c.mensalAtual) {
-      descricao += `\n📊 PRODUTIVIDADE MENSAL (${c.mensalAtual.mes}/${c.mensalAtual.ano}):\n`;
+      const labelFonte = c.fonteDados === 'mensal' 
+        ? '📊 PRODUTIVIDADE MENSAL (fonte principal - sem diário disponível):'
+        : '📊 RESUMO MENSAL (complementar):';
+      
+      descricao += `\n${labelFonte}\n`;
+      descricao += `   • Mês: ${c.mensalAtual.mes}/${c.mensalAtual.ano}\n`;
       descricao += `   • Líquida média: ${c.mensalAtual.prod_liquida} pç/h\n`;
       descricao += `   • Unidades totais: ${c.mensalAtual.unidades_total.toLocaleString('pt-BR')}\n`;
       descricao += `   • Dias trabalhados: ${c.mensalAtual.dias_trabalhados}\n`;
       
-      // Comparação com meta
       const meta = c.processo === 'P2M' ? META_LIQUIDA_P2M : META_LIQUIDA_CHECKIN;
       const pctMeta = ((c.mensalAtual.prod_liquida / meta) * 100).toFixed(1);
       descricao += `   • % da meta (${meta}): ${pctMeta}%\n`;
-    } else {
-      descricao += `\n⚠️ SEM DADOS MENSAIS PARA O MÊS ATUAL\n`;
-    }
-    
-    // Histórico mensal (tendência)
-    if (c.historicoMensal && c.historicoMensal.length > 1) {
-      descricao += `\n📈 HISTÓRICO ÚLTIMOS MESES:\n`;
-      c.historicoMensal.forEach((h: any) => {
-        descricao += `   • ${h.mes}/${h.ano}: ${h.prod_liquida} pç/h (${h.dias_trabalhados} dias)\n`;
-      });
-      
-      // Calcula tendência
-      if (c.historicoMensal.length >= 2) {
-        const atual = c.historicoMensal[0].prod_liquida;
-        const anterior = c.historicoMensal[1].prod_liquida;
-        const diff = atual - anterior;
-        const pctDiff = ((diff / anterior) * 100).toFixed(1);
-        
-        const tendencia = diff > 0 ? '📈 SUBINDO' : diff < 0 ? '📉 CAINDO' : '➡️ ESTÁVEL';
-        descricao += `   • Tendência: ${tendencia} (${pctDiff}%)\n`;
-      }
-    }
-    
-    // Dados diários (fallback ou complementar)
-    if (c.diarioRecente && c.diarioRecente.dias_com_dado > 0) {
-      descricao += `\n📅 DIÁRIO RECENTE (últimos 30 dias):\n`;
-      descricao += `   • Líquida média: ${c.diarioRecente.liquida_media.toFixed(0)} pç/h\n`;
-      descricao += `   • Supera média: ${c.diarioRecente.supera_media.toFixed(1)}%\n`;
-      descricao += `   • Dias com dado: ${c.diarioRecente.dias_com_dado}\n`;
     }
     
     // Presença
@@ -203,29 +185,29 @@ function construirPrompt(colabs: any[], metas: Record<string, number>): string {
       }
     }
     
-    // IMA / Calibração
     if (c.imaUltimo) descricao += `\n📋 IMA: ${c.imaUltimo}\n`;
     if (c.calibracaoUltima) descricao += `📋 Calibração: ${c.calibracaoUltima}\n`;
     
     return descricao;
   }).join('\n');
   
-  return `Você é um analista sênior do MELI. Analisa os dados de produtividade MENSAL dos colaboradores e identifica quem precisa de atenção.
+  return `Você é um analista sênior do MELI. Analisa dados de produtividade dos colaboradores e identifica quem precisa de atenção.
 
 🎯 OBJETIVO: Gerar tarefas de feedback INTELIGENTES baseadas em DADOS REAIS.
 
 📋 INSTRUÇÕES CRÍTICAS:
-1. ANALISE OS DADOS MENSAIS (foco principal)
-2. Use a tendência (subindo/caindo/estável) pra decidir prioridade
-3. CONSIDERE presença - alto ABS é sinal de problema
-4. RESPEITE carreira - quem tá há muito tempo no nível atual pode estar pronto pra promover
-5. NÃO BLOQUEIE PROMOÇÃO automaticamente - só MOSTRA os dados pro líder decidir
-6. Se NÃO TEM dados suficientes pra um colab, pula ele (não inventa)
+1. PRIORIZE dados DIÁRIOS (são mais granulares e atuais)
+2. Se NÃO TIVER diário, use MENSAL como fallback
+3. Sempre referencie o NÚMERO específico no diagnóstico
+4. CONSIDERE presença - alto ABS é sinal de problema
+5. RESPEITE carreira - quem está apto pra promoção MERECE conversa
+6. NÃO BLOQUEIE PROMOÇÃO automaticamente - MOSTRA os dados pro líder decidir
+7. Se NÃO TEM dados (fonte = 'nenhum'), PULA o colab
 
 🎯 PRIORIDADES:
-- **CRÍTICA**: Líquida MUITO abaixo da meta (>20%) OU ABS > 10% OU caindo 3+ meses seguidos
-- **ALTA**: Líquida abaixo da meta (10-20%) OU 1 mês caindo significativamente
-- **MEDIA**: Performance ok mas pode melhorar OU pode promover OU oportunidade de feedback construtivo
+- **CRÍTICA**: Líquida MUITO abaixo da meta (>20%) OU ABS > 10%
+- **ALTA**: Líquida abaixo da meta (10-20%) 
+- **MEDIA**: Performance ok mas pode melhorar OU pode promover
 - **BAIXA**: Performance excelente - reconhecimento
 
 📋 TIPOS DE TAREFA:
@@ -234,14 +216,7 @@ function construirPrompt(colabs: any[], metas: Record<string, number>): string {
 - "Oportunidade de Promoção" - quando atende critérios
 - "Reconhecimento" - quando tá ÓTIMO
 - "ABS Alto" - quando presença tá ruim
-- "Tendência Negativa" - quando caindo nos últimos meses
-
-📝 ESTRUTURA DA TAREFA:
-- diagnostico: o QUE tá acontecendo (com NÚMEROS)
-- analise_ia: POR QUE tá acontecendo (sua interpretação)
-- hipotese: o que PODE ser a causa
-- acao_sugerida: o QUE o líder DEVE fazer
-- gatilho: o que disparou (ex: "liquida_abaixo_meta", "tendencia_negativa")
+- "Sem Dados Recentes" - quando só tem mensal antigo
 
 ═══════════════════════════════════════════════════════════
 📊 DADOS DOS COLABORADORES:
@@ -257,27 +232,23 @@ ${colabsDescricao}
 - VAGAS DISPONÍVEIS: ${colabs[0]?.vagasNoLimite || 10}
 - Gere NO MÁXIMO esse número de tarefas
 - Priorize por urgência (críticas primeiro)
-- Pra cada tarefa, seja ESPECÍFICO com os números do colab
+- Pra cada tarefa, MENCIONE A FONTE no diagnóstico (ex: "dados diários" ou "dados mensais")
 
 Responda APENAS um JSON array (sem texto antes/depois):
 [
   {
     "id_groot": "1710556",
-    "tipo": "Performance Abaixo",
-    "prioridade": "alta",
-    "diagnostico": "Jessiele teve líquida média de 324 pç/h em Maio, 15% acima da meta P2M (280)",
-    "analise_ia": "Apesar de estar acima da meta, a tendência mensal mostra estabilidade. Com 24 dias trabalhados e 45.425 unidades, mantém ritmo consistente.",
-    "hipotese": "Performance sólida, mas pode ter potencial pra crescer mais",
-    "acao_sugerida": "Feedback de reconhecimento + alinhamento sobre potencial de crescimento",
-    "gatilho": "performance_estavel",
+    "tipo": "Reconhecimento",
+    "prioridade": "baixa",
+    "diagnostico": "Jessiele com 324 pç/h em Maio (dados mensais), 15.7% acima da meta P2M",
+    "analise_ia": "Performance consistente com 24 dias trabalhados e 45.425 unidades",
+    "hipotese": "Pode estar apta pra próxima carreira (8m em P2)",
+    "acao_sugerida": "Conversa de reconhecimento + alinhar trilha de carreira",
+    "gatilho": "mensal_acima_meta",
     "feedback_obrigatorio": true
   }
 ]`;
 }
-
-// ============================================
-// CHAMAR IA - Groq
-// ============================================
 
 async function chamarIA(prompt: string): Promise<any[]> {
   if (!GROQ_API_KEY) {
@@ -313,22 +284,18 @@ async function chamarIA(prompt: string): Promise<any[]> {
     const data = await response.json();
     const conteudo = data.choices?.[0]?.message?.content || '';
     
-    // Parseia o JSON
     let resultado: any;
     try {
       resultado = JSON.parse(conteudo);
     } catch (e) {
-      // Tenta extrair JSON do meio do texto
       const match = conteudo.match(/\[[\s\S]*\]/);
       if (match) {
         resultado = JSON.parse(match[0]);
       } else {
-        console.error('Falha ao parsear JSON da IA');
         return [];
       }
     }
     
-    // Aceita tanto array direto quanto objeto com "tarefas"
     if (Array.isArray(resultado)) return resultado;
     if (resultado.tarefas && Array.isArray(resultado.tarefas)) return resultado.tarefas;
     if (resultado.tasks && Array.isArray(resultado.tasks)) return resultado.tasks;
