@@ -1,10 +1,10 @@
 // ============================================
-// 🧠 COLETOR DE CONTEXTO - lê MENSAL + diário + presença
+// 🧠 COLETOR DE CONTEXTO - DIÁRIO base, MENSAL fallback
 // ============================================
-// Estratégia:
-// 1. SEMPRE busca produtividade_mensal (fonte principal)
-// 2. Se não tiver mensal, cai no historico (diário)
-// 3. Cruza com presença, IMA, calibrações
+// Estratégia CORRETA:
+// 1. DIÁRIO é fonte principal (como sempre foi)
+// 2. MENSAL só usado se diário estiver vazio (fallback)
+// 3. Detalhe colab pode mostrar AMBOS (mas só pra UI)
 // ============================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -30,7 +30,15 @@ export type ContextoColab = {
   data_entrada_carreira: string | null;
   proxima_carreira: string | null;
   
-  // 📊 PERFORMANCE MENSAL (do CSV mensal)
+  // 📅 DIÁRIO (FONTE PRINCIPAL)
+  diarioRecente: {
+    liquida_media: number;
+    supera_media: number;
+    dias_com_dado: number;
+    ultimo_dia: string | null;
+  } | null;
+  
+  // 📊 MENSAL (FALLBACK + complemento)
   mensalAtual: {
     prod_liquida: number;
     unidades_total: number;
@@ -39,20 +47,8 @@ export type ContextoColab = {
     ano: number;
   } | null;
   
-  // 📊 HISTÓRICO MENSAL (últimos 3 meses)
-  historicoMensal: Array<{
-    mes: number;
-    ano: number;
-    prod_liquida: number;
-    dias_trabalhados: number;
-  }>;
-  
-  // 📅 PERFORMANCE DIÁRIA (fallback se não tiver mensal)
-  diarioRecente: {
-    liquida_media: number;
-    supera_media: number;
-    dias_com_dado: number;
-  } | null;
+  // 🔍 INDICA fonte usada pela IA
+  fonteDados: 'diario' | 'mensal' | 'nenhum';
   
   // 🩺 PRESENÇA
   presencaQuarter: {
@@ -93,7 +89,7 @@ export async function coletarContextoCompleto(): Promise<{
   metas: Record<string, number>;
   limiteAtingido: boolean;
 }> {
-  // 1️⃣ Pega config (limite de tarefas, metas)
+  // 1️⃣ Config
   const { data: configData } = await supabase
     .from('config')
     .select('chave, valor');
@@ -125,7 +121,6 @@ export async function coletarContextoCompleto(): Promise<{
   
   if (!colabsData) return { colabs: [], metas, limiteAtingido: false };
   
-  // 4️⃣ Pega TODOS os dados em paralelo (1 query por tabela, não por colab)
   const idsGroot = colabsData.map(c => c.id_groot);
   
   // Período do mês atual
@@ -137,15 +132,21 @@ export async function coletarContextoCompleto(): Promise<{
   const trimestreAtual = Math.ceil(mesAtual / 3);
   const inicioQuarter = `${anoAtual}-${String((trimestreAtual - 1) * 3 + 1).padStart(2, '0')}-01`;
   
+  // 4️⃣ Busca TUDO em paralelo
   const [
-    { data: produtividadeMensalData },
-    { data: historicoData },
+    { data: historicoData },              // ← FONTE PRINCIPAL
+    { data: produtividadeMensalData },    // ← FALLBACK
     { data: presencaData },
     { data: imaData },
     { data: calibracoesData },
     { data: tarefasPendentesData },
   ] = await Promise.all([
-    // 📊 PRODUTIVIDADE MENSAL - foco do fix!
+    supabase
+      .from('historico')
+      .select('*')
+      .in('id_groot', idsGroot)
+      .gte('data_referencia', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]),
+    
     supabase
       .from('produtividade_mensal')
       .select('*')
@@ -153,14 +154,6 @@ export async function coletarContextoCompleto(): Promise<{
       .order('ano', { ascending: false })
       .order('mes', { ascending: false }),
     
-    // 📅 Histórico diário (fallback)
-    supabase
-      .from('historico')
-      .select('*')
-      .in('id_groot', idsGroot)
-      .gte('data_referencia', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]),
-    
-    // 🩺 Presença do quarter
     supabase
       .from('presenca')
       .select('*')
@@ -168,38 +161,35 @@ export async function coletarContextoCompleto(): Promise<{
       .gte('data_referencia', inicioQuarter)
       .neq('status', 'descartado'),
     
-    // 📋 IMA
     supabase
       .from('ima_manual')
       .select('*')
       .in('id_groot', idsGroot)
       .order('data_avaliacao', { ascending: false }),
     
-    // 📋 Calibrações
     supabase
       .from('calibracoes')
       .select('*')
       .in('id_groot', idsGroot)
       .order('criado_em', { ascending: false }),
     
-    // 🚧 Tarefas pendentes (por colab)
     supabase
       .from('tarefas')
       .select('id_groot')
       .eq('status', 'Pendente'),
   ]);
   
-  // 5️⃣ Mapeia tudo por id_groot
-  const mapaProdMensal: Record<string, any[]> = {};
-  (produtividadeMensalData || []).forEach((p: any) => {
-    if (!mapaProdMensal[p.id_groot]) mapaProdMensal[p.id_groot] = [];
-    mapaProdMensal[p.id_groot].push(p);
-  });
-  
+  // 5️⃣ Mapeia tudo
   const mapaHistorico: Record<string, any[]> = {};
   (historicoData || []).forEach((h: any) => {
     if (!mapaHistorico[h.id_groot]) mapaHistorico[h.id_groot] = [];
     mapaHistorico[h.id_groot].push(h);
+  });
+  
+  const mapaProdMensal: Record<string, any[]> = {};
+  (produtividadeMensalData || []).forEach((p: any) => {
+    if (!mapaProdMensal[p.id_groot]) mapaProdMensal[p.id_groot] = [];
+    mapaProdMensal[p.id_groot].push(p);
   });
   
   const mapaPresenca: Record<string, any[]> = {};
@@ -227,28 +217,36 @@ export async function coletarContextoCompleto(): Promise<{
   
   // 6️⃣ Constrói contexto pra CADA colab
   const colabs: ContextoColab[] = colabsData.map((c: any) => {
-    // Produtividade mensal
-    const mensaisDoColab = mapaProdMensal[c.id_groot] || [];
-    const mensalAtual = mensaisDoColab.find(p => p.mes === mesAtual && p.ano === anoAtual) || null;
-    const historicoMensal = mensaisDoColab.slice(0, 3).map(p => ({
-      mes: p.mes,
-      ano: p.ano,
-      prod_liquida: Number(p.prod_liquida_media) || 0,
-      dias_trabalhados: Number(p.dias_trabalhados) || 0,
-    }));
-    
-    // Histórico diário (fallback)
+    // 📅 DIÁRIO (FONTE PRINCIPAL)
     const historicoColab = mapaHistorico[c.id_groot] || [];
     let diarioRecente = null;
+    
     if (historicoColab.length > 0) {
       const liquidas = historicoColab.map(h => Number(h.liquida) || 0).filter(v => v > 0);
       const superas = historicoColab.map(h => Number(h.supera) || 0).filter(v => v > 0);
+      
+      const sortedByDate = [...historicoColab].sort((a, b) => 
+        b.data_referencia.localeCompare(a.data_referencia)
+      );
       
       diarioRecente = {
         liquida_media: liquidas.length > 0 ? liquidas.reduce((a, b) => a + b, 0) / liquidas.length : 0,
         supera_media: superas.length > 0 ? superas.reduce((a, b) => a + b, 0) / superas.length : 0,
         dias_com_dado: historicoColab.length,
+        ultimo_dia: sortedByDate[0]?.data_referencia || null,
       };
+    }
+    
+    // 📊 MENSAL (FALLBACK + complemento)
+    const mensaisDoColab = mapaProdMensal[c.id_groot] || [];
+    const mensalAtual = mensaisDoColab.find(p => p.mes === mesAtual && p.ano === anoAtual) || null;
+    
+    // 🎯 DETERMINA fonte que IA vai usar
+    let fonteDados: 'diario' | 'mensal' | 'nenhum' = 'nenhum';
+    if (diarioRecente && diarioRecente.dias_com_dado > 0) {
+      fonteDados = 'diario';
+    } else if (mensalAtual) {
+      fonteDados = 'mensal';
     }
     
     // Presença
@@ -301,6 +299,8 @@ export async function coletarContextoCompleto(): Promise<{
       data_entrada_carreira: c.data_entrada_carreira,
       proxima_carreira: c.proxima_carreira,
       
+      diarioRecente,
+      
       mensalAtual: mensalAtual ? {
         prod_liquida: Number(mensalAtual.prod_liquida_media) || 0,
         unidades_total: Number(mensalAtual.unidades_total) || 0,
@@ -309,8 +309,7 @@ export async function coletarContextoCompleto(): Promise<{
         ano: mensalAtual.ano,
       } : null,
       
-      historicoMensal,
-      diarioRecente,
+      fonteDados,
       presencaQuarter: presencaStats,
       analiseCarreira: analise,
       
