@@ -1,154 +1,292 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '../../../../lib/supabase';
-import { 
-  coletarContextoTime, 
-  priorizarParaAnaliseIA,
-  type ColabContexto,
-  type ContextoTime,
-} from '../../../../lib/copiloto/coletor-contexto';
+import { createClient } from '@supabase/supabase-js';
+import { coletarContextoCompleto } from '../../../../lib/copiloto/coletor-contexto';
 
-// ============================================
-// CONFIGURAÇÃO GROQ
-// ============================================
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
-const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+export const maxDuration = 60;
 
 // ============================================
-// PROMPT MESTRE - Copiloto Vivo (com presença)
+// API DO COPILOTO VIVO
 // ============================================
 
-function montarPromptColab(colab: ColabContexto, contexto: ContextoTime): string {
-  const a = colab.analiseCarreira;
-  const p = colab.presencaQuarter;
-  
-  return `Você é o motor de inteligência do Copiloto Vivo de gestão de desempenho do MELI.
-Sua função é gerar uma TAREFA INTELIGENTE pro Team Leader avaliar.
-
-⚠️ IMPORTANTE: A IA MOSTRA OS DADOS. O TL DECIDE.
-NUNCA bloqueie promoção automaticamente. NUNCA diga "não pode ser promovido". 
-Apresente os fatos cruzados e deixe a decisão ao TL.
-
-📊 CONTEXTO DO TIME (${contexto.hoje} - ${contexto.quarter}):
-- ${contexto.colabsAtivos} colabs ativos
-- ${contexto.totalSuperas} Superas | ${contexto.totalAlinhados} Alinhados | ${contexto.totalOfensores} Ofensores
-- Streak crítico configurado: ${contexto.metas.streak_negativo} dias
-
-👤 COLABORADOR EM ANÁLISE:
-Nome: ${colab.nome}
-ID Groot: ${colab.id_groot}
-Processo: ${colab.processo}
-Carreira atual: ${colab.carreira || 'sem cadastro'}
-Próximo nível: ${a.proximoCargo || 'topo'}
-
-📅 CARREIRA:
-Status: ${a.status} ${a.emoji}
-Meses na carreira atual: ${a.mesesNaCarreira}
-${a.mesNaJanela ? `Mês na janela: ${a.mesNaJanela}/3` : ''}
-${a.quarterInfo ? `Quarter ${a.quarterInfo.quarter}: ${a.quarterInfo.detalhe} (${a.quarterInfo.mesesBatidos}/${a.quarterInfo.mesesTotal} batidos)` : ''}
-${a.quarterInfo?.quebrouNoMes ? `🔴 QUEBROU em: ${a.quarterInfo.quebrouNoMes}` : ''}
-${a.mesesPerpetuo ? `⭐ Apto perpétuo há ${a.mesesPerpetuo} mes(es)` : ''}
-
-📈 PERFORMANCE RECENTE (${contexto.metas.janela_performance_dias} dias):
-Líquida média: ${colab.liquidaMedia30d} pç/h
-Último status: ${colab.ultimoStatus || 'sem dados'}
-Última líquida: ${colab.ultimaLiquida || 0} pç/h
-Último impacto NET: ${colab.ultimoImpacto !== null ? colab.ultimoImpacto + '%' : 'n/a'}
-Taxa de sucesso: ${colab.taxaSucesso}%
-Distribuição: ${colab.diasSuperaMes} Superas | ${colab.diasAlinhadoMes} Alinhados | ${colab.diasAbaixoMes} Abaixo
-
-📋 PRESENÇA DO QUARTER (${contexto.quarter}):
-Total de dias registrados: ${p.totalDias}
-✅ Presenças: ${p.presencas}
-🩺 Atestados (FJ): ${p.atestados}
-🔴 Faltas Injustificadas (FI): ${p.faltasInjustificadas}
-🟡 BH planejado: ${p.bhPlanejado}
-🟠 BH NÃO planejado: ${p.bhNaoPlanejado}
-🤝 Sinergia Externa (SIE): ${p.sinergiaExterna}
-📋 Outras justificadas: ${p.outrasJustificadas}
-🚫 Abandono: ${p.abandono}
-📉 ABS do Q: ${p.pctAbs}%
-
-🚨 STREAK NEGATIVO: ${colab.streakNegativo} dias seguidos abaixo
-(limite crítico: ${contexto.metas.streak_negativo} dias)
-
-🎯 SINAIS DETECTADOS:
-${colab.isOfensorCritico ? '🚨 Ofensor crítico (acima do limite de streak)' : ''}
-${colab.isJanelaCritica ? '🔥 Janela promocional crítica (mês 3 ou prejudicada)' : ''}
-${colab.isAptoMuitoTempo ? '⭐ Apto perpétuo muito tempo (3+ meses)' : ''}
-${colab.isAniversarioHoje ? '🎂 Aniversário hoje' : ''}
-
-================================================
-INSTRUÇÕES PARA A TAREFA:
-================================================
-
-Gere um JSON com:
-
-1. **diagnostico**: O QUE aconteceu (2-3 linhas, factual)
-   - Inclua performance + presença + tempo de carreira
-
-2. **analise_ia**: POR QUE — sua análise INOVADORA cruzando TUDO (3-4 linhas)
-   • Cruze performance + presença + carreira
-   • Se tem atestados/faltas, INCLUA na análise (não esconde)
-   • Identifique padrões (ex: "faltas sempre em segunda")
-   • Compare com média do time
-   • Identifique gargalo técnico, comportamental ou de saúde
-
-3. **hipotese**: Causa raiz provável (1-2 linhas)
-
-4. **prioridade**: 'critica' | 'alta' | 'media' | 'baixa'
-
-5. **tipo**: 'Janela Promocional', 'Feedback Ofensor', 'Janela Prejudicada', 'Apto Perpétuo', 'Reconhecimento Supera', 'Aniversário'
-
-6. **acao_sugerida**: O QUE o TL deve avaliar/conversar (1 linha)
-   - Use linguagem como "Avaliar...", "Conversar sobre...", "Considerar..."
-   - NUNCA: "promover" ou "não promover" como ordem
-
-REGRAS CRÍTICAS:
-- Tom profissional, clínico, sênior
-- IA MOSTRA, TL DECIDE — nunca decida por ele
-- Se houver dados de presença relevantes (atestados, faltas), MENCIONE
-- Cruze informações sempre
-- NÃO invente dados que não estão no contexto
-- Seja específico (use números, datas, nomes de mês)
-
-Retorne APENAS um JSON válido, sem markdown:
-
-{
-  "diagnostico": "...",
-  "analise_ia": "...",
-  "hipotese": "...",
-  "prioridade": "...",
-  "tipo": "...",
-  "acao_sugerida": "..."
-}`;
+export async function POST() {
+  try {
+    // 1️⃣ Coleta contexto COMPLETO (mensal + diário + presença)
+    const { colabs, metas, limiteAtingido } = await coletarContextoCompleto();
+    
+    if (limiteAtingido) {
+      return NextResponse.json({ 
+        sucesso: true, 
+        tarefas_geradas: 0,
+        motivo: 'Limite de tarefas pendentes atingido'
+      });
+    }
+    
+    if (colabs.length === 0) {
+      return NextResponse.json({ sucesso: true, tarefas_geradas: 0 });
+    }
+    
+    // 2️⃣ Filtra colabs SEM tarefa pendente (anti-duplicação)
+    const colabsComVaga = colabs.filter(c => c.tarefasPendentes === 0);
+    
+    if (colabsComVaga.length === 0) {
+      return NextResponse.json({ 
+        sucesso: true, 
+        tarefas_geradas: 0,
+        motivo: 'Todos colabs já têm tarefa pendente'
+      });
+    }
+    
+    // 3️⃣ Limita análise pela quantidade de vagas
+    const vagasDisponiveis = colabsComVaga[0]?.vagasNoLimite || 10;
+    const colabsAnalisar = colabsComVaga.slice(0, Math.min(vagasDisponiveis, 20));
+    
+    // 4️⃣ Constrói prompt RICO com dados mensais
+    const prompt = construirPrompt(colabsAnalisar, metas);
+    
+    // 5️⃣ Chama Groq
+    const tarefasGeradas = await chamarIA(prompt);
+    
+    if (!tarefasGeradas || tarefasGeradas.length === 0) {
+      return NextResponse.json({ sucesso: true, tarefas_geradas: 0 });
+    }
+    
+    // 6️⃣ Salva tarefas no Supabase
+    let inseridas = 0;
+    for (const tarefa of tarefasGeradas) {
+      const colab = colabs.find(c => c.id_groot === tarefa.id_groot);
+      if (!colab) continue;
+      
+      // Anti-duplicata final
+      const { count } = await supabase
+        .from('tarefas')
+        .select('id', { count: 'exact', head: true })
+        .eq('id_groot', tarefa.id_groot)
+        .eq('status', 'Pendente');
+      
+      if ((count || 0) > 0) continue;
+      
+      // Snapshot dos dados pra contexto
+      const contextoDados = {
+        mensalAtual: colab.mensalAtual,
+        historicoMensal: colab.historicoMensal,
+        diarioRecente: colab.diarioRecente,
+        presencaQuarter: colab.presencaQuarter,
+        analiseCarreira: colab.analiseCarreira,
+        imaUltimo: colab.imaUltimo,
+        calibracaoUltima: colab.calibracaoUltima,
+      };
+      
+      const tarefaId = 'TASK-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+      
+      await supabase.from('tarefas').insert({
+        id_tarefa: tarefaId,
+        id_groot: colab.id_groot,
+        nome: colab.nome,
+        processo: colab.processo,
+        tipo: tarefa.tipo || 'Análise',
+        prioridade: tarefa.prioridade || 'media',
+        diagnostico: tarefa.diagnostico || null,
+        analise_ia: tarefa.analise_ia || null,
+        hipotese: tarefa.hipotese || null,
+        motivo: tarefa.acao_sugerida || null,
+        gatilho_origem: tarefa.gatilho || 'analise_mensal',
+        feedback_obrigatorio: tarefa.feedback_obrigatorio !== false,
+        contexto_dados: contextoDados,
+        gerado_por_ia: true,
+        status: 'Pendente',
+        criado_em: new Date().toISOString(),
+      });
+      
+      inseridas++;
+    }
+    
+    return NextResponse.json({ 
+      sucesso: true, 
+      tarefas_geradas: inseridas,
+      analisados: colabsAnalisar.length
+    });
+    
+  } catch (e: any) {
+    console.error('❌ Erro Copiloto:', e);
+    return NextResponse.json({ 
+      sucesso: false, 
+      erro: e.message || 'Erro desconhecido'
+    }, { status: 500 });
+  }
 }
 
 // ============================================
-// CHAMA GROQ
+// CONSTRUIR PROMPT - com dados MENSAIS
 // ============================================
 
-async function analisarColabComIA(
-  colab: ColabContexto,
-  contexto: ContextoTime
-): Promise<{
-  diagnostico: string;
-  analise_ia: string;
-  hipotese: string;
-  prioridade: string;
-  tipo: string;
-  acao_sugerida: string;
-} | null> {
-  if (!GROQ_API_KEY) {
-    console.error('❌ GROQ_API_KEY não configurada');
-    return null;
-  }
-
-  try {
-    const prompt = montarPromptColab(colab, contexto);
+function construirPrompt(colabs: any[], metas: Record<string, number>): string {
+  const META_LIQUIDA_P2M = metas['meta_liquida_p2m'] || 280;
+  const META_LIQUIDA_CHECKIN = metas['meta_liquida_checkin'] || 100;
+  const META_SUPERA = metas['meta_supera'] || 95;
+  
+  const colabsDescricao = colabs.map(c => {
+    let descricao = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    descricao += `👤 ${c.nome} | ID: ${c.id_groot} | ${c.processo || 'sem processo'}\n`;
+    descricao += `   ${c.cargo || 'sem cargo'} | ${c.carreira || 'sem carreira'}\n`;
     
-    const response = await fetch(GROQ_URL, {
+    // 🎯 DADOS MENSAIS (foco principal)
+    if (c.mensalAtual) {
+      descricao += `\n📊 PRODUTIVIDADE MENSAL (${c.mensalAtual.mes}/${c.mensalAtual.ano}):\n`;
+      descricao += `   • Líquida média: ${c.mensalAtual.prod_liquida} pç/h\n`;
+      descricao += `   • Unidades totais: ${c.mensalAtual.unidades_total.toLocaleString('pt-BR')}\n`;
+      descricao += `   • Dias trabalhados: ${c.mensalAtual.dias_trabalhados}\n`;
+      
+      // Comparação com meta
+      const meta = c.processo === 'P2M' ? META_LIQUIDA_P2M : META_LIQUIDA_CHECKIN;
+      const pctMeta = ((c.mensalAtual.prod_liquida / meta) * 100).toFixed(1);
+      descricao += `   • % da meta (${meta}): ${pctMeta}%\n`;
+    } else {
+      descricao += `\n⚠️ SEM DADOS MENSAIS PARA O MÊS ATUAL\n`;
+    }
+    
+    // Histórico mensal (tendência)
+    if (c.historicoMensal && c.historicoMensal.length > 1) {
+      descricao += `\n📈 HISTÓRICO ÚLTIMOS MESES:\n`;
+      c.historicoMensal.forEach((h: any) => {
+        descricao += `   • ${h.mes}/${h.ano}: ${h.prod_liquida} pç/h (${h.dias_trabalhados} dias)\n`;
+      });
+      
+      // Calcula tendência
+      if (c.historicoMensal.length >= 2) {
+        const atual = c.historicoMensal[0].prod_liquida;
+        const anterior = c.historicoMensal[1].prod_liquida;
+        const diff = atual - anterior;
+        const pctDiff = ((diff / anterior) * 100).toFixed(1);
+        
+        const tendencia = diff > 0 ? '📈 SUBINDO' : diff < 0 ? '📉 CAINDO' : '➡️ ESTÁVEL';
+        descricao += `   • Tendência: ${tendencia} (${pctDiff}%)\n`;
+      }
+    }
+    
+    // Dados diários (fallback ou complementar)
+    if (c.diarioRecente && c.diarioRecente.dias_com_dado > 0) {
+      descricao += `\n📅 DIÁRIO RECENTE (últimos 30 dias):\n`;
+      descricao += `   • Líquida média: ${c.diarioRecente.liquida_media.toFixed(0)} pç/h\n`;
+      descricao += `   • Supera média: ${c.diarioRecente.supera_media.toFixed(1)}%\n`;
+      descricao += `   • Dias com dado: ${c.diarioRecente.dias_com_dado}\n`;
+    }
+    
+    // Presença
+    const p = c.presencaQuarter;
+    if (p.presencas > 0 || p.atestados > 0 || p.faltasInjustificadas > 0) {
+      descricao += `\n🩺 PRESENÇA NO QUARTER:\n`;
+      descricao += `   • Presenças: ${p.presencas}\n`;
+      if (p.atestados > 0) descricao += `   • Atestados: ${p.atestados}\n`;
+      if (p.faltasInjustificadas > 0) descricao += `   • Faltas injustificadas: ${p.faltasInjustificadas} ⚠️\n`;
+      if (p.bhNaoPlanejado > 0) descricao += `   • BH não planejado: ${p.bhNaoPlanejado}\n`;
+      if (p.sinergiaExterna > 0) descricao += `   • Sinergia externa: ${p.sinergiaExterna}\n`;
+      if (p.pctAbs > 0) descricao += `   • % ABS: ${p.pctAbs}%\n`;
+    }
+    
+    // Carreira
+    if (c.analiseCarreira) {
+      descricao += `\n🎯 CARREIRA:\n`;
+      descricao += `   • ${c.analiseCarreira.mesesNaEmpresa} meses na empresa\n`;
+      descricao += `   • ${c.analiseCarreira.mesesNaCarreira} meses em ${c.carreira || 'carreira atual'}\n`;
+      if (c.proxima_carreira) {
+        descricao += `   • Próxima: ${c.proxima_carreira}\n`;
+      }
+      if (c.analiseCarreira.podeProximaCarreira) {
+        descricao += `   • 🎉 PODE PROMOVER (atende tempo mínimo)\n`;
+      }
+    }
+    
+    // IMA / Calibração
+    if (c.imaUltimo) descricao += `\n📋 IMA: ${c.imaUltimo}\n`;
+    if (c.calibracaoUltima) descricao += `📋 Calibração: ${c.calibracaoUltima}\n`;
+    
+    return descricao;
+  }).join('\n');
+  
+  return `Você é um analista sênior do MELI. Analisa os dados de produtividade MENSAL dos colaboradores e identifica quem precisa de atenção.
+
+🎯 OBJETIVO: Gerar tarefas de feedback INTELIGENTES baseadas em DADOS REAIS.
+
+📋 INSTRUÇÕES CRÍTICAS:
+1. ANALISE OS DADOS MENSAIS (foco principal)
+2. Use a tendência (subindo/caindo/estável) pra decidir prioridade
+3. CONSIDERE presença - alto ABS é sinal de problema
+4. RESPEITE carreira - quem tá há muito tempo no nível atual pode estar pronto pra promover
+5. NÃO BLOQUEIE PROMOÇÃO automaticamente - só MOSTRA os dados pro líder decidir
+6. Se NÃO TEM dados suficientes pra um colab, pula ele (não inventa)
+
+🎯 PRIORIDADES:
+- **CRÍTICA**: Líquida MUITO abaixo da meta (>20%) OU ABS > 10% OU caindo 3+ meses seguidos
+- **ALTA**: Líquida abaixo da meta (10-20%) OU 1 mês caindo significativamente
+- **MEDIA**: Performance ok mas pode melhorar OU pode promover OU oportunidade de feedback construtivo
+- **BAIXA**: Performance excelente - reconhecimento
+
+📋 TIPOS DE TAREFA:
+- "Performance Crítica" - quando tá MUITO abaixo
+- "Performance Abaixo" - quando tá um pouco abaixo  
+- "Oportunidade de Promoção" - quando atende critérios
+- "Reconhecimento" - quando tá ÓTIMO
+- "ABS Alto" - quando presença tá ruim
+- "Tendência Negativa" - quando caindo nos últimos meses
+
+📝 ESTRUTURA DA TAREFA:
+- diagnostico: o QUE tá acontecendo (com NÚMEROS)
+- analise_ia: POR QUE tá acontecendo (sua interpretação)
+- hipotese: o que PODE ser a causa
+- acao_sugerida: o QUE o líder DEVE fazer
+- gatilho: o que disparou (ex: "liquida_abaixo_meta", "tendencia_negativa")
+
+═══════════════════════════════════════════════════════════
+📊 DADOS DOS COLABORADORES:
+${colabsDescricao}
+═══════════════════════════════════════════════════════════
+
+🎯 METAS DO TIME:
+- Líquida P2M: ${META_LIQUIDA_P2M} pç/h
+- Líquida Checkin: ${META_LIQUIDA_CHECKIN} pç/h
+- Supera: ${META_SUPERA}%
+
+⚠️ IMPORTANTE:
+- VAGAS DISPONÍVEIS: ${colabs[0]?.vagasNoLimite || 10}
+- Gere NO MÁXIMO esse número de tarefas
+- Priorize por urgência (críticas primeiro)
+- Pra cada tarefa, seja ESPECÍFICO com os números do colab
+
+Responda APENAS um JSON array (sem texto antes/depois):
+[
+  {
+    "id_groot": "1710556",
+    "tipo": "Performance Abaixo",
+    "prioridade": "alta",
+    "diagnostico": "Jessiele teve líquida média de 324 pç/h em Maio, 15% acima da meta P2M (280)",
+    "analise_ia": "Apesar de estar acima da meta, a tendência mensal mostra estabilidade. Com 24 dias trabalhados e 45.425 unidades, mantém ritmo consistente.",
+    "hipotese": "Performance sólida, mas pode ter potencial pra crescer mais",
+    "acao_sugerida": "Feedback de reconhecimento + alinhamento sobre potencial de crescimento",
+    "gatilho": "performance_estavel",
+    "feedback_obrigatorio": true
+  }
+]`;
+}
+
+// ============================================
+// CHAMAR IA - Groq
+// ============================================
+
+async function chamarIA(prompt: string): Promise<any[]> {
+  if (!GROQ_API_KEY) {
+    console.error('GROQ_API_KEY não configurada');
+    return [];
+  }
+  
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${GROQ_API_KEY}`,
@@ -157,248 +295,47 @@ async function analisarColabComIA(
       body: JSON.stringify({
         model: GROQ_MODEL,
         messages: [
-          {
-            role: 'system',
-            content: 'Você é um analista sênior de gestão de pessoas e desempenho. Responda SEMPRE em JSON válido, sem markdown. Sua função é APRESENTAR DADOS, não decidir pelo TL.',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
+          { role: 'system', content: 'Você é um analista de RH sênior do MELI. Responde sempre em JSON válido.' },
+          { role: 'user', content: prompt }
         ],
-        temperature: 0.5,
-        max_tokens: 1500,
+        temperature: 0.3,
+        max_tokens: 4000,
         response_format: { type: 'json_object' },
       }),
     });
-
+    
     if (!response.ok) {
-      const erro = await response.text();
-      console.error(`❌ Erro Groq pro ${colab.nome}:`, erro);
-      return null;
+      const errorText = await response.text();
+      console.error('Groq erro:', response.status, errorText);
+      return [];
     }
-
+    
     const data = await response.json();
-    const conteudo = data.choices?.[0]?.message?.content;
+    const conteudo = data.choices?.[0]?.message?.content || '';
     
-    if (!conteudo) {
-      console.error(`❌ Resposta vazia pro ${colab.nome}`);
-      return null;
+    // Parseia o JSON
+    let resultado: any;
+    try {
+      resultado = JSON.parse(conteudo);
+    } catch (e) {
+      // Tenta extrair JSON do meio do texto
+      const match = conteudo.match(/\[[\s\S]*\]/);
+      if (match) {
+        resultado = JSON.parse(match[0]);
+      } else {
+        console.error('Falha ao parsear JSON da IA');
+        return [];
+      }
     }
     
-    const parsed = JSON.parse(conteudo);
-    return parsed;
+    // Aceita tanto array direto quanto objeto com "tarefas"
+    if (Array.isArray(resultado)) return resultado;
+    if (resultado.tarefas && Array.isArray(resultado.tarefas)) return resultado.tarefas;
+    if (resultado.tasks && Array.isArray(resultado.tasks)) return resultado.tasks;
     
+    return [];
   } catch (e: any) {
-    console.error(`❌ Erro analisando ${colab.nome}:`, e.message);
-    return null;
+    console.error('Erro chamando IA:', e);
+    return [];
   }
-}
-
-// ============================================
-// SALVA TAREFA NO BANCO
-// ============================================
-
-async function salvarTarefa(
-  colab: ColabContexto,
-  analise: any,
-  contexto: ContextoTime
-): Promise<boolean> {
-  try {
-    const gatilhoOrigem = determinarGatilho(colab);
-    const idTarefa = `TASK-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`.toUpperCase();
-    const p = colab.presencaQuarter;
-    
-    // Cria nova tarefa (anti-duplicata já feito no priorizador)
-    const { error } = await supabase
-      .from('tarefas')
-      .insert({
-        id_tarefa: idTarefa,
-        id_groot: colab.id_groot,
-        nome: colab.nome,
-        processo: colab.processo,
-        tipo: analise.tipo,
-        prioridade: analise.prioridade,
-        motivo: analise.acao_sugerida,
-        diagnostico: analise.diagnostico,
-        analise_ia: analise.analise_ia,
-        hipotese: analise.hipotese,
-        gatilho_origem: gatilhoOrigem,
-        feedback_obrigatorio: true,
-        gerado_por_ia: true,
-        status: 'Pendente',
-        contexto_dados: {
-          streakNegativo: colab.streakNegativo,
-          ultimoStatus: colab.ultimoStatus,
-          mesesNaCarreira: colab.analiseCarreira.mesesNaCarreira,
-          statusCarreira: colab.analiseCarreira.status,
-          quarter: contexto.quarter,
-          mesNaJanela: colab.analiseCarreira.mesNaJanela,
-          // 🆕 SNAPSHOT DE PRESENÇA
-          presencaQuarter: {
-            presencas: p.presencas,
-            atestados: p.atestados,
-            faltasInjustificadas: p.faltasInjustificadas,
-            bhPlanejado: p.bhPlanejado,
-            bhNaoPlanejado: p.bhNaoPlanejado,
-            pctAbs: p.pctAbs,
-          },
-          performance: {
-            liquidaMedia: colab.liquidaMedia30d,
-            taxaSucesso: colab.taxaSucesso,
-            diasSupera: colab.diasSuperaMes,
-            diasAlinhado: colab.diasAlinhadoMes,
-            diasAbaixo: colab.diasAbaixoMes,
-          },
-        },
-      });
-    
-    if (error) {
-      console.error(`❌ Erro insert pro ${colab.nome}:`, error);
-      return false;
-    }
-    
-    return true;
-    
-  } catch (e: any) {
-    console.error(`❌ Erro salvando tarefa pro ${colab.nome}:`, e.message);
-    return false;
-  }
-}
-
-function determinarGatilho(colab: ColabContexto): string {
-  if (colab.analiseCarreira.status === 'JANELA_PREJUDICADA') return 'janela_prejudicada';
-  if (colab.analiseCarreira.status === 'JANELA_ATIVA' && colab.analiseCarreira.mesNaJanela === 3) return 'promocao_iminente';
-  if (colab.analiseCarreira.status === 'APTO_PERPETUO' && (colab.analiseCarreira.mesesPerpetuo || 0) >= 3) return 'apto_perpetuo';
-  if (colab.isOfensorCritico) return 'streak_negativo';
-  if (colab.isAniversarioHoje) return 'aniversario';
-  return 'analise_geral';
-}
-
-// ============================================
-// HANDLER PRINCIPAL
-// ============================================
-
-export async function POST() {
-  try {
-    console.log('🤖 Copiloto Vivo - iniciando análise...');
-    
-    // 1. Coleta contexto do time
-    const contexto = await coletarContextoTime();
-    
-    // 🛑 2. SE LIMITE ATINGIDO, retorna sem chamar IA
-    if (contexto.limiteAtingido) {
-      console.log(`🛑 Limite atingido: ${contexto.tarefasPendentesAtual}/${contexto.metas.limite_tarefas_pendentes}`);
-      return NextResponse.json({
-        ok: true,
-        message: `Limite de ${contexto.metas.limite_tarefas_pendentes} tarefas atingido. Conclua pra liberar análises.`,
-        analisados: 0,
-        limiteAtingido: true,
-        contexto: {
-          totalAtivos: contexto.colabsAtivos,
-          tarefasPendentes: contexto.tarefasPendentesAtual,
-          limite: contexto.metas.limite_tarefas_pendentes,
-          vagasDisponiveis: 0,
-          ofensoresCriticos: contexto.ofensoresCriticos.length,
-          janelasIminentes: contexto.janelaPromocaoIminente.length,
-          janelasPrejudicadas: contexto.janelaPrejudicada.length,
-          aptosPerpetuos: contexto.aptosPerpetuosAvalidos.length,
-          quarter: contexto.quarter,
-        },
-      });
-    }
-    
-    // 3. Filtra prioritários (já respeita limite + anti-duplicata)
-    const prioritarios = priorizarParaAnaliseIA(contexto);
-    
-    console.log(`📋 ${prioritarios.length} colab(s) prioritários (vagas: ${contexto.vagasDisponiveis})`);
-    
-    if (prioritarios.length === 0) {
-      return NextResponse.json({
-        ok: true,
-        message: 'Nenhum colab requer análise no momento. Tudo em ordem!',
-        analisados: 0,
-        contexto: {
-          totalAtivos: contexto.colabsAtivos,
-          tarefasPendentes: contexto.tarefasPendentesAtual,
-          limite: contexto.metas.limite_tarefas_pendentes,
-          vagasDisponiveis: contexto.vagasDisponiveis,
-          ofensoresCriticos: contexto.ofensoresCriticos.length,
-          janelasIminentes: contexto.janelaPromocaoIminente.length,
-          janelasPrejudicadas: contexto.janelaPrejudicada.length,
-          aptosPerpetuos: contexto.aptosPerpetuosAvalidos.length,
-          quarter: contexto.quarter,
-        },
-      });
-    }
-    
-    // 4. Roda IA em PARALELO (mais rápido)
-    const resultados = await Promise.allSettled(
-      prioritarios.map(async (colab) => {
-        console.log(`🧠 Analisando ${colab.nome}...`);
-        const analise = await analisarColabComIA(colab, contexto);
-        
-        if (!analise) {
-          return { colab: colab.nome, sucesso: false, erro: 'IA não retornou' };
-        }
-        
-        const salvou = await salvarTarefa(colab, analise, contexto);
-        return { colab: colab.nome, sucesso: salvou, analise };
-      })
-    );
-    
-    // 5. Conta resultados
-    const sucessos = resultados.filter(
-      (r) => r.status === 'fulfilled' && r.value.sucesso
-    ).length;
-    
-    const falhas = resultados.filter(
-      (r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.sucesso)
-    ).length;
-    
-    console.log(`✅ Copiloto Vivo: ${sucessos} análises ok, ${falhas} falhas`);
-    
-    return NextResponse.json({
-      ok: true,
-      analisados: sucessos,
-      falhas,
-      total: prioritarios.length,
-      contexto: {
-        totalAtivos: contexto.colabsAtivos,
-        tarefasPendentes: contexto.tarefasPendentesAtual + sucessos,
-        limite: contexto.metas.limite_tarefas_pendentes,
-        vagasDisponiveis: Math.max(0, contexto.vagasDisponiveis - sucessos),
-        ofensoresCriticos: contexto.ofensoresCriticos.length,
-        janelasIminentes: contexto.janelaPromocaoIminente.length,
-        janelasPrejudicadas: contexto.janelaPrejudicada.length,
-        aptosPerpetuos: contexto.aptosPerpetuosAvalidos.length,
-        quarter: contexto.quarter,
-      },
-      resumo: resultados
-        .filter((r) => r.status === 'fulfilled')
-        .map((r: any) => r.value),
-    });
-    
-  } catch (e: any) {
-    console.error('❌ Erro no Copiloto Vivo:', e);
-    return NextResponse.json(
-      { ok: false, error: e.message || 'Erro desconhecido' },
-      { status: 500 }
-    );
-  }
-}
-
-// ============================================
-// GET — pra rotina automática (cron job futuro)
-// ============================================
-
-export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    info: 'Copiloto Vivo API. Use POST pra rodar análise.',
-    endpoints: {
-      analise: 'POST /api/ia/copiloto',
-    },
-    descricao: 'Analisa colabs prioritários com IA. Respeita limite de tarefas. Mostra dados, TL decide.',
-  });
 }
