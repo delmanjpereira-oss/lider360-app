@@ -63,13 +63,8 @@ export type ContextoColab = {
     pctAbs: number;
   };
   
-  // 🎯 CARREIRA
-  analiseCarreira: {
-    mesesNaEmpresa: number;
-    mesesNaCarreira: number;
-    podeProximaCarreira: boolean;
-    proximaCarreiraNivel: string | null;
-  };
+  // 🎯 CARREIRA (tipo flexível pra compatibilidade)
+  analiseCarreira: any;
   
   // 📋 IMA / Calibrações
   imaUltimo: string | null;
