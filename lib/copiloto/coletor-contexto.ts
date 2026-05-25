@@ -8,11 +8,52 @@
 // ============================================
 
 import { createClient } from '@supabase/supabase-js';
-import { analisarCarreira } from './analisador-carreira';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// ============================================
+// ANÁLISE DE CARREIRA - inline (sem dependência)
+// ============================================
+
+const TEMPO_MINIMO_CARREIRA: Record<string, number> = {
+  'P1': 3,
+  'P2': 6,
+  'P3': 9,
+  'P4': 12,
+  'S1': 6,
+  'S2': 9,
+  'S3': 12,
+};
+
+function calcularMesesEntreDatas(dataInicio: string | null): number {
+  if (!dataInicio) return 0;
+  try {
+    const inicio = new Date(dataInicio + 'T12:00:00');
+    if (isNaN(inicio.getTime())) return 0;
+    const hoje = new Date();
+    return (hoje.getFullYear() - inicio.getFullYear()) * 12 + 
+           (hoje.getMonth() - inicio.getMonth());
+  } catch (e) {
+    return 0;
+  }
+}
+
+function analisarCarreiraInline(colab: any): any {
+  const mesesNaEmpresa = calcularMesesEntreDatas(colab.data_admissao);
+  const mesesNaCarreira = calcularMesesEntreDatas(colab.data_entrada_carreira);
+  
+  const tempoMinimo = TEMPO_MINIMO_CARREIRA[colab.carreira || ''] || 99;
+  const podeProximaCarreira = mesesNaCarreira >= tempoMinimo && !!colab.proxima_carreira;
+  
+  return {
+    mesesNaEmpresa,
+    mesesNaCarreira,
+    podeProximaCarreira,
+    proximaCarreiraNivel: colab.proxima_carreira || null,
+  };
+}
 
 // ============================================
 // TIPOS
@@ -277,7 +318,7 @@ export async function coletarContextoCompleto(): Promise<{
       : 0;
     
     // Carreira
-    const analise = analisarCarreira(c);
+    const analise = analisarCarreiraInline(c);
     
     // IMA e Calibração mais recentes
     const imas = mapaIma[c.id_groot] || [];
