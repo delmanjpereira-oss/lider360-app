@@ -1,10 +1,8 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
-
 type Colaborador = {
   id: number;
   id_groot: string;
@@ -17,7 +15,6 @@ type Colaborador = {
   aniversario: string | null;
   created_at: string;
 };
-
 type HistoricoLinha = {
   id: number;
   data_referencia: string;
@@ -33,7 +30,6 @@ type HistoricoLinha = {
   status_meta: string;
   ima: number;
 };
-
 type DpmoEvento = {
   id: number;
   checkin_data: string;
@@ -46,7 +42,6 @@ type DpmoEvento = {
   trimestre: string;
   processo: string;
 };
-
 type DpmoAgregado = {
   id: number;
   representante: string;
@@ -57,7 +52,6 @@ type DpmoAgregado = {
   trimestre: string;
   dpmo: number;
 };
-
 type OcupacaoP2M = {
   id: number;
   user_id: string;
@@ -71,7 +65,6 @@ type OcupacaoP2M = {
   mes: number;
   trimestre: string;
 };
-
 type FeedbackBreve = {
   feedback_id: string;
   tipo: string;
@@ -79,7 +72,6 @@ type FeedbackBreve = {
   observacao: string;
   registrado_em: string;
 };
-
 type DpmoSemana = {
   ano: number;
   semana: number;
@@ -89,7 +81,6 @@ type DpmoSemana = {
   diasAuditados: string[];
   statusCalculo: 'completo' | 'falta_inventario' | 'falta_produtividade';
 };
-
 type TurnoDiario = {
   id: number;
   data_referencia: string;
@@ -99,23 +90,30 @@ type TurnoDiario = {
   pct_ocioso: number;
 };
 
+// 🆕 TIPO DO CSV MENSAL
+type ProdutividadeMensal = {
+  id: number;
+  mes: number;
+  ano: number;
+  prod_liquida_media: number;
+  unidades_total: number;
+  dias_trabalhados: number;
+};
+
 function iniciais(nome: string): string {
   const partes = nome.trim().split(' ');
   if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
   return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
 }
-
 function formatarData(data: string | null): string {
   if (!data) return 'Não informado';
   const d = new Date(data + 'T12:00:00');
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
 }
-
 function formatarDataCurta(data: string): string {
   const d = new Date(data + 'T12:00:00');
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
-
 function mesesEmpresa(dataAdmissao: string | null): string {
   if (!dataAdmissao) return 'Não informado';
   const inicio = new Date(dataAdmissao);
@@ -127,7 +125,6 @@ function mesesEmpresa(dataAdmissao: string | null): string {
   if (mesesRestantes === 0) return `${anos} ${anos === 1 ? 'ano' : 'anos'}`;
   return `${anos} ${anos === 1 ? 'ano' : 'anos'} e ${mesesRestantes} meses`;
 }
-
 function diasParaAniversario(aniversario: string | null): string {
   if (!aniversario) return 'Não informado';
   const hoje = new Date();
@@ -139,7 +136,6 @@ function diasParaAniversario(aniversario: string | null): string {
   if (diff === 1) return 'Amanhã';
   return `Em ${diff} dias`;
 }
-
 function corStatus(status: string): string {
   switch (status) {
     case 'Supera': return 'bg-green-500/20 text-green-400 border-green-500/30';
@@ -148,7 +144,6 @@ function corStatus(status: string): string {
     default: return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
   }
 }
-
 function tempoRelativo(iso: string): string {
   const agora = new Date();
   const data = new Date(iso);
@@ -157,7 +152,6 @@ function tempoRelativo(iso: string): string {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h atrás`;
   return `${Math.floor(diff / 86400)}d atrás`;
 }
-
 function iconeTipo(tipo: string): string {
   switch (tipo) {
     case 'Reconhecimento': return '🏆';
@@ -166,7 +160,6 @@ function iconeTipo(tipo: string): string {
     default: return '✏️';
   }
 }
-
 function tempoParaSegundos(tempo: string | null): number {
   if (!tempo) return 0;
   const partes = tempo.split(':').map(Number);
@@ -174,7 +167,6 @@ function tempoParaSegundos(tempo: string | null): number {
   if (partes.length === 2) return partes[0] * 3600 + partes[1] * 60;
   return 0;
 }
-
 function segundosParaTempo(seg: number): string {
   if (seg <= 0) return '-';
   const h = Math.floor(seg / 3600);
@@ -182,7 +174,6 @@ function segundosParaTempo(seg: number): string {
   const s = seg % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
-
 function segundosParaHM(seg: number): string {
   if (seg < 0) seg = Math.abs(seg);
   if (seg === 0) return '0min';
@@ -192,7 +183,6 @@ function segundosParaHM(seg: number): string {
   if (m === 0) return `${h}h`;
   return `${h}h${m.toString().padStart(2, '0')}`;
 }
-
 function calcularOciosidade(tempoProcesso: string | null, tempoEfetivo: string | null): string {
   const proc = tempoParaSegundos(tempoProcesso);
   const efe = tempoParaSegundos(tempoEfetivo);
@@ -201,7 +191,6 @@ function calcularOciosidade(tempoProcesso: string | null, tempoEfetivo: string |
   if (ocioso <= 0) return '00:00:00';
   return segundosParaTempo(ocioso);
 }
-
 function getSemanaIso(dataStr: string): { semana: number; ano: number } {
   const d = new Date(dataStr + 'T12:00:00');
   const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -211,21 +200,18 @@ function getSemanaIso(dataStr: string): { semana: number; ano: number } {
   const semana = Math.ceil((((utc.getTime() - inicioAno.getTime()) / 86400000) + 1) / 7);
   return { semana, ano: utc.getUTCFullYear() };
 }
-
 function calcularNetIndividual(unidades: number, tempoProcesso: string | null): number {
   const seg = tempoParaSegundos(tempoProcesso);
   if (seg <= 0 || unidades <= 0) return 0;
   const horas = seg / 3600;
   return unidades / horas;
 }
-
 function calcularImpactoReal(netIndividual: number, netTime: number): number {
   if (netTime <= 0 || netIndividual <= 0) return 0;
   let impacto = ((netIndividual - netTime) / netTime) * 100;
   impacto = Math.max(-100, Math.min(200, impacto));
   return Number(impacto.toFixed(1));
 }
-
 type AnaliseOciosidade = {
   ociosidadeSaudavelSeg: number;
   ociosidadeRealSeg: number;
@@ -240,7 +226,6 @@ type AnaliseOciosidade = {
   cor: string;
   insight: string;
 };
-
 function analisarOciosidade(h: HistoricoLinha, meta: number): AnaliseOciosidade | null {
   if (!meta || meta <= 0) return null;
   
@@ -332,7 +317,6 @@ function analisarOciosidade(h: HistoricoLinha, meta: number): AnaliseOciosidade 
       : `${segundosParaHM(diferencaSeg)} ACIMA e NÃO bateu meta. Problema duplo.`,
   };
 }
-
 function detectarPerfil(analises: AnaliseOciosidade[]): { 
   perfil: string; 
   emoji: string; 
@@ -383,12 +367,10 @@ function detectarPerfil(analises: AnaliseOciosidade[]): {
     cor: 'text-red-400',
   };
 }
-
 export default function DetalheColaboradorPage() {
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
-
   const [colaborador, setColaborador] = useState<Colaborador | null>(null);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
   const [dpmoEventos, setDpmoEventos] = useState<DpmoEvento[]>([]);
@@ -397,6 +379,10 @@ export default function DetalheColaboradorPage() {
   const [imaManual, setImaManual] = useState<any[]>([]);
   const [feedbacksRecentes, setFeedbacksRecentes] = useState<FeedbackBreve[]>([]);
   const [turnosDiarios, setTurnosDiarios] = useState<TurnoDiario[]>([]);
+  
+  // 🆕 STATE pro CSV mensal
+  const [produtividadeMensal, setProdutividadeMensal] = useState<ProdutividadeMensal | null>(null);
+  
   const [metaIma, setMetaIma] = useState(1567);
   const [metaProcesso, setMetaProcesso] = useState(296);
   const [loading, setLoading] = useState(true);
@@ -409,7 +395,6 @@ export default function DetalheColaboradorPage() {
   const [iaGeradoEm, setIaGeradoEm] = useState<string>('');
   const [iaFromCache, setIaFromCache] = useState(false);
   const [erroIA, setErroIA] = useState<string>('');
-
   useEffect(() => {
     async function buscar() {
       try {
@@ -431,6 +416,7 @@ export default function DetalheColaboradorPage() {
             buscarMetaIma(data.processo);
             buscarMetaProcesso(data.processo);
             buscarTurnosDiarios();
+            buscarProdutividadeMensal(data.id_groot); // 🆕
           }
         }
       } catch (e: unknown) {
@@ -442,7 +428,26 @@ export default function DetalheColaboradorPage() {
     }
     buscar();
   }, [id]);
-
+  
+  // 🆕 BUSCA PRODUTIVIDADE MENSAL DO MÊS ATUAL
+  async function buscarProdutividadeMensal(idGroot: string) {
+    try {
+      const agora = new Date();
+      const mesAtual = agora.getMonth() + 1;
+      const anoAtual = agora.getFullYear();
+      const { data } = await supabase
+        .from('produtividade_mensal')
+        .select('id, mes, ano, prod_liquida_media, unidades_total, dias_trabalhados')
+        .eq('id_groot', idGroot)
+        .eq('mes', mesAtual)
+        .eq('ano', anoAtual)
+        .maybeSingle();
+      if (data) setProdutividadeMensal(data as ProdutividadeMensal);
+    } catch (e) {
+      console.warn('Erro produtividade mensal:', e);
+    }
+  }
+  
   async function buscarMetaIma(processo: string | null) {
     if (!processo) return;
     const chave = processo === 'Checkin' ? 'meta_ima_checkin' : processo === 'P2M' ? 'meta_ima_p2m' : null;
@@ -450,7 +455,6 @@ export default function DetalheColaboradorPage() {
     const { data } = await supabase.from('config').select('valor').eq('chave', chave).single();
     if (data) setMetaIma(Number(data.valor));
   }
-
   async function buscarMetaProcesso(processo: string | null) {
     if (!processo) return;
     const chave = processo === 'Checkin' ? 'meta_checkin_base' : processo === 'P2M' ? 'meta_p2m_base' : null;
@@ -458,7 +462,6 @@ export default function DetalheColaboradorPage() {
     const { data } = await supabase.from('config').select('valor').eq('chave', chave).single();
     if (data) setMetaProcesso(Number(data.valor));
   }
-
   async function buscarHistorico(idGroot: string) {
     try {
       setLoadingHistorico(true);
@@ -472,7 +475,6 @@ export default function DetalheColaboradorPage() {
       setLoadingHistorico(false);
     }
   }
-
   async function buscarTurnosDiarios() {
     try {
       const { data, error } = await supabase
@@ -485,7 +487,6 @@ export default function DetalheColaboradorPage() {
       console.warn('Erro turnos:', e);
     }
   }
-
   async function buscarDpmoEventos(idGroot: string, nome: string, processoColaborador: string | null) {
     try {
       if (processoColaborador !== 'Checkin' && processoColaborador !== 'P2M') {
@@ -502,7 +503,6 @@ export default function DetalheColaboradorPage() {
         .select('*')
         .ilike('representante', nome)
         .is('id_groot', null);
-
       const todos: DpmoEvento[] = [];
       const idsVistos = new Set<number>();
       [...(porId || []), ...(porNome || [])].forEach((e) => {
@@ -516,7 +516,6 @@ export default function DetalheColaboradorPage() {
       console.error('Erro DPMO eventos:', e);
     }
   }
-
   async function buscarDpmoAgregado(idGroot: string, nome: string, processoColaborador: string | null) {
     try {
       if (processoColaborador !== 'Checkin' && processoColaborador !== 'P2M') {
@@ -524,7 +523,6 @@ export default function DetalheColaboradorPage() {
         return;
       }
       const procDpmo = processoColaborador === 'Checkin' ? 'CK' : 'P2M';
-
       const { data: porId } = await supabase
         .from('dpmo_agregado')
         .select('*')
@@ -532,14 +530,12 @@ export default function DetalheColaboradorPage() {
         .eq('processo', procDpmo)
         .order('ano', { ascending: false })
         .order('semana', { ascending: false });
-
       const { data: porNome } = await supabase
         .from('dpmo_agregado')
         .select('*')
         .ilike('representante', nome)
         .eq('processo', procDpmo)
         .is('id_groot', null);
-
       const todos: DpmoAgregado[] = [];
       const idsVistos = new Set<number>();
       [...(porId || []), ...(porNome || [])].forEach((e) => {
@@ -553,7 +549,6 @@ export default function DetalheColaboradorPage() {
       console.error('Erro DPMO agregado:', e);
     }
   }
-
   async function buscarOcupacaoP2M(idGroot: string, nome: string, processoColaborador: string | null) {
     try {
       if (processoColaborador !== 'P2M') {
@@ -570,7 +565,6 @@ export default function DetalheColaboradorPage() {
       console.error('Erro ocupação P2M:', e);
     }
   }
-
   async function buscarFeedbacks(idGroot: string) {
     const { data } = await supabase
       .from('feedbacks')
@@ -580,7 +574,6 @@ export default function DetalheColaboradorPage() {
       .limit(3);
     if (data) setFeedbacksRecentes(data as FeedbackBreve[]);
   }
-
   async function buscarImaManual(idGroot: string, processoColaborador: string | null) {
     if (!processoColaborador) return;
     try {
@@ -596,7 +589,6 @@ export default function DetalheColaboradorPage() {
       console.warn('Erro IMA manual:', e);
     }
   }
-
   async function carregarAnaliseIA(forcarNovo = false) {
     if (!colaborador) return;
     setCarregandoIA(true);
@@ -620,7 +612,6 @@ export default function DetalheColaboradorPage() {
       setCarregandoIA(false);
     }
   }
-
   async function excluir() {
     if (!colaborador) return;
     const ok = await (window as any).showConfirm({
@@ -637,23 +628,18 @@ export default function DetalheColaboradorPage() {
       router.push('/meu-time');
     }
   }
-
   const turnosPorData = new Map<string, TurnoDiario>();
   turnosDiarios.forEach((t) => turnosPorData.set(t.data_referencia, t));
-
   function calcularDpmoPorSemana(): DpmoSemana[] {
     const resultado: Record<string, DpmoSemana> = {};
     const procPrincipal = colaborador?.processo === 'Checkin' ? 'CK' : colaborador?.processo === 'P2M' ? 'P2M' : null;
     if (!procPrincipal) return [];
-
     const eventosPrincipal = dpmoEventos.filter((e) => e.processo === procPrincipal);
     const agregadoPrincipal = dpmoAgregado.filter((d) => d.processo === procPrincipal);
-
     let dataMaximaInventario = '';
     eventosPrincipal.forEach((e) => {
       if (e.checkin_data > dataMaximaInventario) dataMaximaInventario = e.checkin_data;
     });
-
     agregadoPrincipal.forEach((d) => {
       const chave = `${d.ano}-S${d.semana}`;
       if (!resultado[chave]) {
@@ -666,7 +652,6 @@ export default function DetalheColaboradorPage() {
         resultado[chave].statusCalculo = 'completo';
       }
     });
-
     eventosPrincipal.forEach((e) => {
       const chave = `${e.ano}-S${e.semana}`;
       if (!resultado[chave]) {
@@ -680,7 +665,6 @@ export default function DetalheColaboradorPage() {
         resultado[chave].diasAuditados.push(e.checkin_data);
       }
     });
-
     historico.forEach((h) => {
       if (dataMaximaInventario && h.data_referencia > dataMaximaInventario) return;
       const { ano, semana } = getSemanaIso(h.data_referencia);
@@ -693,13 +677,11 @@ export default function DetalheColaboradorPage() {
       }
       resultado[chave].unidades += h.unidades || 0;
     });
-
     return Object.values(resultado).sort((a, b) => {
       if (a.ano !== b.ano) return b.ano - a.ano;
       return b.semana - a.semana;
     });
   }
-
   const dpmoOutroProcesso = (() => {
     if (!colaborador) return null;
     const procPrincipal = colaborador.processo === 'Checkin' ? 'CK' : colaborador.processo === 'P2M' ? 'P2M' : null;
@@ -717,10 +699,8 @@ export default function DetalheColaboradorPage() {
       eventos: eventosOutro.length,
     };
   })();
-
   const dpmoPorSemana = calcularDpmoPorSemana();
   const semanasCompletas = dpmoPorSemana.filter((s) => s.statusCalculo === 'completo');
-
   const dpmoTotal = (() => {
     if (imaManual.length > 0) {
       const totalIma = imaManual.reduce((s, m) => s + (Number(m.ima) || 0), 0);
@@ -740,7 +720,6 @@ export default function DetalheColaboradorPage() {
     }
     return null;
   })();
-
   const historicoFiltrado = (() => {
     const agora = new Date();
     const mesAtual = agora.getMonth() + 1;
@@ -750,13 +729,10 @@ export default function DetalheColaboradorPage() {
       return data.getMonth() + 1 === mesAtual && data.getFullYear() === anoAtual;
     });
   })();
-
   const analisesOciosidade: AnaliseOciosidade[] = historicoFiltrado
     .map((h) => analisarOciosidade(h, metaProcesso))
     .filter((a): a is AnaliseOciosidade => a !== null);
-
   const perfilDominante = detectarPerfil(analisesOciosidade);
-
   const statsOciosidade = (() => {
     if (analisesOciosidade.length === 0) return null;
     const excelente = analisesOciosidade.filter(a => a.status === 'excelente').length;
@@ -788,12 +764,46 @@ export default function DetalheColaboradorPage() {
       pctSaudavel: Math.round(((excelente + saudavel) / analisesOciosidade.length) * 100),
     };
   })();
-
+  
+  // 🎯 STATS — agora COMBINA diário + mensal
   const stats = (() => {
     const validos = historicoFiltrado.filter((h) => h.prod_liquida > 0);
-    if (validos.length === 0) return null;
-    const somaLiq = validos.reduce((s, h) => s + h.prod_liquida, 0);
     
+    // Se NÃO tem nem diário nem mensal: retorna null
+    if (validos.length === 0 && !produtividadeMensal) return null;
+    
+    // 🎯 CÁLCULO DA LÍQUIDA MÉDIA - combina diário + mensal
+    const somaLiqDiario = validos.reduce((s, h) => s + h.prod_liquida, 0);
+    const diasDiario = validos.length;
+    
+    let mediaLiquidaFinal: number;
+    let totalDiasFinal: number;
+    let fonteInfo: string;
+    let temMensal = false;
+    
+    if (produtividadeMensal && diasDiario > 0) {
+      // 📊 TEM AMBOS: combina via média ponderada
+      const liqMensal = Number(produtividadeMensal.prod_liquida_media) || 0;
+      const diasMensal = Number(produtividadeMensal.dias_trabalhados) || 0;
+      const somaCombinada = (liqMensal * diasMensal) + somaLiqDiario;
+      totalDiasFinal = diasMensal + diasDiario;
+      mediaLiquidaFinal = Math.round(somaCombinada / totalDiasFinal);
+      fonteInfo = `mensal (${diasMensal}d) + diário (${diasDiario}d)`;
+      temMensal = true;
+    } else if (produtividadeMensal) {
+      // 📊 SÓ MENSAL: usa direto
+      mediaLiquidaFinal = Math.round(Number(produtividadeMensal.prod_liquida_media) || 0);
+      totalDiasFinal = Number(produtividadeMensal.dias_trabalhados) || 0;
+      fonteInfo = `mensal (${totalDiasFinal}d)`;
+      temMensal = true;
+    } else {
+      // 📅 SÓ DIÁRIO: jeito antigo
+      mediaLiquidaFinal = Math.round(somaLiqDiario / diasDiario);
+      totalDiasFinal = diasDiario;
+      fonteInfo = `diário (${diasDiario}d)`;
+    }
+    
+    // ➡️ Calcula impacto NET (usa SÓ diário, porque mensal não tem turno)
     let somaImpactoReal = 0;
     let qtdComTurno = 0;
     validos.forEach((h) => {
@@ -807,6 +817,7 @@ export default function DetalheColaboradorPage() {
     });
     const mediaImpactoReal = qtdComTurno > 0 ? Number((somaImpactoReal / qtdComTurno).toFixed(1)) : 0;
     
+    // ➡️ Ociosidade (só diário, porque mensal não tem tempo)
     const ociosidadesValidas = validos
       .map((h) => tempoParaSegundos(h.tempo_processo) - tempoParaSegundos(h.tempo_efetivo))
       .filter((o) => o > 0);
@@ -814,23 +825,31 @@ export default function DetalheColaboradorPage() {
       ? Math.round(ociosidadesValidas.reduce((s, v) => s + v, 0) / ociosidadesValidas.length)
       : 0;
     
-    const melhorDia = validos.reduce((max, h) => (h.prod_liquida > max.prod_liquida ? h : max));
-    const piorDia = validos.reduce((min, h) => (h.prod_liquida < min.prod_liquida ? h : min));
+    // ➡️ Melhor/pior dia (só diário, porque mensal não tem dia individual)
+    const melhorDia = validos.length > 0 
+      ? validos.reduce((max, h) => (h.prod_liquida > max.prod_liquida ? h : max))
+      : null;
+    const piorDia = validos.length > 0
+      ? validos.reduce((min, h) => (h.prod_liquida < min.prod_liquida ? h : min))
+      : null;
+    
     return {
-      totalDias: validos.length,
-      mediaLiquida: Math.round(somaLiq / validos.length),
+      totalDias: totalDiasFinal,
+      mediaLiquida: mediaLiquidaFinal,
       mediaImpacto: mediaImpactoReal,
       diasComTurno: qtdComTurno,
-      ociosidadeMedia: segundosParaTempo(ociosidadeMediaSeg),
+      ociosidadeMedia: ociosidadesValidas.length > 0 ? segundosParaTempo(ociosidadeMediaSeg) : '-',
       diasSupera: validos.filter((h) => h.status_meta === 'Supera').length,
       diasAlinhado: validos.filter((h) => h.status_meta === 'Alinhado').length,
       diasAbaixo: validos.filter((h) => h.status_meta === 'Abaixo').length,
       melhorDia,
       piorDia,
-      ultimoStatus: historicoFiltrado[0]?.status_meta || 'Sem dados',
+      ultimoStatus: historicoFiltrado[0]?.status_meta || (produtividadeMensal ? 'Mensal' : 'Sem dados'),
+      fonteInfo,
+      temMensal,
     };
   })();
-
+  
   if (loading) {
     return (
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
@@ -839,7 +858,6 @@ export default function DetalheColaboradorPage() {
       </div>
     );
   }
-
   if (erro || !colaborador) {
     return (
       <div className="space-y-6">
@@ -850,13 +868,11 @@ export default function DetalheColaboradorPage() {
       </div>
     );
   }
-
   return (
     <div className="space-y-6">
       <Link href="/meu-time" className="text-gray-400 hover:text-white transition-colors inline-flex items-center gap-2">
         ← Voltar para MEU TIME
       </Link>
-
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-start gap-6 flex-wrap">
           <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#FFD700] to-yellow-600 flex items-center justify-center text-black font-black text-3xl flex-shrink-0 shadow-lg shadow-yellow-500/30">
@@ -884,7 +900,6 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       </div>
-
       {perfilDominante.perfil !== 'SEM DADOS' && (
         <div className={`bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 ${
           perfilDominante.perfil === 'EQUILIBRADO' ? 'border-green-500/40' :
@@ -905,7 +920,6 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       )}
-
       {!loadingHistorico && stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
@@ -914,6 +928,9 @@ export default function DetalheColaboradorPage() {
               <span className="text-2xl font-black text-white">{stats.mediaLiquida}</span>
             </div>
             <p className="text-xs text-gray-400">Líquida média (pç/h)</p>
+            {stats.temMensal && (
+              <p className="text-[10px] text-cyan-400 mt-1">{stats.fonteInfo}</p>
+            )}
           </div>
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
@@ -947,7 +964,6 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       )}
-
       {statsOciosidade && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-orange-500/30 rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1016,7 +1032,6 @@ export default function DetalheColaboradorPage() {
               </div>
             </div>
           </div>
-
           <div className="grid grid-cols-5 gap-2">
             <div className="bg-green-500/10 rounded-lg p-2 text-center">
               <p className="text-2xl">🌟</p>
@@ -1046,7 +1061,6 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       )}
-
       <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 rounded-2xl p-6 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-lg font-bold text-purple-300 flex items-center gap-2">
@@ -1070,7 +1084,6 @@ export default function DetalheColaboradorPage() {
             </div>
           )}
         </div>
-
         {!relatorioIA && !carregandoIA && !erroIA && (
           <div className="text-center py-8 space-y-3">
             <span className="text-6xl block">🧠</span>
@@ -1086,7 +1099,6 @@ export default function DetalheColaboradorPage() {
             </button>
           </div>
         )}
-
         {carregandoIA && (
           <div className="text-center py-12 space-y-3">
             <span className="text-6xl block animate-pulse">🤖</span>
@@ -1094,7 +1106,6 @@ export default function DetalheColaboradorPage() {
             <p className="text-xs text-gray-500">Pode levar 10-15 segundos</p>
           </div>
         )}
-
         {erroIA && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
             <p className="text-red-300 text-sm font-bold">❌ Erro: {erroIA}</p>
@@ -1106,7 +1117,6 @@ export default function DetalheColaboradorPage() {
             </button>
           </div>
         )}
-
         {relatorioIA && !carregandoIA && (
           <div className="bg-[#0a0a0a] rounded-xl p-5">
             <div 
@@ -1128,13 +1138,11 @@ export default function DetalheColaboradorPage() {
           </div>
         )}
       </div>
-
       {(colaborador.processo === 'Checkin' || colaborador.processo === 'P2M') && dpmoPorSemana.length > 0 && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-lg font-bold text-purple-400 flex items-center gap-2">📊 DPMO (Qualidade)</h2>
           </div>
-
           {dpmoTotal !== null && (
             <div className={`rounded-lg p-4 border ${dpmoTotal.dpmo > metaIma ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
               <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1151,7 +1159,6 @@ export default function DetalheColaboradorPage() {
               </div>
             </div>
           )}
-
           {semanasCompletas.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -1178,7 +1185,6 @@ export default function DetalheColaboradorPage() {
           )}
         </div>
       )}
-
       {dpmoOutroProcesso && dpmoOutroProcesso.defeitos > 0 && (
         <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/30 rounded-2xl p-6 space-y-3">
           <div className="flex items-center gap-3">
@@ -1208,7 +1214,6 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       )}
-
       {colaborador.processo === 'P2M' && ocupacaoP2M.length > 0 && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
           <h2 className="text-lg font-bold text-emerald-400 flex items-center gap-2">📦 Ocupação P2M</h2>
@@ -1235,7 +1240,6 @@ export default function DetalheColaboradorPage() {
           })()}
         </div>
       )}
-
       {!loadingHistorico && stats && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
           <h3 className="text-sm font-bold text-gray-400 mb-4">DISTRIBUIÇÃO DE STATUS</h3>
@@ -1255,8 +1259,7 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       )}
-
-      {!loadingHistorico && stats && (
+      {!loadingHistorico && stats && stats.melhorDia && stats.piorDia && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-gradient-to-br from-green-500/10 to-green-600/5 border border-green-500/30 rounded-2xl p-4">
             <p className="text-xs text-green-400 font-bold mb-1">🏆 MELHOR DIA</p>
@@ -1270,7 +1273,6 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       )}
-
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">💬 Feedbacks Recentes</h2>
@@ -1300,7 +1302,6 @@ export default function DetalheColaboradorPage() {
           </div>
         )}
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
           <h2 className="text-lg font-bold text-[#FFD700] mb-4">📋 Dados Cadastrais</h2>
@@ -1339,7 +1340,6 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       </div>
-
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico do Mês</h2>
@@ -1354,7 +1354,6 @@ export default function DetalheColaboradorPage() {
             </span>
           </div>
         </div>
-
         {loadingHistorico ? (
           <div className="text-center py-12">
             <span className="text-6xl block mb-4">⏳</span>
