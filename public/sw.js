@@ -1,15 +1,10 @@
 // ============================================
-// 🚀 LIDER 360 - SERVICE WORKER (Online-First)
-// ============================================
-// Estratégia: SEMPRE busca da internet primeiro
-// Cache só pra emergência (sem internet)
-// Dados de API/Supabase NUNCA são cacheados
+// 🚀 LIDER 360 - SERVICE WORKER (v3 fix)
 // ============================================
 
-const VERSAO = 'lider360-v2.0.0';
+const VERSAO = 'lider360-v3.0.0';
 const CACHE_EMERGENCIA = 'lider360-fallback';
 
-// Só cacheia o mínimo absoluto (pra abrir offline)
 const RECURSOS_MINIMOS = [
   '/',
   '/icon.svg',
@@ -20,7 +15,7 @@ const RECURSOS_MINIMOS = [
 // INSTALAÇÃO
 // ============================================
 self.addEventListener('install', (event) => {
-  console.log('🚀 SW v2: Instalando');
+  console.log('🚀 SW v3: Instalando');
   
   event.waitUntil(
     caches.open(CACHE_EMERGENCIA).then((cache) => {
@@ -30,10 +25,10 @@ self.addEventListener('install', (event) => {
 });
 
 // ============================================
-// ATIVAÇÃO - Limpa caches antigos AGRESSIVAMENTE
+// ATIVAÇÃO
 // ============================================
 self.addEventListener('activate', (event) => {
-  console.log('✨ SW v2: Ativando - limpando caches antigos');
+  console.log('✨ SW v3: Ativando - limpando caches antigos');
   
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -50,63 +45,66 @@ self.addEventListener('activate', (event) => {
 });
 
 // ============================================
-// FETCH - SEMPRE ONLINE PRIMEIRO
+// FETCH - SEMPRE deixa o navegador lidar
+// Cache só pra recursos estáticos básicos
 // ============================================
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  const url = new URL(request.url);
   
-  // ❌ NUNCA INTERCEPTAR:
-  // - APIs (Supabase, Groq, Next.js API routes)
+  // ❌ NUNCA INTERCEPTA:
+  // - APIs (qualquer chamada que possa demorar)
+  // - Rotas com /copiloto, /api, /_next
   // - Recursos de outras origens
   // - Métodos não-GET
+  // - Páginas dinâmicas
   
   if (
     request.method !== 'GET' ||
     !request.url.startsWith(self.location.origin) ||
-    request.url.includes('/api/') ||
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/copiloto') ||
+    url.pathname.startsWith('/_next/') ||
+    url.pathname.includes('/analise') ||
+    url.pathname.startsWith('/strategist') ||
     request.url.includes('supabase') ||
     request.url.includes('groq') ||
-    request.url.includes('/_next/data') ||
-    request.url.includes('/_next/webpack') ||
+    request.url.includes('anthropic') ||
     request.url.includes('chrome-extension')
   ) {
     return; // Deixa o navegador lidar normalmente
   }
   
-  // ✅ Pra páginas HTML e assets estáticos:
-  // SEMPRE busca network primeiro, cache só como fallback
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        // Atualiza cache de emergência em segundo plano
-        if (response && response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_EMERGENCIA).then((cache) => {
-            cache.put(request, clone).catch(() => {});
-          });
-        }
-        return response;
-      })
-      .catch(() => {
-        // Sem internet? Tenta o cache de emergência
-        return caches.match(request).then((cached) => {
-          if (cached) {
-            console.log('📦 SW: Sem internet - servindo do cache', request.url);
-            return cached;
+  // ✅ Apenas pra recursos estáticos (imagens, ícones, manifest):
+  // Cache First com fallback de network
+  if (
+    url.pathname.endsWith('.svg') ||
+    url.pathname.endsWith('.png') ||
+    url.pathname.endsWith('.jpg') ||
+    url.pathname.endsWith('.ico') ||
+    url.pathname === '/manifest.json' ||
+    url.pathname === '/'
+  ) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        
+        return fetch(request).then((response) => {
+          if (response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_EMERGENCIA).then((cache) => {
+              cache.put(request, clone).catch(() => {});
+            });
           }
-          
-          // Se é página HTML e não tem cache, retorna a home cacheada
-          if (request.headers.get('accept')?.includes('text/html')) {
-            return caches.match('/');
-          }
-          
-          return new Response('Sem conexão e sem cache', { 
-            status: 503, 
-            statusText: 'Offline' 
-          });
+          return response;
+        }).catch(() => {
+          return new Response('Offline', { status: 503 });
         });
       })
-  );
+    );
+  }
+  
+  // Pra tudo mais: deixa o navegador lidar (sem cache, sem intercept)
 });
 
 // ============================================
@@ -172,7 +170,7 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 // ============================================
-// MESSAGE - Comunicação com o app
+// MESSAGE
 // ============================================
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
@@ -180,4 +178,4 @@ self.addEventListener('message', (event) => {
   }
 });
 
-console.log('🚀 LIDER 360 SW v2 carregado - Modo Online-First');
+console.log('🚀 LIDER 360 SW v3 carregado - Mínima intervenção');
