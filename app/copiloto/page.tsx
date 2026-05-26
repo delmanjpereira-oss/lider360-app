@@ -1,13 +1,12 @@
 'use client';
-
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
+import FinalizarTarefaModal from './FinalizarTarefaModal';
 
 // ============================================
 // TIPOS
 // ============================================
-
 type TarefaCopiloto = {
   id: number;
   id_tarefa: string;
@@ -28,7 +27,6 @@ type TarefaCopiloto = {
   gerado_por_ia: boolean;
   criado_em: string;
 };
-
 type Colaborador = {
   id: number;
   id_groot: string;
@@ -36,7 +34,6 @@ type Colaborador = {
   processo: string | null;
   status: string;
 };
-
 type HistoricoSimples = {
   id_groot: string;
   data_referencia: string;
@@ -44,7 +41,15 @@ type HistoricoSimples = {
   status_meta: string;
   impacto_net: number;
 };
-
+type ProdutividadeMensalLinha = {
+  id_groot: string;
+  mes: number;
+  ano: number;
+  processo: string;
+  prod_liquida_media: number;
+  unidades_total: number;
+  dias_trabalhados: number;
+};
 type MonitorItem = {
   idGroot: string;
   id: number;
@@ -54,18 +59,17 @@ type MonitorItem = {
   ultimaLiquida: number;
   ultimoImpacto: number;
   diasAbaixo: number;
+  fonte: 'diario' | 'mensal';  // 🆕 indica de onde vem o dado
+  diasMes?: number;             // só pra mensal
 };
-
 // ============================================
 // HELPERS
 // ============================================
-
 function iniciais(nome: string): string {
   const partes = nome.trim().split(' ');
   if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
   return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
 }
-
 function tempoRelativo(iso: string): string {
   const agora = new Date();
   const data = new Date(iso);
@@ -75,7 +79,6 @@ function tempoRelativo(iso: string): string {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h atrás`;
   return `${Math.floor(diff / 86400)}d atrás`;
 }
-
 const CORES_PRIORIDADE: Record<string, { bg: string; border: string; text: string; bgIntenso: string }> = {
   critica: { bg: 'from-red-500/10 to-rose-500/5', border: 'border-red-500/40', text: 'text-red-300', bgIntenso: 'bg-red-500/20' },
   alta: { bg: 'from-orange-500/10 to-amber-500/5', border: 'border-orange-500/40', text: 'text-orange-300', bgIntenso: 'bg-orange-500/20' },
@@ -83,7 +86,6 @@ const CORES_PRIORIDADE: Record<string, { bg: string; border: string; text: strin
   baixa: { bg: 'from-blue-500/10 to-cyan-500/5', border: 'border-blue-500/40', text: 'text-blue-300', bgIntenso: 'bg-blue-500/20' },
   normal: { bg: 'from-gray-500/10 to-slate-500/5', border: 'border-gray-500/40', text: 'text-gray-300', bgIntenso: 'bg-gray-500/20' },
 };
-
 const EMOJI_TIPO: Record<string, string> = {
   'Janela Promocional': '🔥',
   'Janela Prejudicada': '🔴',
@@ -91,53 +93,60 @@ const EMOJI_TIPO: Record<string, string> = {
   'Feedback Ofensor': '🚨',
   'Reconhecimento Supera': '🌟',
   'Aniversário': '🎂',
+  'Reconhecimento Estratégico': '🏆',
+  'Acompanhamento de Evolução': '📈',
+  'Antecipação de Queda': '⚠️',
+  'Coaching Preventivo': '💬',
+  'Cuidado de Bem-Estar': '💚',
+  'Oportunidade de Carreira': '🎯',
+  'Quebra de Padrão': '🔍',
+  'Reconhecimento Invisível': '💎',
 };
-
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
-
 export default function CopilotoPage() {
   const [tarefas, setTarefas] = useState<TarefaCopiloto[]>([]);
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoSimples[]>([]);
+  const [produtividadeMensal, setProdutividadeMensal] = useState<ProdutividadeMensalLinha[]>([]);  // 🆕
   const [loading, setLoading] = useState(true);
   const [analisando, setAnalisando] = useState(false);
   const [ultimaAnalise, setUltimaAnalise] = useState<Date | null>(null);
   const [resumoAnalise, setResumoAnalise] = useState<any>(null);
   const [filtroPrioridade, setFiltroPrioridade] = useState<'todas' | 'critica' | 'alta'>('todas');
   
-  // Modal
+  // Modal antigo (ver detalhes)
   const [tarefaAberta, setTarefaAberta] = useState<TarefaCopiloto | null>(null);
-  const [textoFeedback, setTextoFeedback] = useState('');
-  const [salvandoFeedback, setSalvandoFeedback] = useState(false);
   
-  // 🎯 Ref pra controlar análise (evita rodar 2x)
+  // 🆕 Modal de finalizar com aprendizado
+  const [tarefaParaFinalizar, setTarefaParaFinalizar] = useState<TarefaCopiloto | null>(null);
+  
   const jaRodouRef = useRef(false);
   const [, forceUpdate] = useState({});
-
   // ============================================
-  // CARREGAR DADOS (sem chamar IA)
+  // CARREGAR DADOS
   // ============================================
   
   const carregarDados = useCallback(async () => {
     try {
-      const [tarsResp, colabsResp, histResp] = await Promise.all([
+      const [tarsResp, colabsResp, histResp, mensalResp] = await Promise.all([
         supabase.from('tarefas').select('*').eq('status', 'Pendente').order('criado_em', { ascending: false }),
         supabase.from('colaboradores').select('id, id_groot, nome, processo, status').eq('status', 'Ativo'),
         supabase.from('historico').select('id_groot, data_referencia, prod_liquida, status_meta, impacto_net').order('data_referencia', { ascending: false }),
+        supabase.from('produtividade_mensal').select('id_groot, mes, ano, processo, prod_liquida_media, unidades_total, dias_trabalhados').order('ano', { ascending: false }).order('mes', { ascending: false }),
       ]);
       
       if (tarsResp.data) setTarefas(tarsResp.data as any);
       if (colabsResp.data) setColaboradores(colabsResp.data as any);
       if (histResp.data) setHistorico(histResp.data as any);
+      if (mensalResp.data) setProdutividadeMensal(mensalResp.data as any);
     } catch (e) {
       console.error('Erro carregando:', e);
     }
   }, []);
-
   // ============================================
-  // RODAR ANÁLISE IA (automático)
+  // RODAR ANÁLISE IA
   // ============================================
   
   const rodarAnalise = useCallback(async () => {
@@ -146,8 +155,8 @@ export default function CopilotoPage() {
     try {
       const resp = await fetch('/api/ia/copiloto', { method: 'POST' });
       const data = await resp.json();
-      if (data.ok) {
-        setResumoAnalise(data.contexto);
+      if (data.sucesso) {
+        setResumoAnalise(data);
         setUltimaAnalise(new Date());
         await carregarDados();
       }
@@ -157,12 +166,7 @@ export default function CopilotoPage() {
       setAnalisando(false);
     }
   }, [analisando, carregarDados]);
-
-  // ============================================
-  // 🎯 AUTOMAÇÃO 100% — sem botão
-  // ============================================
-  
-  // 1. Roda ao montar
+  // Automação
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -175,17 +179,13 @@ export default function CopilotoPage() {
       }
     })();
   }, [carregarDados, rodarAnalise]);
-
-  // 2. Recarrega dados a cada 30s (sem chamar IA)
   useEffect(() => {
     const interval = setInterval(() => {
       carregarDados();
-      forceUpdate({}); // pra atualizar o "há X segundos"
+      forceUpdate({});
     }, 30000);
     return () => clearInterval(interval);
   }, [carregarDados]);
-
-  // 3. Detecta volta de aba ausente (>10min) → re-roda IA
   useEffect(() => {
     function handleVisibility() {
       if (document.visibilityState === 'visible' && ultimaAnalise) {
@@ -199,15 +199,12 @@ export default function CopilotoPage() {
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [ultimaAnalise, rodarAnalise]);
-
-  // 4. Atualiza "há X segundos" a cada 10s
   useEffect(() => {
     const interval = setInterval(() => forceUpdate({}), 10000);
     return () => clearInterval(interval);
   }, []);
-
   // ============================================
-  // CÁLCULO DAS 3 COLUNAS (OFENSORES / ALINHADOS / SUPERAS)
+  // 🆕 CÁLCULO DAS 3 COLUNAS - combina diário + mensal
   // ============================================
   
   function calcularStreak(idGroot: string): number {
@@ -221,40 +218,91 @@ export default function CopilotoPage() {
     }
     return streak;
   }
-
-  // Último status de cada colab
+  
+  function determinarStatusMensal(liquida: number, processo: string): string {
+    // Metas básicas
+    const metaP2M = 280;
+    const metaCheckin = 100;
+    const meta = processo === 'P2M' ? metaP2M : processo === 'Checkin' ? metaCheckin : 0;
+    
+    if (meta === 0) return 'Alinhado';
+    
+    const pctMeta = (liquida / meta) * 100;
+    if (pctMeta >= 105) return 'Supera';
+    if (pctMeta >= 95) return 'Alinhado';
+    return 'Abaixo';
+  }
+  
+  // Pega o registro mais recente de cada colab no histórico DIÁRIO
   const ultimoStatusPorId: Record<string, HistoricoSimples> = {};
   historico.forEach((h) => {
     if (!ultimoStatusPorId[h.id_groot]) ultimoStatusPorId[h.id_groot] = h;
   });
-
-  const monitor = { ofensores: [] as MonitorItem[], alinhados: [] as MonitorItem[], superas: [] as MonitorItem[] };
-
-  colaboradores.forEach((c) => {
-    const ultimo = ultimoStatusPorId[c.id_groot];
-    if (!ultimo) return;
-    
-    const item: MonitorItem = {
-      idGroot: c.id_groot,
-      id: c.id,
-      nome: c.nome,
-      processo: c.processo || '-',
-      ultimoStatus: ultimo.status_meta,
-      ultimaLiquida: ultimo.prod_liquida,
-      ultimoImpacto: ultimo.impacto_net,
-      diasAbaixo: calcularStreak(c.id_groot),
-    };
-    
-    if (ultimo.status_meta === 'Abaixo') monitor.ofensores.push(item);
-    else if (ultimo.status_meta === 'Alinhado') monitor.alinhados.push(item);
-    else if (ultimo.status_meta === 'Supera') monitor.superas.push(item);
+  
+  // 🆕 Pega o MENSAL mais recente de cada colab
+  const hoje = new Date();
+  const mesAtual = hoje.getMonth() + 1;
+  const anoAtual = hoje.getFullYear();
+  
+  const mensalPorId: Record<string, ProdutividadeMensalLinha> = {};
+  produtividadeMensal.forEach((m) => {
+    if (m.mes === mesAtual && m.ano === anoAtual && !mensalPorId[m.id_groot]) {
+      mensalPorId[m.id_groot] = m;
+    }
   });
-
+  
+  const monitor = { ofensores: [] as MonitorItem[], alinhados: [] as MonitorItem[], superas: [] as MonitorItem[] };
+  
+  colaboradores.forEach((c) => {
+    const ultimoDiario = ultimoStatusPorId[c.id_groot];
+    const mensal = mensalPorId[c.id_groot];
+    
+    // 🎯 LÓGICA: Se tem DIÁRIO usa diário (mais recente). Se NÃO TEM mas tem mensal, usa mensal
+    if (ultimoDiario) {
+      const item: MonitorItem = {
+        idGroot: c.id_groot,
+        id: c.id,
+        nome: c.nome,
+        processo: c.processo || '-',
+        ultimoStatus: ultimoDiario.status_meta,
+        ultimaLiquida: ultimoDiario.prod_liquida,
+        ultimoImpacto: ultimoDiario.impacto_net,
+        diasAbaixo: calcularStreak(c.id_groot),
+        fonte: 'diario',
+      };
+      
+      if (ultimoDiario.status_meta === 'Abaixo') monitor.ofensores.push(item);
+      else if (ultimoDiario.status_meta === 'Alinhado') monitor.alinhados.push(item);
+      else if (ultimoDiario.status_meta === 'Supera') monitor.superas.push(item);
+    } else if (mensal) {
+      // 🆕 Sem diário, mas tem mensal: usa o mensal
+      const liquida = Number(mensal.prod_liquida_media) || 0;
+      const status = determinarStatusMensal(liquida, c.processo || '');
+      
+      const item: MonitorItem = {
+        idGroot: c.id_groot,
+        id: c.id,
+        nome: c.nome,
+        processo: c.processo || '-',
+        ultimoStatus: status,
+        ultimaLiquida: liquida,
+        ultimoImpacto: 0, // não dá pra calcular sem turno
+        diasAbaixo: 0,
+        fonte: 'mensal',
+        diasMes: mensal.dias_trabalhados,
+      };
+      
+      if (status === 'Abaixo') monitor.ofensores.push(item);
+      else if (status === 'Alinhado') monitor.alinhados.push(item);
+      else if (status === 'Supera') monitor.superas.push(item);
+    }
+  });
+  
   monitor.ofensores.sort((a, b) => b.diasAbaixo - a.diasAbaixo);
   monitor.alinhados.sort((a, b) => b.ultimoImpacto - a.ultimoImpacto);
   monitor.superas.sort((a, b) => b.ultimoImpacto - a.ultimoImpacto);
-
-  // Filtragem de tarefas por prioridade
+  
+  // Filtragem de tarefas
   const ordemPrio: Record<string, number> = { critica: 1, alta: 2, media: 3, baixa: 4, normal: 5 };
   const tarefasOrdenadas = [...tarefas].sort((a, b) => {
     const ap = ordemPrio[a.prioridade] || 9;
@@ -262,75 +310,43 @@ export default function CopilotoPage() {
     if (ap !== bp) return ap - bp;
     return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
   });
-
   const tarefasFiltradas = filtroPrioridade === 'todas'
     ? tarefasOrdenadas
     : tarefasOrdenadas.filter(t => t.prioridade === filtroPrioridade);
-
   const statsPrio = {
     critica: tarefas.filter(t => t.prioridade === 'critica').length,
     alta: tarefas.filter(t => t.prioridade === 'alta').length,
   };
-
   // ============================================
-  // FEEDBACK
+  // Abrir/Fechar modal
   // ============================================
   
   function abrirTarefa(t: TarefaCopiloto) {
     setTarefaAberta(t);
-    setTextoFeedback(t.feedback_texto || '');
   }
   
   function fecharTarefa() {
     setTarefaAberta(null);
-    setTextoFeedback('');
   }
   
-  async function concluirTarefa() {
-    if (!tarefaAberta) return;
-    if (tarefaAberta.feedback_obrigatorio && textoFeedback.trim().length < 10) {
-      alert('⚠️ Feedback obrigatório com mín. 10 caracteres');
-      return;
-    }
-    setSalvandoFeedback(true);
-    try {
-      await supabase.from('tarefas').update({
-        status: 'Concluída',
-        concluido_em: new Date().toISOString(),
-        feedback_texto: textoFeedback.trim(),
-        feedback_em: new Date().toISOString(),
-      }).eq('id', tarefaAberta.id);
-      
-      if (textoFeedback.trim()) {
-        const feedbackId = 'FB-' + Math.random().toString(36).substring(2, 10).toUpperCase();
-        await supabase.from('feedbacks').insert({
-          feedback_id: feedbackId,
-          id_tarefa: tarefaAberta.id_tarefa,
-          id_groot: tarefaAberta.id_groot,
-          nome: tarefaAberta.nome,
-          processo: tarefaAberta.processo,
-          tipo: tarefaAberta.tipo,
-          observacao: textoFeedback.trim(),
-          responsavel: 'delman.jpereira@mercadolivre.com',
-          classificacao: tarefaAberta.prioridade === 'critica' ? 'Abaixo' : 'Alinhado',
-        });
-      }
-      
-      if (typeof window !== 'undefined' && (window as any).showToast) {
-        (window as any).showToast('success', '✅ Tarefa concluída!');
-      }
-      fecharTarefa();
-      await carregarDados();
-    } catch (e: any) {
-      alert('Erro: ' + e.message);
-    } finally {
-      setSalvandoFeedback(false);
-    }
+  // 🆕 Quando clica em "Concluir com IA"
+  function abrirFinalizacao(t: TarefaCopiloto) {
+    setTarefaAberta(null); // fecha o modal de detalhes
+    setTarefaParaFinalizar(t); // abre o modal de finalização
   }
-
+  
+  // 🆕 Quando finaliza com aprendizado
+  async function onFinalizacaoCompleta() {
+    setTarefaParaFinalizar(null);
+    if (typeof window !== 'undefined' && (window as any).showToast) {
+      (window as any).showToast('success', '🧠 Tarefa finalizada! A IA aprendeu com sua ação.');
+    }
+    await carregarDados();
+  }
+  
   return (
     <div className="space-y-6">
-      {/* HEADER COM INDICADOR DE IA VIVA */}
+      {/* HEADER */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-4xl font-black mb-2">
@@ -347,6 +363,9 @@ export default function CopilotoPage() {
                 <span className="inline-block w-2 h-2 rounded-full bg-green-400"></span>
                 <span className="text-green-400">Análise viva</span>
                 <span className="text-gray-500">· sincronizado {tempoRelativo(ultimaAnalise.toISOString())}</span>
+                {resumoAnalise?.aprendizado_usado && (
+                  <span className="text-purple-400 text-xs">· 🧠 com aprendizado</span>
+                )}
               </>
             ) : loading ? (
               <>
@@ -362,46 +381,14 @@ export default function CopilotoPage() {
           </div>
         </div>
       </div>
-
-      {/* RESUMO DA ANÁLISE */}
-      {resumoAnalise && !loading && (
-        <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
-          <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-            📊 Resumo da Análise · {resumoAnalise.quarter}
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="bg-[#0a0a0a] rounded-lg p-3 border border-[#2a2a2a]">
-              <p className="text-2xl font-black text-white">{resumoAnalise.totalAtivos}</p>
-              <p className="text-[10px] text-gray-500 uppercase">Ativos</p>
-            </div>
-            <div className="bg-red-500/10 rounded-lg p-3 border border-red-500/30">
-              <p className="text-2xl font-black text-red-300">{resumoAnalise.ofensoresCriticos || 0}</p>
-              <p className="text-[10px] text-red-400 uppercase">Ofensores Críticos</p>
-            </div>
-            <div className="bg-orange-500/10 rounded-lg p-3 border border-orange-500/30">
-              <p className="text-2xl font-black text-orange-300">{resumoAnalise.janelasIminentes || 0}</p>
-              <p className="text-[10px] text-orange-400 uppercase">Promoções Iminentes</p>
-            </div>
-            <div className="bg-rose-500/10 rounded-lg p-3 border border-rose-500/30">
-              <p className="text-2xl font-black text-rose-300">{resumoAnalise.janelasPrejudicadas || 0}</p>
-              <p className="text-[10px] text-rose-400 uppercase">Janelas Quebradas</p>
-            </div>
-            <div className="bg-yellow-500/10 rounded-lg p-3 border border-yellow-500/30">
-              <p className="text-2xl font-black text-yellow-300">{resumoAnalise.aptosPerpetuos || 0}</p>
-              <p className="text-[10px] text-yellow-400 uppercase">Aptos Aguardando</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 🎯 3 COLUNAS — MONITORAMENTO OPERACIONAL */}
+      
+      {/* 🎯 3 COLUNAS — MONITORAMENTO (DIÁRIO + MENSAL) */}
       {!loading && colaboradores.length > 0 && (
         <div>
           <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
             📊 Monitoramento Operacional
-            <span className="text-xs text-gray-500 font-normal">(último status)</span>
+            <span className="text-xs text-gray-500 font-normal">(último status · diário + mensal)</span>
           </h2>
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* OFENSORES */}
             <div className="bg-red-500/5 border border-red-500/30 rounded-2xl overflow-hidden">
@@ -425,9 +412,14 @@ export default function CopilotoPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-white truncate">{o.nome}</p>
-                          <p className="text-xs text-gray-500">{o.processo} • {o.ultimaLiquida} pç/h</p>
+                          <p className="text-xs text-gray-500">
+                            {o.processo} • {o.ultimaLiquida} pç/h
+                            {o.fonte === 'mensal' && (
+                              <span className="ml-1 text-cyan-400">· mensal ({o.diasMes}d)</span>
+                            )}
+                          </p>
                         </div>
-                        {o.diasAbaixo >= 3 && (
+                        {o.fonte === 'diario' && o.diasAbaixo >= 3 && (
                           <span className="text-xs px-2 py-0.5 bg-red-500/30 text-red-300 rounded-full font-bold">
                             {o.diasAbaixo}d
                           </span>
@@ -438,7 +430,6 @@ export default function CopilotoPage() {
                 )}
               </div>
             </div>
-
             {/* ALINHADOS */}
             <div className="bg-blue-500/5 border border-blue-500/30 rounded-2xl overflow-hidden">
               <div className="bg-blue-500/20 px-4 py-3 border-b border-blue-500/30 flex items-center justify-between">
@@ -461,20 +452,26 @@ export default function CopilotoPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-white truncate">{a.nome}</p>
-                          <p className="text-xs text-gray-500">{a.processo} • {a.ultimaLiquida} pç/h</p>
+                          <p className="text-xs text-gray-500">
+                            {a.processo} • {a.ultimaLiquida} pç/h
+                            {a.fonte === 'mensal' && (
+                              <span className="ml-1 text-cyan-400">· mensal ({a.diasMes}d)</span>
+                            )}
+                          </p>
                         </div>
-                        <span className={`text-xs font-mono font-bold ${
-                          a.ultimoImpacto > 0 ? 'text-green-400' : 'text-red-400'
-                        }`}>
-                          {a.ultimoImpacto > 0 ? '+' : ''}{a.ultimoImpacto.toFixed(1)}%
-                        </span>
+                        {a.fonte === 'diario' && (
+                          <span className={`text-xs font-mono font-bold ${
+                            a.ultimoImpacto > 0 ? 'text-green-400' : 'text-red-400'
+                          }`}>
+                            {a.ultimoImpacto > 0 ? '+' : ''}{a.ultimoImpacto.toFixed(1)}%
+                          </span>
+                        )}
                       </div>
                     </Link>
                   ))
                 )}
               </div>
             </div>
-
             {/* SUPERAS */}
             <div className="bg-green-500/5 border border-green-500/30 rounded-2xl overflow-hidden">
               <div className="bg-green-500/20 px-4 py-3 border-b border-green-500/30 flex items-center justify-between">
@@ -497,11 +494,18 @@ export default function CopilotoPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-white truncate">{s.nome}</p>
-                          <p className="text-xs text-gray-500">{s.processo} • {s.ultimaLiquida} pç/h</p>
+                          <p className="text-xs text-gray-500">
+                            {s.processo} • {s.ultimaLiquida} pç/h
+                            {s.fonte === 'mensal' && (
+                              <span className="ml-1 text-cyan-400">· mensal ({s.diasMes}d)</span>
+                            )}
+                          </p>
                         </div>
-                        <span className="text-xs font-mono font-bold text-green-400">
-                          +{s.ultimoImpacto.toFixed(1)}%
-                        </span>
+                        {s.fonte === 'diario' && (
+                          <span className="text-xs font-mono font-bold text-green-400">
+                            +{s.ultimoImpacto.toFixed(1)}%
+                          </span>
+                        )}
                       </div>
                     </Link>
                   ))
@@ -511,7 +515,6 @@ export default function CopilotoPage() {
           </div>
         </div>
       )}
-
       {/* TAREFAS DA IA */}
       <div>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
@@ -520,7 +523,6 @@ export default function CopilotoPage() {
             <span className="text-xs text-gray-500 font-normal">(geradas pela IA)</span>
           </h2>
           
-          {/* Filtros */}
           {tarefas.length > 0 && (
             <div className="flex gap-2 flex-wrap">
               <button
@@ -554,7 +556,6 @@ export default function CopilotoPage() {
             </div>
           )}
         </div>
-
         {loading || analisando ? (
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-12 text-center">
             <span className="text-5xl block mb-3 animate-pulse">🧠</span>
@@ -617,7 +618,7 @@ export default function CopilotoPage() {
                       <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#2a2a2a]">
                         <span className="text-xs text-gray-500">{tempoRelativo(t.criado_em)}</span>
                         <span className="text-xs text-[#FFD700] font-bold">
-                          {t.feedback_obrigatorio ? '🔒 Feedback obrigatório →' : 'Ver detalhes →'}
+                          Ver detalhes →
                         </span>
                       </div>
                     </div>
@@ -628,8 +629,8 @@ export default function CopilotoPage() {
           </div>
         )}
       </div>
-
-      {/* MODAL DE FEEDBACK */}
+      
+      {/* MODAL DE DETALHES (apenas leitura + botão pra finalizar) */}
       {tarefaAberta && (
         <div className="fixed inset-0 z-[9000] flex items-end md:items-center justify-center p-0 md:p-4 bg-black/80 backdrop-blur-sm" onClick={fecharTarefa}>
           <div onClick={(e) => e.stopPropagation()} className="bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border-2 border-[#FFD700]/30 rounded-t-3xl md:rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -653,25 +654,25 @@ export default function CopilotoPage() {
               {tarefaAberta.diagnostico && (
                 <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-2xl p-4">
                   <p className="text-xs text-gray-400 uppercase font-bold mb-2">📊 Diagnóstico</p>
-                  <p className="text-sm text-gray-200 leading-relaxed">{tarefaAberta.diagnostico}</p>
+                  <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-line">{tarefaAberta.diagnostico}</p>
                 </div>
               )}
               {tarefaAberta.analise_ia && (
                 <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 rounded-2xl p-4">
-                  <p className="text-xs text-purple-300 uppercase font-bold mb-2">🧠 Análise Inovadora da IA</p>
-                  <p className="text-sm text-gray-200 leading-relaxed">{tarefaAberta.analise_ia}</p>
+                  <p className="text-xs text-purple-300 uppercase font-bold mb-2">🧠 Análise da IA</p>
+                  <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-line">{tarefaAberta.analise_ia}</p>
                 </div>
               )}
               {tarefaAberta.hipotese && (
                 <div className="bg-yellow-500/5 border border-yellow-500/30 rounded-2xl p-4">
                   <p className="text-xs text-yellow-300 uppercase font-bold mb-2">💡 Hipótese</p>
-                  <p className="text-sm text-gray-200 leading-relaxed">{tarefaAberta.hipotese}</p>
+                  <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-line">{tarefaAberta.hipotese}</p>
                 </div>
               )}
               {tarefaAberta.motivo && (
                 <div className="bg-[#FFD700]/10 border border-[#FFD700]/30 rounded-2xl p-4">
                   <p className="text-xs text-[#FFD700] uppercase font-bold mb-2">🎯 Ação Sugerida</p>
-                  <p className="text-sm text-white font-bold leading-relaxed">{tarefaAberta.motivo}</p>
+                  <p className="text-sm text-white font-bold leading-relaxed whitespace-pre-line">{tarefaAberta.motivo}</p>
                 </div>
               )}
               
@@ -684,41 +685,30 @@ export default function CopilotoPage() {
                   </Link>
                 );
               })()}
-              
-              <div className="bg-[#0a0a0a] border-2 border-[#FFD700]/40 rounded-2xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-[#FFD700] uppercase font-bold flex items-center gap-2">
-                    ✍️ Feedback do Líder
-                    {tarefaAberta.feedback_obrigatorio && (
-                      <span className="bg-red-500/20 text-red-300 px-2 py-0.5 rounded-full text-[10px]">OBRIGATÓRIO</span>
-                    )}
-                  </p>
-                  <span className="text-xs text-gray-500">{textoFeedback.length} chars</span>
-                </div>
-                <textarea
-                  value={textoFeedback}
-                  onChange={(e) => setTextoFeedback(e.target.value)}
-                  placeholder={tarefaAberta.feedback_obrigatorio ? 'Escreva o feedback... (mín. 10 chars)' : 'Anotações (opcional)...'}
-                  rows={5}
-                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] focus:border-[#FFD700] rounded-xl px-4 py-3 text-white text-sm outline-none transition-colors resize-none"
-                />
-              </div>
             </div>
             
             <div className="sticky bottom-0 bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border-t border-[#2a2a2a] p-5 flex gap-3">
-              <button onClick={fecharTarefa} disabled={salvandoFeedback} className="flex-1 bg-[#2a2a2a] hover:bg-[#3a3a3a] text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50">
+              <button onClick={fecharTarefa} className="flex-1 bg-[#2a2a2a] hover:bg-[#3a3a3a] text-white font-bold py-3 rounded-xl transition-all">
                 Fechar
               </button>
               <button
-                onClick={concluirTarefa}
-                disabled={salvandoFeedback || (tarefaAberta.feedback_obrigatorio && textoFeedback.trim().length < 10)}
-                className="flex-1 bg-gradient-to-br from-green-500 to-emerald-600 hover:from-green-400 text-white font-black py-3 rounded-xl shadow-lg shadow-green-500/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                onClick={() => abrirFinalizacao(tarefaAberta)}
+                className="flex-1 bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-black py-3 rounded-xl shadow-lg shadow-purple-500/30 transition-all"
               >
-                {salvandoFeedback ? '⏳' : '✅ Concluir'}
+                🧠 Finalizar com IA
               </button>
             </div>
           </div>
         </div>
+      )}
+      
+      {/* 🆕 MODAL DE FINALIZAÇÃO COM APRENDIZADO */}
+      {tarefaParaFinalizar && (
+        <FinalizarTarefaModal
+          tarefa={tarefaParaFinalizar}
+          onClose={() => setTarefaParaFinalizar(null)}
+          onFinalizar={onFinalizacaoCompleta}
+        />
       )}
     </div>
   );
