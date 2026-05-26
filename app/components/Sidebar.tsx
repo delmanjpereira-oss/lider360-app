@@ -1,19 +1,15 @@
 'use client';
-
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-
 // ============================================
 // MENU ORGANIZADO POR GRUPOS
-// Mantra ABS REMOVIDO
-// Início acessível via logo (sem item no menu)
+// Available Time REMOVIDO
 // ============================================
 const menuGroups = [
   {
     titulo: 'Operação Diária',
     items: [
       { icon: '🧮', label: 'Calculadora NET', path: '/calculadora' },
-      { icon: '⏱️', label: 'Available Time', path: '/available-time' },
       { icon: '📋', label: 'Lista de Presença', path: '/presenca' },
     ],
   },
@@ -38,10 +34,8 @@ const menuGroups = [
     ],
   },
 ];
-
 export default function Sidebar() {
   const pathname = usePathname();
-
   return (
     <aside className="w-64 min-h-screen bg-[#0f0f0f] border-r border-[#2a2a2a] flex flex-col">
       {/* Logo - clicável vai pra Início */}
@@ -56,7 +50,6 @@ export default function Sidebar() {
           </div>
         </div>
       </Link>
-
       {/* Menu agrupado */}
       <nav className="flex-1 p-4 overflow-y-auto">
         {menuGroups.map((grupo, idx) => (
@@ -86,7 +79,6 @@ export default function Sidebar() {
           </div>
         ))}
       </nav>
-
       {/* Footer */}
       <div className="p-4 border-t border-[#2a2a2a]">
         <div className="bg-gradient-to-br from-[#FFD700]/10 to-yellow-600/5 border border-[#FFD700]/20 rounded-xl p-3">
