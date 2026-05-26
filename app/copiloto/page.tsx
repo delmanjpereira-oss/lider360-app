@@ -50,6 +50,12 @@ type ProdutividadeMensalLinha = {
   unidades_total: number;
   dias_trabalhados: number;
 };
+type MetasConfig = {
+  checkinBase: number;
+  checkinAlinhadoMax: number;
+  p2mBase: number;
+  p2mAlinhadoMax: number;
+};
 type MonitorItem = {
   idGroot: string;
   id: number;
@@ -126,18 +132,23 @@ const SUGESTOES_CHAT = [
 export default function CopilotoPage() {
   const [abaAtiva, setAbaAtiva] = useState<Aba>('tarefas');
   
-  // Estados compartilhados
+  // Estados
   const [tarefas, setTarefas] = useState<TarefaCopiloto[]>([]);
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoSimples[]>([]);
   const [produtividadeMensal, setProdutividadeMensal] = useState<ProdutividadeMensalLinha[]>([]);
+  const [metasConfig, setMetasConfig] = useState<MetasConfig>({
+    checkinBase: 296,
+    checkinAlinhadoMax: 308,
+    p2mBase: 329,
+    p2mAlinhadoMax: 350,
+  });
   const [loading, setLoading] = useState(true);
   const [analisando, setAnalisando] = useState(false);
   const [ultimaAnalise, setUltimaAnalise] = useState<Date | null>(null);
   const [resumoAnalise, setResumoAnalise] = useState<any>(null);
   const [filtroPrioridade, setFiltroPrioridade] = useState<'todas' | 'critica' | 'alta'>('todas');
   
-  // Tarefas
   const [tarefaAberta, setTarefaAberta] = useState<TarefaCopiloto | null>(null);
   const [tarefaParaFinalizar, setTarefaParaFinalizar] = useState<TarefaCopiloto | null>(null);
   
@@ -155,17 +166,18 @@ export default function CopilotoPage() {
   const [, forceUpdate] = useState({});
   
   // ============================================
-  // CARREGAR DADOS
+  // CARREGAR DADOS (agora com config!)
   // ============================================
   
   const carregarDados = useCallback(async () => {
     try {
-      const [tarsResp, colabsResp, histResp, mensalResp, finalizadas] = await Promise.all([
+      const [tarsResp, colabsResp, histResp, mensalResp, finalizadas, configResp] = await Promise.all([
         supabase.from('tarefas').select('*').eq('status', 'Pendente').order('criado_em', { ascending: false }),
         supabase.from('colaboradores').select('id, id_groot, nome, processo, status').eq('status', 'Ativo'),
         supabase.from('historico').select('id_groot, data_referencia, prod_liquida, status_meta, impacto_net').order('data_referencia', { ascending: false }),
         supabase.from('produtividade_mensal').select('id_groot, mes, ano, processo, prod_liquida_media, unidades_total, dias_trabalhados').order('ano', { ascending: false }).order('mes', { ascending: false }),
         supabase.from('tarefas').select('*').eq('status', 'Finalizada').not('classificacao_aprendizado', 'is', null).order('finalizada_em', { ascending: false }).limit(30),
+        supabase.from('config').select('chave, valor'),
       ]);
       
       if (tarsResp.data) setTarefas(tarsResp.data as any);
@@ -173,6 +185,24 @@ export default function CopilotoPage() {
       if (histResp.data) setHistorico(histResp.data as any);
       if (mensalResp.data) setProdutividadeMensal(mensalResp.data as any);
       if (finalizadas.data) setTarefasFinalizadas(finalizadas.data as any);
+      
+      // 🆕 Lê metas REAIS do config
+      if (configResp.data) {
+        const map: Record<string, number> = {};
+        configResp.data.forEach((c: any) => {
+          map[c.chave] = Number(c.valor) || 0;
+        });
+        setMetasConfig({
+          checkinBase: map.meta_checkin_base || 296,
+          checkinAlinhadoMax: map.meta_checkin_alinhado_max || 308,
+          p2mBase: map.meta_p2m_base || 329,
+          p2mAlinhadoMax: map.meta_p2m_alinhado_max || 350,
+        });
+        console.log('📊 Metas carregadas:', {
+          P2M: `${map.meta_p2m_base}-${map.meta_p2m_alinhado_max}`,
+          Checkin: `${map.meta_checkin_base}-${map.meta_checkin_alinhado_max}`,
+        });
+      }
     } catch (e) {
       console.error('Erro carregando:', e);
     }
@@ -217,7 +247,6 @@ export default function CopilotoPage() {
     return () => clearInterval(interval);
   }, [carregarDados]);
   
-  // Scroll automático do chat
   useEffect(() => {
     if (chatRef.current) {
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
@@ -225,7 +254,7 @@ export default function CopilotoPage() {
   }, [chatMensagens]);
   
   // ============================================
-  // 3 COLUNAS - DIÁRIO + MENSAL
+  // 🎯 LÓGICA CORRIGIDA - usa metas reais
   // ============================================
   
   function calcularStreak(idGroot: string): number {
@@ -240,15 +269,27 @@ export default function CopilotoPage() {
     return streak;
   }
   
-  function determinarStatusMensal(liquida: number, processo: string): string {
-    const metaP2M = 280;
-    const metaCheckin = 100;
-    const meta = processo === 'P2M' ? metaP2M : processo === 'Checkin' ? metaCheckin : 0;
-    if (meta === 0) return 'Alinhado';
-    const pctMeta = (liquida / meta) * 100;
-    if (pctMeta >= 105) return 'Supera';
-    if (pctMeta >= 95) return 'Alinhado';
-    return 'Abaixo';
+  // 🆕 FUNÇÃO CORRIGIDA - usa as 2 metas (base e max)
+  function determinarStatusPorMeta(liquida: number, processo: string): string {
+    if (liquida === 0) return 'Sem dados';
+    
+    let base = 0;
+    let alinhadoMax = 0;
+    
+    if (processo === 'P2M') {
+      base = metasConfig.p2mBase;
+      alinhadoMax = metasConfig.p2mAlinhadoMax;
+    } else if (processo === 'Checkin') {
+      base = metasConfig.checkinBase;
+      alinhadoMax = metasConfig.checkinAlinhadoMax;
+    } else {
+      // Sorting ou outros
+      return 'Alinhado';
+    }
+    
+    if (liquida < base) return 'Abaixo';
+    if (liquida >= base && liquida <= alinhadoMax) return 'Alinhado';
+    return 'Supera'; // > alinhadoMax
   }
   
   const ultimoStatusPorId: Record<string, HistoricoSimples> = {};
@@ -274,23 +315,42 @@ export default function CopilotoPage() {
     const mensal = mensalPorId[c.id_groot];
     
     if (ultimoDiario) {
+      // 🆕 USA A FUNÇÃO CORRIGIDA EM VEZ DE CONFIAR NO status_meta
+      const liquida = Number(ultimoDiario.prod_liquida) || 0;
+      const status = determinarStatusPorMeta(liquida, c.processo || '');
+      
       const item: MonitorItem = {
-        idGroot: c.id_groot, id: c.id, nome: c.nome, processo: c.processo || '-',
-        ultimoStatus: ultimoDiario.status_meta, ultimaLiquida: ultimoDiario.prod_liquida,
-        ultimoImpacto: ultimoDiario.impacto_net, diasAbaixo: calcularStreak(c.id_groot),
+        idGroot: c.id_groot, 
+        id: c.id, 
+        nome: c.nome, 
+        processo: c.processo || '-',
+        ultimoStatus: status, 
+        ultimaLiquida: liquida,
+        ultimoImpacto: ultimoDiario.impacto_net, 
+        diasAbaixo: calcularStreak(c.id_groot),
         fonte: 'diario',
       };
-      if (ultimoDiario.status_meta === 'Abaixo') monitor.ofensores.push(item);
-      else if (ultimoDiario.status_meta === 'Alinhado') monitor.alinhados.push(item);
-      else if (ultimoDiario.status_meta === 'Supera') monitor.superas.push(item);
+      
+      if (status === 'Abaixo') monitor.ofensores.push(item);
+      else if (status === 'Alinhado') monitor.alinhados.push(item);
+      else if (status === 'Supera') monitor.superas.push(item);
     } else if (mensal) {
       const liquida = Number(mensal.prod_liquida_media) || 0;
-      const status = determinarStatusMensal(liquida, c.processo || '');
+      const status = determinarStatusPorMeta(liquida, c.processo || '');
+      
       const item: MonitorItem = {
-        idGroot: c.id_groot, id: c.id, nome: c.nome, processo: c.processo || '-',
-        ultimoStatus: status, ultimaLiquida: liquida, ultimoImpacto: 0,
-        diasAbaixo: 0, fonte: 'mensal', diasMes: mensal.dias_trabalhados,
+        idGroot: c.id_groot, 
+        id: c.id, 
+        nome: c.nome, 
+        processo: c.processo || '-',
+        ultimoStatus: status, 
+        ultimaLiquida: liquida, 
+        ultimoImpacto: 0,
+        diasAbaixo: 0, 
+        fonte: 'mensal', 
+        diasMes: mensal.dias_trabalhados,
       };
+      
       if (status === 'Abaixo') monitor.ofensores.push(item);
       else if (status === 'Alinhado') monitor.alinhados.push(item);
       else if (status === 'Supera') monitor.superas.push(item);
@@ -324,18 +384,13 @@ export default function CopilotoPage() {
     
     setChatInput('');
     setChatEnviando(true);
-    
-    // Adiciona mensagem do usuário no UI
     setChatMensagens(prev => [...prev, { papel: 'user', conteudo: mensagem }]);
     
     try {
       const resp = await fetch('/api/ia/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mensagem,
-          id_conversa: conversaAtual || undefined,
-        }),
+        body: JSON.stringify({ mensagem, id_conversa: conversaAtual || undefined }),
       });
       
       const data = await resp.json();
@@ -344,16 +399,10 @@ export default function CopilotoPage() {
         if (!conversaAtual) setConversaAtual(data.id_conversa);
         setChatMensagens(prev => [...prev, { papel: 'assistant', conteudo: data.resposta }]);
       } else {
-        setChatMensagens(prev => [...prev, { 
-          papel: 'assistant', 
-          conteudo: `❌ Erro: ${data.erro || 'Falha ao processar'}` 
-        }]);
+        setChatMensagens(prev => [...prev, { papel: 'assistant', conteudo: `❌ Erro: ${data.erro || 'Falha'}` }]);
       }
     } catch (e: any) {
-      setChatMensagens(prev => [...prev, { 
-        papel: 'assistant', 
-        conteudo: `❌ Erro: ${e.message}` 
-      }]);
+      setChatMensagens(prev => [...prev, { papel: 'assistant', conteudo: `❌ Erro: ${e.message}` }]);
     } finally {
       setChatEnviando(false);
     }
@@ -366,29 +415,20 @@ export default function CopilotoPage() {
   }
   
   // ============================================
-  // APRENDIZADO STATS
+  // APRENDIZADO
   // ============================================
   
   const aprendizadoStats = (() => {
     if (tarefasFinalizadas.length === 0) return null;
-    
     const sucessos = tarefasFinalizadas.filter(t => 
-      t.classificacao_aprendizado === 'sucesso_confirmado' || 
-      t.classificacao_aprendizado === 'abordagem_funcionou'
+      t.classificacao_aprendizado === 'sucesso_confirmado' || t.classificacao_aprendizado === 'abordagem_funcionou'
     ).length;
     const falhas = tarefasFinalizadas.filter(t => 
-      t.classificacao_aprendizado === 'falha_confirmada' || 
-      t.classificacao_aprendizado === 'abordagem_falhou'
+      t.classificacao_aprendizado === 'falha_confirmada' || t.classificacao_aprendizado === 'abordagem_falhou'
     ).length;
-    const neutros = tarefasFinalizadas.filter(t => 
-      t.classificacao_aprendizado === 'efeito_neutro'
-    ).length;
+    const neutros = tarefasFinalizadas.filter(t => t.classificacao_aprendizado === 'efeito_neutro').length;
+    const taxaSucesso = (sucessos + falhas) > 0 ? Math.round((sucessos / (sucessos + falhas)) * 100) : 0;
     
-    const taxaSucesso = (sucessos + falhas) > 0 
-      ? Math.round((sucessos / (sucessos + falhas)) * 100)
-      : 0;
-    
-    // Por tipo
     const porTipo: Record<string, { sucesso: number; falha: number }> = {};
     tarefasFinalizadas.forEach(t => {
       if (!t.tipo) return;
@@ -400,57 +440,27 @@ export default function CopilotoPage() {
       }
     });
     
-    const tiposRanking = Object.entries(porTipo)
-      .map(([tipo, vals]) => ({
-        tipo,
-        sucesso: vals.sucesso,
-        falha: vals.falha,
-        total: vals.sucesso + vals.falha,
-        taxa: (vals.sucesso + vals.falha) > 0 ? Math.round((vals.sucesso / (vals.sucesso + vals.falha)) * 100) : 0,
-      }))
-      .sort((a, b) => b.taxa - a.taxa);
+    const tiposRanking = Object.entries(porTipo).map(([tipo, vals]) => ({
+      tipo, sucesso: vals.sucesso, falha: vals.falha, total: vals.sucesso + vals.falha,
+      taxa: (vals.sucesso + vals.falha) > 0 ? Math.round((vals.sucesso / (vals.sucesso + vals.falha)) * 100) : 0,
+    })).sort((a, b) => b.taxa - a.taxa);
     
-    return {
-      total: tarefasFinalizadas.length,
-      sucessos, falhas, neutros, taxaSucesso,
-      tiposRanking,
-    };
+    return { total: tarefasFinalizadas.length, sucessos, falhas, neutros, taxaSucesso, tiposRanking };
   })();
   
-  // ============================================
-  // TIME HEALTH (saúde sistêmica)
-  // ============================================
-  
-  const timeHealth = (() => {
-    const totalColabs = colaboradores.length;
-    if (totalColabs === 0) return null;
-    
-    const semFeedback90d: string[] = [];
-    const zeroReconhecimentos: string[] = [];
-    
-    // Para cada colab, contagem básica
-    // (vamos puxar dados leves aqui - o resumo já vem do resumoAnalise)
-    
-    return {
-      totalColabs,
-      ofensores: monitor.ofensores.length,
-      alinhados: monitor.alinhados.length,
-      superas: monitor.superas.length,
-    };
-  })();
-  
-  // ============================================
-  // MODAL
-  // ============================================
+  const timeHealth = colaboradores.length > 0 ? {
+    totalColabs: colaboradores.length,
+    ofensores: monitor.ofensores.length,
+    alinhados: monitor.alinhados.length,
+    superas: monitor.superas.length,
+  } : null;
   
   function abrirTarefa(t: TarefaCopiloto) { setTarefaAberta(t); }
   function fecharTarefa() { setTarefaAberta(null); }
-  
   function abrirFinalizacao(t: TarefaCopiloto) {
     setTarefaAberta(null);
     setTarefaParaFinalizar(t);
   }
-  
   async function onFinalizacaoCompleta() {
     setTarefaParaFinalizar(null);
     if (typeof window !== 'undefined' && (window as any).showToast) {
@@ -512,9 +522,7 @@ export default function CopilotoPage() {
                 key={tab.key}
                 onClick={() => setAbaAtiva(tab.key)}
                 className={`px-4 py-3 font-bold text-sm transition-all border-b-2 ${
-                  ativo
-                    ? 'border-[#FFD700] text-[#FFD700]'
-                    : 'border-transparent text-gray-400 hover:text-white'
+                  ativo ? 'border-[#FFD700] text-[#FFD700]' : 'border-transparent text-gray-400 hover:text-white'
                 }`}
               >
                 {tab.label}
@@ -536,12 +544,13 @@ export default function CopilotoPage() {
       {/* ============================================ */}
       {abaAtiva === 'tarefas' && (
         <div className="space-y-6">
-          {/* 3 COLUNAS */}
           {!loading && colaboradores.length > 0 && (
             <div>
               <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                 📊 Monitoramento Operacional
-                <span className="text-xs text-gray-500 font-normal">(diário + mensal)</span>
+                <span className="text-xs text-gray-500 font-normal">
+                  · P2M {metasConfig.p2mBase}-{metasConfig.p2mAlinhadoMax} · Checkin {metasConfig.checkinBase}-{metasConfig.checkinAlinhadoMax}
+                </span>
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* OFENSORES */}
@@ -725,12 +734,9 @@ export default function CopilotoPage() {
         </div>
       )}
       
-      {/* ============================================ */}
       {/* ABA: CHAT */}
-      {/* ============================================ */}
       {abaAtiva === 'chat' && (
         <div className="bg-[#0f0f0f] border border-[#2a2a2a] rounded-2xl overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}>
-          {/* Header do chat */}
           <div className="bg-[#1a1a1a] border-b border-[#2a2a2a] px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-2xl">🤖</span>
@@ -740,34 +746,24 @@ export default function CopilotoPage() {
               </div>
             </div>
             {chatMensagens.length > 0 && (
-              <button onClick={novaConversa} className="text-xs text-purple-400 hover:text-purple-300 font-bold">
-                + Nova conversa
-              </button>
+              <button onClick={novaConversa} className="text-xs text-purple-400 hover:text-purple-300 font-bold">+ Nova conversa</button>
             )}
           </div>
           
-          {/* Mensagens */}
           <div ref={chatRef} className="flex-1 overflow-y-auto p-5 space-y-4">
             {chatMensagens.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center space-y-4">
                 <span className="text-6xl">💬</span>
                 <div>
                   <h3 className="text-xl font-bold text-white mb-2">Pergunte qualquer coisa</h3>
-                  <p className="text-sm text-gray-400 max-w-md">
-                    Eu sei tudo sobre o seu time. Performance, padrões, oportunidades, riscos.
-                  </p>
+                  <p className="text-sm text-gray-400 max-w-md">Eu sei tudo sobre o seu time. Performance, padrões, oportunidades, riscos.</p>
                 </div>
-                
                 <div className="w-full max-w-2xl space-y-2 mt-6">
                   <p className="text-xs text-gray-500 uppercase font-bold">Sugestões:</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {SUGESTOES_CHAT.map((sug, i) => (
-                      <button
-                        key={i}
-                        onClick={() => enviarMensagem(sug.replace(/^.{2}\s/, ''))}
-                        disabled={chatEnviando}
-                        className="bg-[#1a1a1a] hover:bg-[#2a2a2a] border border-[#2a2a2a] hover:border-purple-500/30 rounded-lg p-3 text-left text-sm text-gray-300 transition-all disabled:opacity-50"
-                      >
+                      <button key={i} onClick={() => enviarMensagem(sug.replace(/^.{2}\s/, ''))} disabled={chatEnviando}
+                        className="bg-[#1a1a1a] hover:bg-[#2a2a2a] border border-[#2a2a2a] hover:border-purple-500/30 rounded-lg p-3 text-left text-sm text-gray-300 transition-all disabled:opacity-50">
                         {sug}
                       </button>
                     ))}
@@ -778,30 +774,22 @@ export default function CopilotoPage() {
               <>
                 {chatMensagens.map((msg, i) => (
                   <div key={i} className={`flex ${msg.papel === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] rounded-2xl p-4 ${
-                      msg.papel === 'user'
-                        ? 'bg-[#FFD700] text-black'
-                        : 'bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 text-gray-100'
-                    }`}>
+                    <div className={`max-w-[85%] rounded-2xl p-4 ${msg.papel === 'user' ? 'bg-[#FFD700] text-black' : 'bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 text-gray-100'}`}>
                       {msg.papel === 'assistant' && (
                         <div className="flex items-center gap-2 mb-2">
                           <span className="text-lg">🤖</span>
                           <span className="text-xs font-bold text-purple-300">Estratega</span>
                         </div>
                       )}
-                      <div 
-                        className="text-sm leading-relaxed whitespace-pre-wrap"
-                        dangerouslySetInnerHTML={{
-                          __html: msg.conteudo
-                            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/^### (.+)$/gm, '<h3 class="font-bold text-base mt-3 mb-1 text-purple-300">$1</h3>')
-                            .replace(/^- (.+)$/gm, '• $1')
-                        }}
-                      />
+                      <div className="text-sm leading-relaxed whitespace-pre-wrap" dangerouslySetInnerHTML={{
+                        __html: msg.conteudo
+                          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                          .replace(/^### (.+)$/gm, '<h3 class="font-bold text-base mt-3 mb-1 text-purple-300">$1</h3>')
+                          .replace(/^- (.+)$/gm, '• $1')
+                      }} />
                     </div>
                   </div>
                 ))}
-                
                 {chatEnviando && (
                   <div className="flex justify-start">
                     <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 rounded-2xl p-4">
@@ -816,23 +804,14 @@ export default function CopilotoPage() {
             )}
           </div>
           
-          {/* Input */}
           <div className="border-t border-[#2a2a2a] bg-[#1a1a1a] p-4">
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
+              <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && enviarMensagem()}
-                placeholder="Pergunte sobre o seu time..."
-                disabled={chatEnviando}
-                className="flex-1 bg-[#0a0a0a] border border-[#2a2a2a] focus:border-purple-500/60 rounded-xl px-4 py-3 text-white text-sm outline-none disabled:opacity-50"
-              />
-              <button
-                onClick={() => enviarMensagem()}
-                disabled={chatEnviando || !chatInput.trim()}
-                className="bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-bold px-5 rounded-xl disabled:opacity-30 transition-all"
-              >
+                placeholder="Pergunte sobre o seu time..." disabled={chatEnviando}
+                className="flex-1 bg-[#0a0a0a] border border-[#2a2a2a] focus:border-purple-500/60 rounded-xl px-4 py-3 text-white text-sm outline-none disabled:opacity-50" />
+              <button onClick={() => enviarMensagem()} disabled={chatEnviando || !chatInput.trim()}
+                className="bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-bold px-5 rounded-xl disabled:opacity-30 transition-all">
                 {chatEnviando ? '⏳' : 'Enviar'}
               </button>
             </div>
@@ -840,29 +819,18 @@ export default function CopilotoPage() {
         </div>
       )}
       
-      {/* ============================================ */}
       {/* ABA: APRENDIZADO */}
-      {/* ============================================ */}
       {abaAtiva === 'aprendizado' && (
         <div className="space-y-6">
           {!aprendizadoStats ? (
             <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center">
               <span className="text-6xl block mb-4">🧠</span>
               <h3 className="text-xl font-bold text-white mb-2">IA ainda não tem aprendizado</h3>
-              <p className="text-sm text-gray-400 mb-4">
-                A IA precisa que você finalize tarefas e marque o resultado.<br/>
-                Quanto mais feedback você der, mais inteligente ela fica.
-              </p>
-              <button
-                onClick={() => setAbaAtiva('tarefas')}
-                className="bg-[#FFD700] text-black font-bold px-6 py-2 rounded-lg hover:bg-yellow-300 transition-all text-sm"
-              >
-                → Ir pras tarefas
-              </button>
+              <p className="text-sm text-gray-400 mb-4">A IA precisa que você finalize tarefas e marque o resultado.<br/>Quanto mais feedback você der, mais inteligente ela fica.</p>
+              <button onClick={() => setAbaAtiva('tarefas')} className="bg-[#FFD700] text-black font-bold px-6 py-2 rounded-lg hover:bg-yellow-300 transition-all text-sm">→ Ir pras tarefas</button>
             </div>
           ) : (
             <>
-              {/* Stats gerais */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4 text-center">
                   <p className="text-3xl font-black text-white">{aprendizadoStats.total}</p>
@@ -882,7 +850,6 @@ export default function CopilotoPage() {
                 </div>
               </div>
               
-              {/* Ranking de estratégias */}
               {aprendizadoStats.tiposRanking.length > 0 && (
                 <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl overflow-hidden">
                   <div className="bg-[#0a0a0a] px-5 py-3 border-b border-[#2a2a2a]">
@@ -900,10 +867,7 @@ export default function CopilotoPage() {
                             <span className="text-gray-500">Total: {tipo.total}</span>
                           </div>
                         </div>
-                        <div className={`text-2xl font-black ${
-                          tipo.taxa >= 70 ? 'text-green-400' :
-                          tipo.taxa >= 40 ? 'text-yellow-400' : 'text-red-400'
-                        }`}>
+                        <div className={`text-2xl font-black ${tipo.taxa >= 70 ? 'text-green-400' : tipo.taxa >= 40 ? 'text-yellow-400' : 'text-red-400'}`}>
                           {tipo.taxa}%
                         </div>
                       </div>
@@ -912,17 +876,14 @@ export default function CopilotoPage() {
                 </div>
               )}
               
-              {/* Histórico de tarefas finalizadas */}
               <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl overflow-hidden">
                 <div className="bg-[#0a0a0a] px-5 py-3 border-b border-[#2a2a2a]">
                   <h3 className="font-bold text-[#FFD700]">📚 Histórico Recente</h3>
                 </div>
                 <div className="divide-y divide-[#2a2a2a] max-h-96 overflow-y-auto">
                   {tarefasFinalizadas.slice(0, 15).map((t) => {
-                    const corClass = 
-                      t.classificacao_aprendizado?.includes('sucesso') ? 'text-green-400 bg-green-500/10' :
-                      t.classificacao_aprendizado?.includes('falha') ? 'text-red-400 bg-red-500/10' :
-                      'text-yellow-400 bg-yellow-500/10';
+                    const corClass = t.classificacao_aprendizado?.includes('sucesso') ? 'text-green-400 bg-green-500/10' :
+                      t.classificacao_aprendizado?.includes('falha') ? 'text-red-400 bg-red-500/10' : 'text-yellow-400 bg-yellow-500/10';
                     return (
                       <div key={t.id} className="p-4">
                         <div className="flex items-center gap-3 mb-2">
@@ -932,12 +893,9 @@ export default function CopilotoPage() {
                             {t.classificacao_aprendizado}
                           </span>
                         </div>
-                        {t.observacao_tl && (
-                          <p className="text-xs text-gray-400 italic">"{t.observacao_tl}"</p>
-                        )}
+                        {t.observacao_tl && <p className="text-xs text-gray-400 italic">"{t.observacao_tl}"</p>}
                         {t.performance_depois_30d?.variacao_pct !== undefined && (
-                          <p className="text-xs mt-1">
-                            Performance 30d: 
+                          <p className="text-xs mt-1">Performance 30d: 
                             <span className={t.performance_depois_30d.variacao_pct > 0 ? 'text-green-400' : 'text-red-400'}>
                               {' '}{t.performance_depois_30d.variacao_pct > 0 ? '+' : ''}{t.performance_depois_30d.variacao_pct}%
                             </span>
@@ -953,14 +911,11 @@ export default function CopilotoPage() {
         </div>
       )}
       
-      {/* ============================================ */}
       {/* ABA: TIME */}
-      {/* ============================================ */}
       {abaAtiva === 'time' && (
         <div className="space-y-6">
           {timeHealth && (
             <>
-              {/* Métricas gerais */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4 text-center">
                   <p className="text-3xl font-black text-white">{timeHealth.totalColabs}</p>
@@ -980,7 +935,27 @@ export default function CopilotoPage() {
                 </div>
               </div>
               
-              {/* Resumo da análise */}
+              {/* 🆕 METAS VIGENTES */}
+              <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-5">
+                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  🎯 Metas Vigentes
+                </h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-blue-300 font-bold mb-1">🚚 P2M</p>
+                    <p className="text-gray-400">Abaixo: &lt; {metasConfig.p2mBase} pç/h</p>
+                    <p className="text-gray-400">Alinhado: {metasConfig.p2mBase} - {metasConfig.p2mAlinhadoMax} pç/h</p>
+                    <p className="text-gray-400">Supera: &gt; {metasConfig.p2mAlinhadoMax} pç/h</p>
+                  </div>
+                  <div>
+                    <p className="text-cyan-300 font-bold mb-1">📦 Checkin</p>
+                    <p className="text-gray-400">Abaixo: &lt; {metasConfig.checkinBase} pç/h</p>
+                    <p className="text-gray-400">Alinhado: {metasConfig.checkinBase} - {metasConfig.checkinAlinhadoMax} pç/h</p>
+                    <p className="text-gray-400">Supera: &gt; {metasConfig.checkinAlinhadoMax} pç/h</p>
+                  </div>
+                </div>
+              </div>
+              
               {resumoAnalise && (
                 <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 rounded-2xl p-5">
                   <h3 className="text-sm font-bold text-purple-300 uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -1001,19 +976,13 @@ export default function CopilotoPage() {
                     </div>
                     <div>
                       <p className="text-gray-400">Aprendizado</p>
-                      <p className="text-base font-black text-purple-400">
-                        {resumoAnalise.aprendizado_usado ? '🧠 Ativo' : '⏳ Aguardando'}
-                      </p>
+                      <p className="text-base font-black text-purple-400">{resumoAnalise.aprendizado_usado ? '🧠 Ativo' : '⏳ Aguardando'}</p>
                     </div>
                   </div>
                 </div>
               )}
               
-              {/* Botão pra chat */}
-              <button
-                onClick={() => setAbaAtiva('chat')}
-                className="w-full bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-black py-4 rounded-2xl shadow-lg shadow-purple-500/30 transition-all flex items-center justify-center gap-2"
-              >
+              <button onClick={() => setAbaAtiva('chat')} className="w-full bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-black py-4 rounded-2xl shadow-lg shadow-purple-500/30 transition-all flex items-center justify-center gap-2">
                 💬 Perguntar pra IA estratega →
               </button>
             </>
@@ -1085,11 +1054,7 @@ export default function CopilotoPage() {
       )}
       
       {tarefaParaFinalizar && (
-        <FinalizarTarefaModal
-          tarefa={tarefaParaFinalizar}
-          onClose={() => setTarefaParaFinalizar(null)}
-          onFinalizar={onFinalizacaoCompleta}
-        />
+        <FinalizarTarefaModal tarefa={tarefaParaFinalizar} onClose={() => setTarefaParaFinalizar(null)} onFinalizar={onFinalizacaoCompleta} />
       )}
     </div>
   );
