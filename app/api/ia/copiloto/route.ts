@@ -26,7 +26,6 @@ export async function POST() {
       return NextResponse.json({ sucesso: true, tarefas_geradas: 0 });
     }
     
-    // Filtra colabs que podem receber tarefa
     const colabsElegiveis = ctx.colabs.filter(c => 
       c.podeSerSugerido && c.performance.fonteDados !== 'nenhum'
     );
@@ -39,18 +38,12 @@ export async function POST() {
       });
     }
     
-    // Prepara prompt
-    const prompt = construirPrompt(colabsElegiveis, ctx.saudeTime, ctx.dataAtual, ctx.metas);
+    const prompt = construirPrompt(colabsElegiveis, ctx.saudeTime, ctx.dataAtual, ctx.metas, ctx.aprendizado);
     const systemPrompt = construirSystemPrompt();
     
-    // 🎯 CLAUDE SONNET 4.5 com persona PROFUNDA
     const tarefasGeradas = await chamarClaudeJson<any>(
       [{ role: 'user', content: prompt }],
-      {
-        systemPrompt,
-        temperature: 0.5, // Um pouco mais criativo
-        maxTokens: 6000,  // Mais espaço pra análise rica
-      }
+      { systemPrompt, temperature: 0.5, maxTokens: 6000 }
     ).catch(e => {
       console.error('Erro Claude:', e);
       return [];
@@ -60,12 +53,10 @@ export async function POST() {
       return NextResponse.json({ sucesso: true, tarefas_geradas: 0 });
     }
     
-    // Aceita array ou { tarefas: [...] }
     const tarefas = Array.isArray(tarefasGeradas) 
       ? tarefasGeradas 
       : (tarefasGeradas.tarefas || tarefasGeradas.tasks || []);
     
-    // 🎯 Limita pela meta diária
     const tarefasParaInserir = tarefas.slice(0, ctx.vagasHoje);
     
     let inseridas = 0;
@@ -73,12 +64,12 @@ export async function POST() {
       const colab = ctx.colabs.find(c => c.id_groot === tarefa.id_groot);
       if (!colab) continue;
       
-      // Double-check anti-duplicação
+      const dias14atras = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
       const { count } = await supabase
         .from('tarefas')
         .select('id', { count: 'exact', head: true })
         .eq('id_groot', tarefa.id_groot)
-        .or('status.eq.Pendente,criado_em.gte.' + new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString());
+        .or(`status.eq.Pendente,criado_em.gte.${dias14atras}`);
       
       if ((count || 0) > 0) continue;
       
@@ -90,10 +81,12 @@ export async function POST() {
         carreira_info: colab.carreira_info,
         acompanhamento: colab.acompanhamento,
         memoria: colab.memoria,
+        aprendizadoColab: colab.aprendizadoColab,
         vieses: colab.vieses,
         burnout: colab.burnout,
         reconhecimentoInvisivel: colab.reconhecimentoInvisivel,
         contexto_temporal: ctx.dataAtual,
+        aprendizado_geral: ctx.aprendizado,
       };
       
       const tarefaId = 'TASK-' + Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -109,7 +102,7 @@ export async function POST() {
         analise_ia: tarefa.analise_ia || null,
         hipotese: tarefa.hipotese || null,
         motivo: tarefa.acao_sugerida || null,
-        gatilho_origem: tarefa.gatilho || 'analise_inteligente',
+        gatilho_origem: tarefa.gatilho || 'analise_com_aprendizado',
         feedback_obrigatorio: tarefa.feedback_obrigatorio !== false,
         contexto_dados: contextoDados,
         gerado_por_ia: true,
@@ -127,6 +120,7 @@ export async function POST() {
       tarefas_hoje: ctx.tarefasGeradasHoje + inseridas,
       modelo: 'claude-sonnet-4-5',
       contexto: ctx.dataAtual.contextoTemporal,
+      aprendizado_usado: ctx.aprendizado.totalTarefas > 0,
     });
     
   } catch (e: any) {
@@ -138,395 +132,281 @@ export async function POST() {
   }
 }
 
-// ============================================
-// 🧠 SYSTEM PROMPT MESTRE - Persona profunda
-// ============================================
-
 function construirSystemPrompt(): string {
   return `Você é o ANALISTA SÊNIOR DE GENTE & OPERAÇÕES MAIS EXPERIENTE DO MELI.
 
 # QUEM VOCÊ É
-
-Sua persona:
-- 15 anos de operações P2M/Checkin/Sorting no Mercado Livre
-- Já gerenciou times de 5 a 200 colaboradores  
-- Coach certificado pela ICF (International Coach Federation)
+- 15 anos de operações P2M/Checkin/Sorting
+- Coach certificado pela ICF
 - Especialista em desenvolvimento humano + performance
 - Bate metas há 8 trimestres seguidos
 - Conhecido por DESENVOLVER PESSOAS, não só cobrar números
 
 # SUA MISSÃO
+Você NÃO é uma máquina de tarefas. Você É um PARCEIRO ESTRATÉGICO do TL.
+Cada tarefa que você sugere pode mudar uma carreira.
 
-Você NÃO é uma máquina de gerar tarefas.
-Você É um PARCEIRO ESTRATÉGICO do TL.
+# SUPERPODERES (12)
+1. Multi-prazo: curto/médio/longo
+2. Contexto temporal: dia do mês, fim de Q
+3. Acompanhamento: vê se feedback funcionou
+4. Saúde sistêmica: time como organismo
+5. Ciclos: 30/60/90 dias
+6. Coaching: perguntas, não comandos
+7. Reconhecimento estratégico: público/privado/invisível
+8. Anti-vieses: protege TL de armadilhas
+9. Memória histórica: lembra tudo
+10. Radar de burnout: sinais sutis
+11. Detetive de padrões: vê o invisível
+12. Defensora: considera fatores humanos
 
-Cada tarefa que você sugere = uma intervenção pensada que pode mudar uma carreira, salvar um talento, evitar uma demissão, ou impulsionar alguém pra cima.
+# 🧠 APRENDIZADO REAL
+Você TEM MEMÓRIA das tarefas anteriores.
+Você VÊ o que funcionou e o que não.
+Você ADAPTA estratégias baseado nos RESULTADOS reais do TIME ESPECÍFICO.
 
-# SEUS 12 SUPERPODERES
+QUANDO O TL DEU UM FEEDBACK ANTES:
+- Se MELHOROU → use estratégia parecida em casos similares
+- Se PIOROU → mude abordagem
+- Se NEUTRO → aprofunde, talvez mude ângulo
 
-## 1. INTELIGÊNCIA MULTI-PRAZO
-- CURTO (7 dias): variações pontuais, eventos
-- MÉDIO (30 dias): tendências, consistência  
-- LONGO (3+ meses): padrões, evolução, carreira
-
-## 2. CONTEXTO TEMPORAL
-Você SABE qual dia/mês/Q é hoje:
-- Início do mês (1-7): alinhamento, planejamento
-- Meio do mês (8-22): aceleração, ajustes
-- Fechamento (23-31): recuperação, fechar bem
-
-## 3. ACOMPANHAMENTO DE FEEDBACK
-Você LEMBRA dos feedbacks dados pelo TL:
-- Se TL deu feedback e MELHOROU → reconheça a evolução
-- Se TL deu feedback e tá IGUAL → sugerir aprofundar
-- Se TL deu feedback e PIOROU → mudar abordagem
-
-## 4. SAÚDE SISTÊMICA DO TIME
-Você vê o TIME como organismo:
-- 5+ pessoas caindo juntas? Pode ser problema coletivo
-- Atestados em alta? Cuidar do bem-estar
-- Burnout coletivo? Alertar ANTES de virar crise
-
-## 5. CICLOS DE DESENVOLVIMENTO (30/60/90)
-Você pensa em ondas:
-- 1-30 dias: semente (primeira mudança)
-- 30-60 dias: crescimento (consolidação)  
-- 60-90 dias: maturidade (próximo nível)
-
-## 6. COACHING COM PERGUNTAS
-Você NÃO impõe. Você PROVOCA REFLEXÃO:
-- "Antes da conversa, REFLITA: ..."
-- "Pergunta poderosa pra começar: ..."
-- "OUÇA antes de falar"
-
-## 7. RECONHECIMENTO ESTRATÉGICO
-Você sabe que existem 4 tipos:
-- PÚBLICO: pros que inspiram time
-- PRIVADO: pros tímidos
-- DE EVOLUÇÃO: pros que cresceram (mesmo devagar)
-- DO INVISÍVEL: pros silenciosos e consistentes
-
-## 8. ANTI-VIESES
-Você protege o TL de armadilhas:
-- VIÉS DA RECÊNCIA: "Você lembra só do que aconteceu hoje"
-- VIÉS DA FREQUÊNCIA: "Você foca nos difíceis, esquece bons"
-- VIÉS DO ESFORÇO APARENTE: "Quem corre nem sempre produz"
-
-## 9. MEMÓRIA HISTÓRICA
-Você LEMBRA tudo:
-- "Faz 3 meses você conversou X com ela. Hoje ela faz Y. CRESCEU."
-- "Ele já foi APTO no Q1, EM OBSERVAÇÃO no Q2. Padrão sazonal?"
-
-## 10. RADAR DE BURNOUT
-Você detecta sinais SUTIS:
-- ABS subindo + performance caindo + horário irregular
-- "Não é hora de COBRAR. É hora de CUIDAR."
-
-## 11. DETETIVE DE PADRÕES
-Você acha o que outros não veem:
-- "Quedas sempre em segunda → fim de semana ruim?"
-- "Todos caem dia 15 → mudança operacional?"
-
-## 12. DEFENSORA DA HUMANIDADE
-Você considera contexto HUMANO:
-- Saúde, família, situação financeira
-- "Cuidado com decisões precipitadas. Estratégia longa, não Q único."
-
-# COMO VOCÊ ESCREVE
-
-## DIAGNÓSTICO
-NÃO faça:
-❌ "Performance abaixo da meta"
-
-FAÇA:
-✅ "Maria 305 pç/h nos últimos 30 dias (vs meta 280).
-    PORÉM cai 3 semanas consecutivas (320 → 310 → 305).
-    Tendência preocupante apesar de ainda acima da meta."
-
-## ANÁLISE_IA
-Vá ALÉM dos números:
-✅ "Padrão de queda gradual + ABS estável + sem feedback há 45 dias
-    sugere possível desconexão emocional. Performance é sintoma, 
-    não causa raiz."
-
-## HIPÓTESE
-Especule HUMANAMENTE:
-✅ "Pode estar: sentindo-se invisível (sem feedback recente),
-    cansada (família, saúde), ou desmotivada (sem perspectiva).
-    Conversa privada antes de cobrar."
-
-## AÇÃO_SUGERIDA
-Faça COACHING:
-✅ "Estratégia em 3 passos:
-    
-    1. ANTES (preparação interna):
-       Relembre: quando foi a última conversa não-trabalho?
-       Lembre: ela teve algum momento difícil recente?
-    
-    2. CONVERSA (não comece pelo número):
-       'Maria, queria saber como você tem se sentido nessas 
-        semanas. Notei que tem sido diferente.'
-       OUÇA. Não interrompa. Não defenda.
-    
-    3. DEPOIS (acompanhamento):
-       Em 7 dias, breve check-in: 'Como tá?'
-       Em 30 dias, avaliar evolução."
+# COMO ESCREVER
+DIAGNÓSTICO: dados + padrão + tempo + memória
+ANÁLISE: vai além do número, considera contexto humano
+HIPÓTESE: especulação humana e empática
+AÇÃO: estratégia em PASSOS com COACHING
 
 # REGRAS DE OURO
+1. NÃO duplicar (já filtrado)
+2. EQUILIBRAR tipos (reconhecimento, coaching, prevenção)
+3. PROFUNDIDADE: dado + padrão + estratégia
+4. HUMANIDADE: pessoa por trás do número
+5. USAR APRENDIZADO: aplicar o que funcionou no time
 
-1. **NÃO DUPLICAR** - Se a pessoa tem tarefa pendente ou recebeu 
-   tarefa nos últimos 14 dias, NÃO sugerir.
-
-2. **EQUILIBRAR** - Em 5 tarefas, varie:
-   - Performance (não só)
-   - Reconhecimento (essencial!)
-   - Carreira (oportunidade)
-   - Cuidado preventivo
-
-3. **PROFUNDIDADE** - Cada tarefa deve ter:
-   - Dado real (números)
-   - Padrão identificado (não só evento)
-   - Estratégia humana (não só comando)
-
-4. **HUMANIDADE** - Sempre considere:
-   - A pessoa pode estar passando algo
-   - O número não conta toda história
-   - Liderança é desenvolver, não cobrar
-
-5. **MEMÓRIA** - Use o histórico:
-   - "Já recebeu feedback há X dias sobre Y"
-   - "Calibração passada foi Z"
-
-# FORMATO DE RESPOSTA
-
-Responda SEMPRE em JSON válido (sem texto antes/depois):
-
+# FORMATO
+Responda APENAS JSON válido:
 [
   {
     "id_groot": "1710556",
     "tipo": "Reconhecimento Estratégico" | "Acompanhamento de Evolução" | "Antecipação de Queda" | "Coaching Preventivo" | "Cuidado de Bem-Estar" | "Oportunidade de Carreira" | "Quebra de Padrão" | "Reconhecimento Invisível",
     "prioridade": "critica" | "alta" | "media" | "baixa",
-    "diagnostico": "Análise rica com NÚMEROS + PADRÕES + TEMPO",
-    "analise_ia": "Sua interpretação ESTRATÉGICA do que tá por trás",
-    "hipotese": "Especulação HUMANA do que pode estar acontecendo",
-    "acao_sugerida": "Estratégia em PASSOS com COACHING, não comando",
-    "gatilho": "padrao_detectado_ou_oportunidade",
+    "diagnostico": "Análise rica COM NÚMEROS + PADRÕES + TEMPO + REFERÊNCIA HISTÓRICA",
+    "analise_ia": "Sua interpretação ESTRATÉGICA",
+    "hipotese": "Especulação HUMANA",
+    "acao_sugerida": "Estratégia em PASSOS com COACHING",
+    "gatilho": "padrao_ou_oportunidade",
     "feedback_obrigatorio": true
   }
 ]`;
 }
 
-// ============================================
-// 📝 PROMPT COM DADOS DO TIME
-// ============================================
-
-function construirPrompt(colabs: any[], saudeTime: any, dataAtual: any, metas: Record<string, number>): string {
+function construirPrompt(colabs: any[], saudeTime: any, dataAtual: any, metas: Record<string, number>, aprendizado: any): string {
   const META_LIQUIDA_P2M = metas['meta_liquida_p2m'] || 280;
   const META_LIQUIDA_CHECKIN = metas['meta_liquida_checkin'] || 100;
   
-  // Contexto temporal explícito
   const contextoTemporalTexto = {
-    inicio_mes: '🌅 INÍCIO DO MÊS (foco em alinhamento, planejamento)',
-    meio_mes: '☀️ MEIO DO MÊS (foco em aceleração, ajustes)',
-    fechamento: '🌆 FECHAMENTO (foco em recuperação, fechar bem)',
+    inicio_mes: '🌅 INÍCIO DO MÊS (alinhamento, planejamento)',
+    meio_mes: '☀️ MEIO DO MÊS (aceleração, ajustes)',
+    fechamento: '🌆 FECHAMENTO (recuperação, fechar bem)',
   }[dataAtual.contextoTemporal as string] || '';
   
-  // 🆕 ALERTAS SISTÊMICOS
   let alertasSistemicos = '';
   if (saudeTime?.alertas) {
     const alerts = [];
-    if (saudeTime.alertas.muitasQuedasJuntas) {
-      alerts.push(`🚨 ${saudeTime.performance.caindoTodos} colabs caindo juntos - pode ser problema COLETIVO`);
-    }
-    if (saudeTime.alertas.atestadosEmAlta) {
-      alerts.push(`🩺 Múltiplos colabs com atestados em alta - radar de bem-estar`);
-    }
-    if (saudeTime.alertas.burnoutColetivo) {
-      alerts.push(`🔥 Sinais de burnout em vários colabs - cuidado preventivo`);
-    }
-    if (saudeTime.distribuicaoFeedback.semFeedback90d > 5) {
-      alerts.push(`⚠️ ${saudeTime.distribuicaoFeedback.semFeedback90d} colabs SEM FEEDBACK há 90+ dias`);
-    }
-    if (saudeTime.distribuicaoFeedback.poucoReconhecimentos > 10) {
-      alerts.push(`💔 ${saudeTime.distribuicaoFeedback.poucoReconhecimentos} colabs nunca foram RECONHECIDOS`);
-    }
+    if (saudeTime.alertas.muitasQuedasJuntas) alerts.push(`🚨 ${saudeTime.performance.caindoTodos} colabs caindo juntos - PROBLEMA COLETIVO?`);
+    if (saudeTime.alertas.atestadosEmAlta) alerts.push(`🩺 Atestados em alta - bem-estar`);
+    if (saudeTime.alertas.burnoutColetivo) alerts.push(`🔥 Burnout coletivo detectado`);
+    if (saudeTime.distribuicaoFeedback.semFeedback90d > 5) alerts.push(`⚠️ ${saudeTime.distribuicaoFeedback.semFeedback90d} colabs SEM FEEDBACK 90+ dias`);
+    if (saudeTime.distribuicaoFeedback.poucoReconhecimentos > 10) alerts.push(`💔 ${saudeTime.distribuicaoFeedback.poucoReconhecimentos} colabs NUNCA reconhecidos`);
     if (alerts.length > 0) {
-      alertasSistemicos = '\n## 🚨 ALERTAS SISTÊMICOS DO TIME\n' + alerts.map(a => `   ${a}`).join('\n') + '\n';
+      alertasSistemicos = '\n## 🚨 ALERTAS SISTÊMICOS\n' + alerts.map(a => `   ${a}`).join('\n') + '\n';
     }
   }
   
-  // Descreve cada colab COM PROFUNDIDADE
+  // 🧠 SEÇÃO DE APRENDIZADO
+  let secaoAprendizado = '';
+  if (aprendizado && aprendizado.totalTarefas > 0) {
+    secaoAprendizado = `
+# 🧠 SEU APRENDIZADO COM ESSE TIME (últimos 90 dias)
+
+## Estatísticas gerais:
+- Total tarefas finalizadas: ${aprendizado.totalTarefas}
+- ✅ Sucessos: ${aprendizado.sucessos} (${aprendizado.taxaSucesso}%)
+- ❌ Falhas: ${aprendizado.falhas}
+- ⏳ Neutros: ${aprendizado.neutros}
+
+${aprendizado.estrategiasEficazes.length > 0 ? `## 🎯 ESTRATÉGIAS QUE FUNCIONARAM:
+${aprendizado.estrategiasEficazes.map((e: string) => `   ✅ ${e}`).join('\n')}` : ''}
+
+${aprendizado.estrategiasIneficazes.length > 0 ? `## ⚠️ ESTRATÉGIAS QUE NÃO FUNCIONARAM:
+${aprendizado.estrategiasIneficazes.map((e: string) => `   ❌ ${e}`).join('\n')}` : ''}
+
+${aprendizado.historicoDetalhado.length > 0 ? `## 📚 HISTÓRICO DETALHADO (últimas tarefas finalizadas):
+${aprendizado.historicoDetalhado.slice(0, 5).map((h: any) => `
+   • ${h.nome} (${h.diasAtras}d atrás):
+     Tipo: ${h.tipo} | Ação: ${h.acao_tomada}
+     Resultado: ${h.resultado}${h.variacao_30d !== null ? ` (${h.variacao_30d > 0 ? '+' : ''}${h.variacao_30d}% em 30d)` : ''}
+     ${h.observacao ? `Observação TL: "${h.observacao.slice(0, 100)}"` : ''}
+`).join('\n')}` : ''}
+
+USE esses aprendizados para CALIBRAR suas próximas sugestões.
+Se algo funcionou, REPITA o padrão. Se falhou, EVITE.
+`;
+  } else {
+    secaoAprendizado = `
+# 🧠 APRENDIZADO
+
+Você ainda NÃO tem histórico de feedbacks finalizados.
+À medida que o TL for finalizando tarefas e marcando resultado,
+você vai aprender o que FUNCIONA com esse time específico.
+`;
+  }
+  
   const colabsDescricao = colabs.map(c => {
     let desc = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
     desc += `👤 ${c.nome} | ID: ${c.id_groot} | ${c.processo || 'sem processo'}\n`;
-    desc += `   ${c.cargo || 'sem cargo'} | Carreira: ${c.carreira || 'não informada'}\n`;
-    desc += `   ${c.carreira_info.mesesNaEmpresa}m na empresa | ${c.carreira_info.mesesNaCarreira}m na carreira atual\n`;
+    desc += `   ${c.cargo || 'sem cargo'} | ${c.carreira || 'sem carreira'}\n`;
+    desc += `   ${c.carreira_info.mesesNaEmpresa}m empresa | ${c.carreira_info.mesesNaCarreira}m carreira\n`;
     
-    // 📅 PERFORMANCE MULTI-PRAZO
-    desc += `\n📊 PERFORMANCE MULTI-PRAZO:\n`;
-    
+    desc += `\n📊 PERFORMANCE:\n`;
     if (c.performance.curto_prazo_7d.dias > 0) {
-      const t7d = c.performance.curto_prazo_7d.tendencia;
-      desc += `   • 7 DIAS: ${c.performance.curto_prazo_7d.media} pç/h `;
-      desc += `(${c.performance.curto_prazo_7d.dias} dias, ${t7d.tendencia} ${t7d.variacao_pct > 0 ? '+' : ''}${t7d.variacao_pct}%)\n`;
+      const t = c.performance.curto_prazo_7d.tendencia;
+      desc += `   • 7d: ${c.performance.curto_prazo_7d.media} pç/h (${t.tendencia} ${t.variacao_pct > 0 ? '+' : ''}${t.variacao_pct}%)\n`;
     }
-    
     if (c.performance.medio_prazo_30d.dias > 0) {
-      const t30d = c.performance.medio_prazo_30d.tendencia;
-      desc += `   • 30 DIAS: ${c.performance.medio_prazo_30d.media} pç/h `;
-      desc += `(${c.performance.medio_prazo_30d.dias} dias, ${t30d.tendencia} ${t30d.variacao_pct > 0 ? '+' : ''}${t30d.variacao_pct}% - força ${t30d.forca})\n`;
-      
+      const t = c.performance.medio_prazo_30d.tendencia;
+      desc += `   • 30d: ${c.performance.medio_prazo_30d.media} pç/h (${t.tendencia} ${t.variacao_pct > 0 ? '+' : ''}${t.variacao_pct}% - ${t.forca})\n`;
       const meta = c.processo === 'P2M' ? META_LIQUIDA_P2M : META_LIQUIDA_CHECKIN;
-      const pctMeta = (c.performance.medio_prazo_30d.media / meta) * 100;
-      desc += `   • % da meta (${meta}): ${pctMeta.toFixed(1)}%\n`;
+      desc += `   • % meta (${meta}): ${((c.performance.medio_prazo_30d.media / meta) * 100).toFixed(1)}%\n`;
     }
-    
     if (c.performance.historico_mensal.length > 1) {
-      desc += `   • HISTÓRICO MENSAL: ${c.performance.historico_mensal.map((h: any) => 
-        `${h.mes}/${h.ano}=${h.liquida}`
-      ).join(' → ')}\n`;
+      desc += `   • Histórico: ${c.performance.historico_mensal.map((h: any) => `${h.mes}=${h.liquida}`).join(' → ')}\n`;
     }
-    
     if (c.performance.mensal_atual) {
-      desc += `   • MENSAL ATUAL: ${c.performance.mensal_atual.liquida} pç/h (${c.performance.mensal_atual.dias} dias)\n`;
+      desc += `   • Mensal atual: ${c.performance.mensal_atual.liquida} pç/h (${c.performance.mensal_atual.dias}d)\n`;
     }
     
-    // 🔍 PADRÕES
     if (c.padroes.cai_segunda || c.padroes.cai_sexta || c.padroes.consistente || c.padroes.volatil) {
-      desc += `\n🔍 PADRÕES DETECTADOS:\n`;
-      if (c.padroes.cai_segunda) desc += `   • ⚠️ Cai nas SEGUNDAS (problema fim de semana?)\n`;
-      if (c.padroes.cai_sexta) desc += `   • ⚠️ Cai nas SEXTAS (cansaço da semana?)\n`;
-      if (c.padroes.consistente) desc += `   • ✅ CONSISTENTE (variância baixa: ${c.padroes.variancia}%)\n`;
-      if (c.padroes.volatil) desc += `   • ⚠️ VOLÁTIL (variância alta: ${c.padroes.variancia}%)\n`;
+      desc += `\n🔍 PADRÕES:\n`;
+      if (c.padroes.cai_segunda) desc += `   • ⚠️ Cai SEGUNDAS\n`;
+      if (c.padroes.cai_sexta) desc += `   • ⚠️ Cai SEXTAS\n`;
+      if (c.padroes.consistente) desc += `   • ✅ Consistente (var ${c.padroes.variancia}%)\n`;
+      if (c.padroes.volatil) desc += `   • ⚠️ Volátil (var ${c.padroes.variancia}%)\n`;
     }
     
-    // 🩺 PRESENÇA
     if (c.presenca.presencas > 0 || c.presenca.atestados > 0) {
-      desc += `\n🩺 PRESENÇA (90 DIAS):\n`;
-      desc += `   • Presenças: ${c.presenca.presencas} | Atestados: ${c.presenca.atestados}\n`;
-      if (c.presenca.faltasInjustificadas > 0) desc += `   • ⚠️ Faltas: ${c.presenca.faltasInjustificadas}\n`;
-      if (c.presenca.pctAbs > 0) desc += `   • % ABS: ${c.presenca.pctAbs}%\n`;
-      if (c.presenca.tendenciaAtestados === 'subindo') {
-        desc += `   • 🚨 ATESTADOS EM ALTA - SINAL DE ALERTA\n`;
-      }
+      desc += `\n🩺 PRESENÇA 90d:\n`;
+      desc += `   • Pres: ${c.presenca.presencas} | Atest: ${c.presenca.atestados}`;
+      if (c.presenca.faltasInjustificadas > 0) desc += ` | Faltas: ${c.presenca.faltasInjustificadas}`;
+      if (c.presenca.pctAbs > 0) desc += ` | ABS: ${c.presenca.pctAbs}%`;
+      desc += `\n`;
+      if (c.presenca.tendenciaAtestados === 'subindo') desc += `   • 🚨 ATESTADOS EM ALTA\n`;
     }
     
-    // 🔥 BURNOUT
     if (c.burnout.pontuacao >= 2) {
-      desc += `\n🔥 RADAR DE BURNOUT (${c.burnout.pontuacao}/3 sinais):\n`;
-      if (c.burnout.atestadosSubindo) desc += `   • Atestados subindo\n`;
-      if (c.burnout.performanceCaindo) desc += `   • Performance caindo\n`;
-      if (c.burnout.absAlto) desc += `   • ABS acima do normal\n`;
+      desc += `\n🔥 BURNOUT (${c.burnout.pontuacao}/3): `;
+      const sinais = [];
+      if (c.burnout.atestadosSubindo) sinais.push('atestados↑');
+      if (c.burnout.performanceCaindo) sinais.push('perf↓');
+      if (c.burnout.absAlto) sinais.push('ABS alto');
+      desc += sinais.join(', ') + '\n';
     }
     
-    // 🎯 CARREIRA
-    desc += `\n🎯 CARREIRA:\n`;
+    desc += `\n🎯 CARREIRA: `;
     if (c.carreira_info.podePromover) {
-      desc += `   • 🎉 PRONTO PRA PROMOÇÃO (${c.carreira_info.mesesNaCarreira}m em ${c.carreira} → ${c.proxima_carreira})\n`;
+      desc += `🎉 PRONTO P/ PROMOÇÃO (${c.carreira_info.mesesNaCarreira}m em ${c.carreira} → ${c.proxima_carreira})\n`;
     } else {
-      desc += `   • ${c.carreira_info.mesesNaCarreira}m em ${c.carreira} (próx: ${c.proxima_carreira || 'topo'})\n`;
-    }
-    if (c.carreira_info.nuncaCalibrouComoApto) {
-      desc += `   • Nunca foi APTO em calibração\n`;
+      desc += `${c.carreira_info.mesesNaCarreira}m em ${c.carreira}\n`;
     }
     
-    // 🆕 ACOMPANHAMENTO DE FEEDBACK
     if (c.acompanhamento) {
-      desc += `\n📝 ACOMPANHAMENTO DE FEEDBACK:\n`;
-      desc += `   • Último feedback: há ${c.acompanhamento.diasDesdeFeedback} dias\n`;
-      desc += `   • Tipo: ${c.acompanhamento.tipoFeedback} (${c.acompanhamento.classificacao})\n`;
+      desc += `\n📝 ÚLTIMO FEEDBACK (TL deu):\n`;
+      desc += `   • Há ${c.acompanhamento.diasDesdeFeedback}d: ${c.acompanhamento.tipoFeedback} (${c.acompanhamento.classificacao})\n`;
       desc += `   • Tema: "${c.acompanhamento.observacao}"\n`;
-      if (c.acompanhamento.evolucao === 'melhorou') {
-        desc += `   • ✅ MELHOROU após feedback (${c.acompanhamento.mediaAntes} → ${c.acompanhamento.mediaDepois}) - RECONHECER!\n`;
-      } else if (c.acompanhamento.evolucao === 'piorou') {
-        desc += `   • 🔴 PIOROU após feedback (${c.acompanhamento.mediaAntes} → ${c.acompanhamento.mediaDepois}) - MUDAR ABORDAGEM!\n`;
-      } else if (c.acompanhamento.evolucao === 'igual') {
-        desc += `   • ⚠️ IGUAL após feedback - APROFUNDAR conversa\n`;
-      }
+      if (c.acompanhamento.evolucao === 'melhorou') desc += `   • ✅ MELHOROU (${c.acompanhamento.mediaAntes} → ${c.acompanhamento.mediaDepois})\n`;
+      else if (c.acompanhamento.evolucao === 'piorou') desc += `   • 🔴 PIOROU (${c.acompanhamento.mediaAntes} → ${c.acompanhamento.mediaDepois})\n`;
+      else if (c.acompanhamento.evolucao === 'igual') desc += `   • ⚠️ IGUAL - aprofundar\n`;
     }
     
-    // 🧠 MEMÓRIA HISTÓRICA
     desc += `\n🧠 MEMÓRIA:\n`;
-    desc += `   • Feedbacks 90d: ${c.memoria.feedbacksUltimos90d} `;
-    desc += `(${c.memoria.feedbacksConstrutivos} construtivos, ${c.memoria.feedbacksReconhecimento} reconhecimentos)\n`;
+    desc += `   • FB 90d: ${c.memoria.feedbacksUltimos90d} (${c.memoria.feedbacksConstrutivos}C / ${c.memoria.feedbacksReconhecimento}R)\n`;
     if (c.memoria.calibracoesPassadas.length > 0) {
-      desc += `   • Últimas calibrações: ${c.memoria.calibracoesPassadas.map((cal: any) => cal.classificacao).join(' → ')}\n`;
+      desc += `   • Calibrações: ${c.memoria.calibracoesPassadas.map((cal: any) => cal.classificacao).join(' → ')}\n`;
     }
     
-    // 🆕 VIESES (ALERTAS PRO TL)
-    if (c.vieses.nuncaReceberFeedback) {
-      desc += `   • ⚠️ NUNCA RECEBEU FEEDBACK (90 dias) - INCLUSÃO\n`;
-    }
-    if (c.vieses.desbalanceadoConstrutivo) {
-      desc += `   • ⚠️ Só Construtivos, ZERO Reconhecimentos - DESEQUILÍBRIO\n`;
-    }
-    if (c.vieses.recebeMuitoFeedback) {
-      desc += `   • ⚠️ Recebe MUITO feedback (${c.memoria.feedbacksUltimos90d} em 90d) - cuidado pra não saturar\n`;
+    // 🧠 APRENDIZADO ESPECÍFICO DESSE COLAB
+    if (c.aprendizadoColab && c.aprendizadoColab.length > 0) {
+      desc += `\n🎓 HISTÓRICO DE TAREFAS COM ESSE COLAB:\n`;
+      c.aprendizadoColab.slice(0, 3).forEach((a: any) => {
+        desc += `   • ${a.diasAtras}d: ${a.tipo} → ${a.acao} → ${a.resultado}`;
+        if (a.variacao !== null) desc += ` (${a.variacao > 0 ? '+' : ''}${a.variacao}%)`;
+        desc += `\n`;
+        if (a.observacao) desc += `     Obs TL: "${a.observacao}"\n`;
+      });
     }
     
-    // 🆕 RECONHECIMENTO INVISÍVEL
-    if (c.reconhecimentoInvisivel.consistenteSilencioso) {
-      desc += `\n💎 CONSISTENTE SILENCIOSO: Performance estável mas nunca foi reconhecido. URGENTE!\n`;
-    }
-    if (c.reconhecimentoInvisivel.evolucaoSilenciosa) {
-      desc += `\n📈 EVOLUÇÃO SILENCIOSA: Melhorou nos últimos meses (devagar mas constante)\n`;
-    }
+    if (c.vieses.nuncaReceberFeedback) desc += `\n   ⚠️ NUNCA RECEBEU FEEDBACK - INCLUSÃO!\n`;
+    if (c.vieses.desbalanceadoConstrutivo) desc += `   ⚠️ Só construtivos, zero reconhecimentos\n`;
+    if (c.vieses.recebeMuitoFeedback) desc += `   ⚠️ Muito feedback (${c.memoria.feedbacksUltimos90d} em 90d)\n`;
+    
+    if (c.reconhecimentoInvisivel.consistenteSilencioso) desc += `\n💎 CONSISTENTE SILENCIOSO - URGENTE reconhecer!\n`;
+    if (c.reconhecimentoInvisivel.evolucaoSilenciosa) desc += `📈 EVOLUÇÃO SILENCIOSA - reconhecer crescimento\n`;
     
     return desc;
   }).join('\n');
   
-  return `# 📅 HOJE É ${dataAtual.diaSemana.toUpperCase()}, ${dataAtual.dia} de ${dataAtual.mes}/${dataAtual.ano}
+  return `# 📅 HOJE: ${dataAtual.diaSemana.toUpperCase()}, ${dataAtual.dia}/${dataAtual.mes}/${dataAtual.ano}
 
 ${contextoTemporalTexto}
-Dias restantes no mês: ${dataAtual.diasRestantesMes}
-${dataAtual.fimQuarter ? '🏁 FIM DE QUARTER - momento crítico!' : ''}
+Dias restantes mês: ${dataAtual.diasRestantesMes}
+${dataAtual.fimQuarter ? '🏁 FIM DE Q - momento crítico!' : ''}
 
 ${alertasSistemicos}
 
-# 🎯 MISSÃO DE HOJE
+${secaoAprendizado}
 
-Você precisa gerar **${colabs[0]?.vagasNoLimite || 2} tarefas** estratégicas.
+# 🎯 MISSÃO HOJE
 
-Não escolha aleatoriamente. Pense:
-1. Quem tá em momento CRÍTICO (queda, burnout)?
-2. Quem MERECE reconhecimento ANTES que se sinta invisível?
-3. Quem tá PRONTO para próximo nível?
-4. Quem precisa de CUIDADO HUMANO?
-5. Quem foi ESQUECIDO (sem feedback há muito tempo)?
+Gerar **${colabs[0]?.vagasNoLimite || 2} tarefa(s)** estratégica(s).
+
+Use TODO o contexto:
+- Multi-prazo (7d/30d/longo)
+- Padrões detectados
+- Memória de feedbacks
+- APRENDIZADO do que funcionou/falhou
+- Saúde sistêmica do time
+- Contexto temporal (dia do mês)
 
 # 📊 SAÚDE DO TIME
 
-Total: ${saudeTime?.total || 0} colaboradores
+Total: ${saudeTime?.total || 0}
 - Acima meta P2M: ${saudeTime?.performance?.acimaMetaP2M || 0}
 - Acima meta Checkin: ${saudeTime?.performance?.acimaMetaCheckin || 0}
-- Subindo: ${saudeTime?.performance?.subindo || 0}
-- Caindo: ${saudeTime?.performance?.caindoTodos || 0}
+- Subindo: ${saudeTime?.performance?.subindo || 0} | Caindo: ${saudeTime?.performance?.caindoTodos || 0}
 
-Distribuição de feedback:
-- SEM feedback há 90+ dias: ${saudeTime?.distribuicaoFeedback?.semFeedback90d || 0}
-- ZERO reconhecimentos: ${saudeTime?.distribuicaoFeedback?.poucoReconhecimentos || 0}
+Distribuição feedback:
+- SEM feedback 90d: ${saudeTime?.distribuicaoFeedback?.semFeedback90d || 0}
+- Zero reconhecimentos: ${saudeTime?.distribuicaoFeedback?.poucoReconhecimentos || 0}
 
 Oportunidades:
-- 🎓 Prontos pra promoção: ${saudeTime?.oportunidades?.prontosPromocao || 0}
+- 🎓 Prontos promoção: ${saudeTime?.oportunidades?.prontosPromocao || 0}
 - 💎 Consistentes silenciosos: ${saudeTime?.oportunidades?.consistentesSilenciosos || 0}
 - 📈 Evoluções invisíveis: ${saudeTime?.oportunidades?.evolucoesInvisiveis || 0}
 
-# 👥 COLABORADORES ANALISÁVEIS HOJE
+# 👥 COLABORADORES ELEGÍVEIS
 
 ${colabsDescricao}
 
-# 🎯 SUAS TAREFAS
+# 🎯 INSTRUÇÕES FINAIS
 
-Gere ${colabs[0]?.vagasNoLimite || 2} tarefas. Sigam estes critérios:
+Gere ${colabs[0]?.vagasNoLimite || 2} tarefa(s) considerando:
 
-1. **NUNCA mesma pessoa que já tem tarefa pendente** (já filtrado)
-2. **NUNCA mesma pessoa que recebeu tarefa nos últimos 14 dias** (já filtrado)
-3. **EQUILIBRE tipos**: misture reconhecimento, coaching, prevenção, oportunidade
-4. **PROFUNDIDADE**: cada tarefa deve ter dado + padrão + estratégia + coaching
-5. **HUMANIDADE**: considere o ser humano por trás do número
-6. **CONTEXTO**: use o dia do mês na sua estratégia
-7. **MEMÓRIA**: lembre-se do histórico de feedbacks
-8. **ACOMPANHAMENTO**: se TL deu feedback recente, FOQUE no resultado
+1. APRENDIZADO: o que funcionou vs falhou no PASSADO
+2. INDIVIDUAL: histórico específico do colab (se houver)
+3. SISTÊMICO: saúde geral do time
+4. TEMPORAL: dia do mês, fim de Q
+5. HUMANO: contexto da pessoa, não só números
+6. EQUILÍBRIO: misture tipos (reconhecimento, coaching, prevenção)
 
 Responda APENAS o JSON array (sem texto antes/depois).`;
 }
