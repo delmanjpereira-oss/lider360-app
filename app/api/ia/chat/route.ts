@@ -1,17 +1,11 @@
 // ============================================
 // 💬 API CHAT COM CLAUDE - Estratega do Time
 // ============================================
-// TL conversa com Claude que tem contexto COMPLETO:
-// - Time inteiro
-// - Performance multi-prazo
-// - Padrões detectados
-// - Aprendizado das tarefas passadas
-// - Saúde sistêmica
+// 🔧 FIX: Coleta contexto SEMPRE, ignora trava de meta diária
 // ============================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { coletarContextoCompleto } from '../../../../lib/copiloto/coletor-contexto';
 import { chamarClaude } from '../../../../lib/ia/claude-client';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -20,6 +14,218 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 export const maxDuration = 60;
 
+// ============================================
+// COLETOR DEDICADO PRO CHAT
+// Não tem trava de meta diária - SEMPRE retorna contexto completo
+// ============================================
+async function coletarContextoChat() {
+  const { data: configData } = await supabase.from('config').select('chave, valor');
+  
+  const metas: Record<string, number> = {};
+  (configData || []).forEach((c: any) => {
+    metas[c.chave] = Number(c.valor) || 0;
+  });
+  
+  // Data atual
+  const dataAtualObj = new Date();
+  const diaAtual = dataAtualObj.getDate();
+  const mesAtual = dataAtualObj.getMonth() + 1;
+  const anoAtual = dataAtualObj.getFullYear();
+  const ultimoDiaMes = new Date(anoAtual, mesAtual, 0).getDate();
+  
+  let contextoTemporal: string;
+  if (diaAtual <= 7) contextoTemporal = 'inicio_mes';
+  else if (diaAtual <= 22) contextoTemporal = 'meio_mes';
+  else contextoTemporal = 'fechamento';
+  
+  const dataAtual = {
+    dia: diaAtual,
+    mes: mesAtual,
+    ano: anoAtual,
+    diasRestantesMes: ultimoDiaMes - diaAtual,
+    contextoTemporal,
+    fimQuarter: mesAtual % 3 === 0,
+    diaSemana: ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'][dataAtualObj.getDay()],
+  };
+  
+  // Busca colabs ativos
+  const { data: colabsData, error: errColabs } = await supabase
+    .from('colaboradores')
+    .select('*')
+    .eq('status', 'Ativo');
+  
+  console.log('🔍 [CHAT] Colabs ativos:', colabsData?.length || 0);
+  if (errColabs) console.error('❌ Erro buscando colabs:', errColabs);
+  
+  if (!colabsData || colabsData.length === 0) {
+    return {
+      colabs: [],
+      metas,
+      dataAtual,
+      saudeTime: null,
+      aprendizado: null,
+      erro: errColabs?.message || 'Sem colaboradores ativos no banco',
+    };
+  }
+  
+  const idsGroot = colabsData.map(c => c.id_groot);
+  const dias30atras = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const dias90atras = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  
+  // Busca dados leves pra cada colab
+  const [
+    { data: historicoData },
+    { data: produtividadeMensalData },
+    { data: presencaData },
+    { data: feedbacksData },
+    { data: tarefasFinalizadasData },
+  ] = await Promise.all([
+    supabase.from('historico')
+      .select('id_groot, data_referencia, prod_liquida, status_meta, impacto_net')
+      .in('id_groot', idsGroot)
+      .gte('data_referencia', dias30atras),
+    supabase.from('produtividade_mensal')
+      .select('id_groot, mes, ano, processo, prod_liquida_media, unidades_total, dias_trabalhados')
+      .in('id_groot', idsGroot)
+      .order('ano', { ascending: false })
+      .order('mes', { ascending: false }),
+    supabase.from('presenca')
+      .select('id_groot, motivo, status, data_referencia')
+      .in('id_groot', idsGroot)
+      .gte('data_referencia', dias90atras),
+    supabase.from('feedbacks')
+      .select('id_groot, tipo, classificacao, registrado_em')
+      .in('id_groot', idsGroot)
+      .gte('registrado_em', dias90atras),
+    supabase.from('tarefas')
+      .select('classificacao_aprendizado, tipo, finalizada_em')
+      .eq('status', 'Finalizada')
+      .not('classificacao_aprendizado', 'is', null)
+      .gte('finalizada_em', dias90atras),
+  ]);
+  
+  console.log('📊 [CHAT] Dados coletados:', {
+    historico: historicoData?.length || 0,
+    mensal: produtividadeMensalData?.length || 0,
+    presenca: presencaData?.length || 0,
+    feedbacks: feedbacksData?.length || 0,
+    finalizadas: tarefasFinalizadasData?.length || 0,
+  });
+  
+  // Mapeia por colab
+  const mapaHistorico: Record<string, any[]> = {};
+  (historicoData || []).forEach((h: any) => {
+    if (!mapaHistorico[h.id_groot]) mapaHistorico[h.id_groot] = [];
+    mapaHistorico[h.id_groot].push(h);
+  });
+  
+  const mapaMensal: Record<string, any[]> = {};
+  (produtividadeMensalData || []).forEach((p: any) => {
+    if (!mapaMensal[p.id_groot]) mapaMensal[p.id_groot] = [];
+    mapaMensal[p.id_groot].push(p);
+  });
+  
+  const mapaPresenca: Record<string, any[]> = {};
+  (presencaData || []).forEach((p: any) => {
+    if (!mapaPresenca[p.id_groot]) mapaPresenca[p.id_groot] = [];
+    mapaPresenca[p.id_groot].push(p);
+  });
+  
+  const mapaFeedbacks: Record<string, any[]> = {};
+  (feedbacksData || []).forEach((f: any) => {
+    if (!mapaFeedbacks[f.id_groot]) mapaFeedbacks[f.id_groot] = [];
+    mapaFeedbacks[f.id_groot].push(f);
+  });
+  
+  // Constrói lista de colabs com dados básicos
+  const colabs = colabsData.map((c: any) => {
+    const historico = mapaHistorico[c.id_groot] || [];
+    const mensais = mapaMensal[c.id_groot] || [];
+    const presencas = mapaPresenca[c.id_groot] || [];
+    const feedbacks = mapaFeedbacks[c.id_groot] || [];
+    
+    const liquidas = historico.map(h => Number(h.prod_liquida) || 0).filter(v => v > 0);
+    const media30d = liquidas.length > 0 ? liquidas.reduce((s, v) => s + v, 0) / liquidas.length : 0;
+    
+    const mensalAtual = mensais.find(m => m.mes === mesAtual && m.ano === anoAtual);
+    const mensalAnterior = mensais[1];
+    
+    const ultimoFeedback = feedbacks[0] || null;
+    const diasDesdeFeedback = ultimoFeedback 
+      ? Math.floor((Date.now() - new Date(ultimoFeedback.registrado_em).getTime()) / (1000 * 60 * 60 * 24))
+      : null;
+    
+    const atestados = presencas.filter(p => (p.motivo || '').toLowerCase().includes('atestado')).length;
+    const faltas = presencas.filter(p => (p.motivo || '').toLowerCase().includes('fi - falta')).length;
+    
+    return {
+      id_groot: c.id_groot,
+      nome: c.nome,
+      processo: c.processo,
+      cargo: c.cargo,
+      carreira: c.carreira,
+      media_30d: Math.round(media30d),
+      mensal_atual: mensalAtual ? Number(mensalAtual.prod_liquida_media) : null,
+      mensal_anterior: mensalAnterior ? Number(mensalAnterior.prod_liquida_media) : null,
+      dias_no_mes: mensalAtual?.dias_trabalhados || 0,
+      atestados_90d: atestados,
+      faltas_90d: faltas,
+      feedbacks_90d: feedbacks.length,
+      ultimo_feedback: ultimoFeedback ? {
+        tipo: ultimoFeedback.tipo,
+        classificacao: ultimoFeedback.classificacao,
+        dias_atras: diasDesdeFeedback,
+      } : null,
+      fonte_dados: liquidas.length > 0 ? 'diario' : (mensalAtual ? 'mensal' : 'sem_dados'),
+    };
+  });
+  
+  // Saúde do time
+  const META_P2M = metas['meta_liquida_p2m'] || 280;
+  const META_CHECKIN = metas['meta_liquida_checkin'] || 100;
+  
+  const saudeTime = {
+    total: colabs.length,
+    acima_meta: colabs.filter(c => {
+      const meta = c.processo === 'P2M' ? META_P2M : META_CHECKIN;
+      const valor = c.media_30d || c.mensal_atual || 0;
+      return valor >= meta;
+    }).length,
+    abaixo_meta: colabs.filter(c => {
+      const meta = c.processo === 'P2M' ? META_P2M : META_CHECKIN;
+      const valor = c.media_30d || c.mensal_atual || 0;
+      return valor > 0 && valor < meta;
+    }).length,
+    sem_dados: colabs.filter(c => c.fonte_dados === 'sem_dados').length,
+    sem_feedback_90d: colabs.filter(c => c.feedbacks_90d === 0).length,
+    atestados_alta: colabs.filter(c => c.atestados_90d >= 3).length,
+  };
+  
+  // Aprendizado
+  const aprendizado = (() => {
+    if (!tarefasFinalizadasData || tarefasFinalizadasData.length === 0) {
+      return { totalTarefas: 0, sucessos: 0, falhas: 0, taxaSucesso: 0 };
+    }
+    const sucessos = tarefasFinalizadasData.filter(t => 
+      t.classificacao_aprendizado?.includes('sucesso') || t.classificacao_aprendizado === 'abordagem_funcionou'
+    ).length;
+    const falhas = tarefasFinalizadasData.filter(t => 
+      t.classificacao_aprendizado?.includes('falha') || t.classificacao_aprendizado === 'abordagem_falhou'
+    ).length;
+    return {
+      totalTarefas: tarefasFinalizadasData.length,
+      sucessos,
+      falhas,
+      taxaSucesso: (sucessos + falhas) > 0 ? Math.round((sucessos / (sucessos + falhas)) * 100) : 0,
+    };
+  })();
+  
+  return { colabs, metas, dataAtual, saudeTime, aprendizado, erro: null };
+}
+
+// ============================================
+// POST: Chat com Claude
+// ============================================
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -31,14 +237,14 @@ export async function POST(req: NextRequest) {
     
     const conversaId = id_conversa || `chat-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     
-    // 1️⃣ Salva pergunta do usuário
+    // 1️⃣ Salva pergunta
     await supabase.from('chat_conversas').insert({
       id_conversa: conversaId,
       papel: 'user',
       conteudo: mensagem,
     });
     
-    // 2️⃣ Busca histórico da conversa (últimas 10 mensagens)
+    // 2️⃣ Busca histórico
     const { data: historicoMsgs } = await supabase
       .from('chat_conversas')
       .select('papel, conteudo')
@@ -46,34 +252,34 @@ export async function POST(req: NextRequest) {
       .order('criado_em', { ascending: true })
       .limit(20);
     
-    // 3️⃣ Coleta contexto completo do time
-    const ctx = await coletarContextoCompleto();
+    // 3️⃣ Coleta contexto (SEM trava)
+    const ctx = await coletarContextoChat();
     
-    // 4️⃣ Monta system prompt com persona estratega
+    console.log(`💬 [CHAT] Pergunta: "${mensagem.slice(0, 50)}..." | Colabs no contexto: ${ctx.colabs.length}`);
+    
+    // 4️⃣ Monta system prompt
     const systemPrompt = construirSystemPrompt(ctx);
     
-    // 5️⃣ Monta mensagens pro Claude
+    // 5️⃣ Chama Claude
     const messages = (historicoMsgs || []).map(m => ({
       role: m.papel as 'user' | 'assistant',
       content: m.conteudo,
     }));
     
-    // 6️⃣ Chama Claude
     const resposta = await chamarClaude(messages, {
       systemPrompt,
       temperature: 0.6,
       maxTokens: 3000,
     });
     
-    // 7️⃣ Salva resposta da Claude
+    // 6️⃣ Salva resposta
     await supabase.from('chat_conversas').insert({
       id_conversa: conversaId,
       papel: 'assistant',
       conteudo: resposta,
       contexto_usado: {
         total_colabs: ctx.colabs.length,
-        tarefas_hoje: ctx.tarefasGeradasHoje,
-        aprendizado_aplicado: ctx.aprendizado.totalTarefas > 0,
+        sem_dados: ctx.saudeTime?.sem_dados || 0,
       },
     });
     
@@ -81,175 +287,113 @@ export async function POST(req: NextRequest) {
       sucesso: true,
       resposta,
       id_conversa: conversaId,
-      modelo: 'claude-sonnet-4-5',
+      debug: {
+        total_colabs: ctx.colabs.length,
+        com_dados: ctx.colabs.filter(c => c.fonte_dados !== 'sem_dados').length,
+      },
     });
     
   } catch (e: any) {
     console.error('❌ Erro chat:', e);
-    return NextResponse.json({ 
-      sucesso: false, 
-      erro: e.message 
-    }, { status: 500 });
+    return NextResponse.json({ sucesso: false, erro: e.message }, { status: 500 });
   }
 }
 
 // ============================================
-// GET: Lista conversas anteriores
+// SYSTEM PROMPT
 // ============================================
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const idConversa = searchParams.get('id_conversa');
-    
-    if (idConversa) {
-      // Pega mensagens de UMA conversa
-      const { data } = await supabase
-        .from('chat_conversas')
-        .select('*')
-        .eq('id_conversa', idConversa)
-        .order('criado_em', { ascending: true });
-      
-      return NextResponse.json({ mensagens: data || [] });
-    } else {
-      // Lista TODAS as conversas (agrupadas)
-      const { data } = await supabase
-        .from('chat_conversas')
-        .select('id_conversa, conteudo, criado_em')
-        .eq('papel', 'user')
-        .order('criado_em', { ascending: false })
-        .limit(20);
-      
-      // Agrupa por id_conversa, pegando primeira mensagem
-      const conversas: any[] = [];
-      const idsVistos = new Set();
-      
-      (data || []).forEach(m => {
-        if (!idsVistos.has(m.id_conversa)) {
-          idsVistos.add(m.id_conversa);
-          conversas.push({
-            id_conversa: m.id_conversa,
-            primeira_msg: m.conteudo.slice(0, 100),
-            criado_em: m.criado_em,
-          });
-        }
-      });
-      
-      return NextResponse.json({ conversas });
-    }
-  } catch (e: any) {
-    return NextResponse.json({ erro: e.message }, { status: 500 });
-  }
-}
-
-// ============================================
-// 🧠 SYSTEM PROMPT - Persona ESTRATEGA
-// ============================================
-
 function construirSystemPrompt(ctx: any): string {
-  const META_LIQUIDA_P2M = ctx.metas['meta_liquida_p2m'] || 280;
-  const META_LIQUIDA_CHECKIN = ctx.metas['meta_liquida_checkin'] || 100;
-  
-  // Lista de colabs resumida
-  const colabsResumo = ctx.colabs.slice(0, 50).map((c: any) => {
-    const perf = c.performance.medio_prazo_30d.media;
-    const tend = c.performance.medio_prazo_30d.tendencia;
-    const meta = c.processo === 'P2M' ? META_LIQUIDA_P2M : META_LIQUIDA_CHECKIN;
-    const pctMeta = meta > 0 ? ((perf / meta) * 100).toFixed(0) : '0';
-    
-    return `${c.nome} (${c.processo}) | ${perf} pç/h (${pctMeta}% meta) | ${tend.tendencia} ${tend.variacao_pct > 0 ? '+' : ''}${tend.variacao_pct}% | ABS ${c.presenca.pctAbs}% | ${c.memoria.feedbacksUltimos90d} FBs 90d`;
-  }).join('\n');
-  
-  // Aprendizado da IA
-  let aprendizadoTexto = '';
-  if (ctx.aprendizado && ctx.aprendizado.totalTarefas > 0) {
-    aprendizadoTexto = `
-## SEU APRENDIZADO COM ESSE TIME (últimos 90 dias):
+  if (!ctx.colabs || ctx.colabs.length === 0) {
+    return `Você é o Estratega do Delman.
 
-- ${ctx.aprendizado.totalTarefas} tarefas finalizadas
-- ${ctx.aprendizado.taxaSucesso}% de taxa de sucesso (${ctx.aprendizado.sucessos} sucessos / ${ctx.aprendizado.falhas} falhas)
+ATENÇÃO: Não foram encontrados colaboradores ativos no sistema.
+${ctx.erro ? `Erro: ${ctx.erro}` : ''}
 
-${ctx.aprendizado.estrategiasEficazes.length > 0 ? `Estratégias que funcionaram:
-${ctx.aprendizado.estrategiasEficazes.map((e: string) => `  ✅ ${e}`).join('\n')}` : ''}
+Se o Delman perguntar sobre o time, explique que houve um problema de sincronização e peça pra ele verificar:
+1. Se há colabs com status="Ativo" no banco
+2. Se a tabela colaboradores está populada
 
-${ctx.aprendizado.estrategiasIneficazes.length > 0 ? `Estratégias que falharam:
-${ctx.aprendizado.estrategiasIneficazes.map((e: string) => `  ❌ ${e}`).join('\n')}` : ''}
-`;
+Seja honesto sobre não ter dados, mas amigável.`;
   }
+  
+  const META_P2M = ctx.metas['meta_liquida_p2m'] || 280;
+  const META_CHECKIN = ctx.metas['meta_liquida_checkin'] || 100;
+  
+  // Lista TODOS os colabs com dados básicos
+  const colabsTexto = ctx.colabs.map((c: any) => {
+    const valor = c.media_30d || c.mensal_atual || 0;
+    const meta = c.processo === 'P2M' ? META_P2M : META_CHECKIN;
+    const pctMeta = meta > 0 && valor > 0 ? Math.round((valor / meta) * 100) : 0;
+    const fonte = c.fonte_dados === 'diario' ? '(diário)' : c.fonte_dados === 'mensal' ? `(mensal ${c.dias_no_mes}d)` : '(SEM dados)';
+    
+    let linha = `• ${c.nome} (${c.processo || '?'})`;
+    if (valor > 0) {
+      linha += ` | ${valor} pç/h ${fonte} = ${pctMeta}% meta`;
+    } else {
+      linha += ` | sem dados de performance`;
+    }
+    if (c.atestados_90d > 0) linha += ` | ${c.atestados_90d}ates`;
+    if (c.faltas_90d > 0) linha += ` | ${c.faltas_90d}faltas`;
+    if (c.ultimo_feedback) {
+      linha += ` | FB ${c.ultimo_feedback.tipo} há ${c.ultimo_feedback.dias_atras}d`;
+    } else {
+      linha += ` | SEM feedback 90d`;
+    }
+    return linha;
+  }).join('\n');
   
   return `Você é o ESTRATEGA SÊNIOR do MELI, conversando com Delman (TL do Perus RC01).
 
 # QUEM VOCÊ É
-
-Você é a EVOLUÇÃO do Copiloto IA do Delman.
 - 15 anos de operações P2M/Checkin/Sorting
 - Coach certificado ICF
-- Especialista em desenvolvimento humano + performance
 - Conhece o TIME do Delman como ninguém
-- Já analisou dados do time há semanas
 - Bate metas há 8 trimestres seguidos
 
 # COMO VOCÊ CONVERSA
-
-ESTILO:
 - DIRETO mas humano
-- ESTRATÉGICO mas prático
-- USA NÚMEROS REAIS do time
-- PROVOCA reflexão (coaching)
-- ANTECIPA antes de reagir
-- LEMBRA do histórico
+- Cite NOMES REAIS do time
+- Use NÚMEROS REAIS
+- Antecipe antes de reagir
+- Faça coaching, não comando
 
 NÃO:
 - Não dê respostas genéricas
+- Não diga "não tenho dados" se TEM dados abaixo
 - Não enrole
-- Não use linguagem corporativa fria
-- Não cite o time inteiro se a pergunta é específica
 
-SIM:
-- Cite nomes específicos quando relevante
-- Conecte padrões que você já detectou
-- Sugira AÇÕES concretas
-- Faça perguntas ESTRATÉGICAS quando útil
-
-# CONTEXTO ATUAL DO TIME (${ctx.dataAtual.dia}/${ctx.dataAtual.mes}/${ctx.dataAtual.ano})
+# CONTEXTO ATUAL (${ctx.dataAtual.dia}/${ctx.dataAtual.mes}/${ctx.dataAtual.ano})
 
 Total: ${ctx.colabs.length} colabs ativos
-Contexto temporal: ${ctx.dataAtual.contextoTemporal} (${ctx.dataAtual.diasRestantesMes} dias restantes no mês)
-${ctx.dataAtual.fimQuarter ? '🏁 FIM DE QUARTER - momento crítico!' : ''}
+Contexto: ${ctx.dataAtual.contextoTemporal} (${ctx.dataAtual.diasRestantesMes} dias restantes)
 
 ## SAÚDE GERAL:
-- Acima meta P2M: ${ctx.saudeTime?.performance?.acimaMetaP2M || 0}
-- Acima meta Checkin: ${ctx.saudeTime?.performance?.acimaMetaCheckin || 0}
-- Subindo: ${ctx.saudeTime?.performance?.subindo || 0}
-- Caindo: ${ctx.saudeTime?.performance?.caindoTodos || 0}
+- Acima meta: ${ctx.saudeTime?.acima_meta || 0}
+- Abaixo meta: ${ctx.saudeTime?.abaixo_meta || 0}
+- Sem dados: ${ctx.saudeTime?.sem_dados || 0}
+- Sem feedback 90d: ${ctx.saudeTime?.sem_feedback_90d || 0}
+- Atestados em alta (3+): ${ctx.saudeTime?.atestados_alta || 0}
 
-## ALERTAS:
-${ctx.saudeTime?.alertas?.muitasQuedasJuntas ? '🚨 Quedas em massa detectadas\n' : ''}${ctx.saudeTime?.alertas?.atestadosEmAlta ? '🩺 Atestados em alta\n' : ''}${ctx.saudeTime?.alertas?.burnoutColetivo ? '🔥 Burnout coletivo\n' : ''}
+## METAS:
+- P2M: ${META_P2M} pç/h
+- Checkin: ${META_CHECKIN} pç/h
 
-## DISTRIBUIÇÃO DE FEEDBACK:
-- SEM feedback 90d: ${ctx.saudeTime?.distribuicaoFeedback?.semFeedback90d || 0}
-- Zero reconhecimentos: ${ctx.saudeTime?.distribuicaoFeedback?.poucoReconhecimentos || 0}
+## APRENDIZADO:
+- Total tarefas finalizadas: ${ctx.aprendizado?.totalTarefas || 0}
+- Taxa de sucesso: ${ctx.aprendizado?.taxaSucesso || 0}%
 
-## OPORTUNIDADES:
-- 🎓 Prontos pra promoção: ${ctx.saudeTime?.oportunidades?.prontosPromocao || 0}
-- 💎 Consistentes silenciosos: ${ctx.saudeTime?.oportunidades?.consistentesSilenciosos || 0}
+# 👥 TIME COMPLETO DO DELMAN:
 
-${aprendizadoTexto}
-
-## COLABS DO TIME (resumo):
-
-${colabsResumo}
+${colabsTexto}
 
 # REGRAS DE OURO
 
-1. **CITE NÚMEROS REAIS** - sempre que falar de alguém, use dados do contexto
-2. **SEJA ESTRATÉGICO** - vá além do óbvio
-3. **CONSIDERE O HUMANO** - não é só performance, é gente
-4. **USE APRENDIZADO** - se algo funcionou no passado, mencione
-5. **PERGUNTE quando útil** - coaching, não comando
-6. **SEJA CONCISO** - resposta direta, sem rodeio
+1. **USE OS DADOS ACIMA** - o time TEM ${ctx.colabs.length} pessoas, com dados reais
+2. **CITE NOMES** - sempre que falar de alguém, use o nome real
+3. **NÚMEROS REAIS** - performance, atestados, feedbacks
+4. **SEJA ESTRATÉGICO** - vá além do óbvio
+5. **CONSIDERE HUMANO** - pessoa por trás do número
 
-Quando o Delman fizer perguntas, RESPONDA COMO UM PARCEIRO ESTRATÉGICO QUE CONHECE PROFUNDAMENTE O TIME.
-
-Use Markdown leve (negritos, listas, headers H3 quando útil).
-NÃO use blocos de código a não ser que ele pergunte sobre código.`;
+Use Markdown leve (negritos, listas).
+Resposta DIRETA, sem rodeio.`;
 }
