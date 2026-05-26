@@ -1,19 +1,10 @@
 // ============================================
-// 🧠 COLETOR DE CONTEXTO INTELIGENTE
+// 🧠 COLETOR INTELIGENTE + APRENDIZADO
 // ============================================
-// 12 IDEIAS INCORPORADAS:
-// 1. Acompanhamento de feedback
-// 2. Saúde do time (sistêmico)
-// 3. Ciclos 30/60/90
-// 4. Coaching com perguntas
-// 5. Reconhecimento estratégico
-// 6. Anti-vieses
-// 7. Memória histórica
-// 8. Quebra-gelo
-// 9. Radar de burnout
-// 10. Mentora de escalada
-// 11. Detetive de padrões
-// 12. Defensora (humanidade)
+// Agora a IA APRENDE com suas ações passadas:
+// - O que funcionou (sucesso)
+// - O que não funcionou (falha)
+// - Padrões do seu time específico
 // ============================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -21,10 +12,6 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
-
-// ============================================
-// HELPERS
-// ============================================
 
 function calcularMesesEntreDatas(dataInicio: string | null): number {
   if (!dataInicio) return 0;
@@ -90,11 +77,10 @@ function detectarPadroes(historicoColab: any[]): {
   const consistente = coefVariacao < 8;
   const volatil = coefVariacao > 15;
   
-  // Análise por dia da semana
   const porDia: Record<number, number[]> = {};
   historicoColab.forEach(h => {
     const data = new Date(h.data_referencia + 'T12:00:00');
-    const dia = data.getDay(); // 0=domingo, 1=segunda, 5=sexta
+    const dia = data.getDay();
     if (!porDia[dia]) porDia[dia] = [];
     if (Number(h.liquida) > 0) porDia[dia].push(Number(h.liquida));
   });
@@ -106,6 +92,101 @@ function detectarPadroes(historicoColab: any[]): {
   const cai_sexta = mediaSexta < media * 0.92;
   
   return { cai_segunda, cai_sexta, consistente, volatil, variancia: Number(coefVariacao.toFixed(1)) };
+}
+
+// ============================================
+// 🧠 ANALISA APRENDIZADO DAS TAREFAS PASSADAS
+// ============================================
+function analisarAprendizado(tarefasPassadas: any[]): {
+  totalTarefas: number;
+  sucessos: number;
+  falhas: number;
+  neutros: number;
+  taxaSucesso: number;
+  estrategiasEficazes: string[];
+  estrategiasIneficazes: string[];
+  historicoDetalhado: any[];
+} {
+  if (!tarefasPassadas || tarefasPassadas.length === 0) {
+    return {
+      totalTarefas: 0,
+      sucessos: 0,
+      falhas: 0,
+      neutros: 0,
+      taxaSucesso: 0,
+      estrategiasEficazes: [],
+      estrategiasIneficazes: [],
+      historicoDetalhado: [],
+    };
+  }
+  
+  // Conta por classificação
+  const sucessos = tarefasPassadas.filter(t => 
+    t.classificacao_aprendizado === 'sucesso_confirmado' || 
+    (t.classificacao_aprendizado === 'abordagem_funcionou' && !t.performance_depois_30d)
+  ).length;
+  
+  const falhas = tarefasPassadas.filter(t =>
+    t.classificacao_aprendizado === 'falha_confirmada' ||
+    (t.classificacao_aprendizado === 'abordagem_falhou' && !t.performance_depois_30d)
+  ).length;
+  
+  const neutros = tarefasPassadas.filter(t =>
+    t.classificacao_aprendizado === 'efeito_neutro'
+  ).length;
+  
+  const totalAvaliadas = sucessos + falhas + neutros;
+  const taxaSucesso = totalAvaliadas > 0 ? (sucessos / totalAvaliadas) * 100 : 0;
+  
+  // Identifica estratégias eficazes (tipos que tiveram sucesso)
+  const tiposComSucesso: Record<string, number> = {};
+  const tiposComFalha: Record<string, number> = {};
+  
+  tarefasPassadas.forEach(t => {
+    if (!t.tipo) return;
+    if (t.classificacao_aprendizado === 'sucesso_confirmado' || t.classificacao_aprendizado === 'abordagem_funcionou') {
+      tiposComSucesso[t.tipo] = (tiposComSucesso[t.tipo] || 0) + 1;
+    }
+    if (t.classificacao_aprendizado === 'falha_confirmada' || t.classificacao_aprendizado === 'abordagem_falhou') {
+      tiposComFalha[t.tipo] = (tiposComFalha[t.tipo] || 0) + 1;
+    }
+  });
+  
+  const estrategiasEficazes = Object.entries(tiposComSucesso)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([tipo, count]) => `${tipo} (${count} sucessos)`);
+  
+  const estrategiasIneficazes = Object.entries(tiposComFalha)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([tipo, count]) => `${tipo} (${count} falhas)`);
+  
+  // Histórico detalhado (últimas 10 tarefas finalizadas)
+  const historicoDetalhado = tarefasPassadas
+    .filter(t => t.finalizada_em)
+    .sort((a, b) => new Date(b.finalizada_em).getTime() - new Date(a.finalizada_em).getTime())
+    .slice(0, 10)
+    .map(t => ({
+      nome: t.nome,
+      tipo: t.tipo,
+      acao_tomada: t.acao_tomada,
+      resultado: t.classificacao_aprendizado,
+      variacao_30d: t.performance_depois_30d?.variacao_pct || null,
+      observacao: t.observacao_tl,
+      diasAtras: Math.floor((Date.now() - new Date(t.finalizada_em).getTime()) / (1000 * 60 * 60 * 24)),
+    }));
+  
+  return {
+    totalTarefas: tarefasPassadas.length,
+    sucessos,
+    falhas,
+    neutros,
+    taxaSucesso: Number(taxaSucesso.toFixed(1)),
+    estrategiasEficazes,
+    estrategiasIneficazes,
+    historicoDetalhado,
+  };
 }
 
 // ============================================
@@ -121,8 +202,8 @@ export async function coletarContextoCompleto(): Promise<{
   vagasHoje: number;
   saudeTime: any;
   dataAtual: any;
+  aprendizado: any;
 }> {
-  // 1️⃣ Config
   const { data: configData } = await supabase.from('config').select('chave, valor');
   
   const metas: Record<string, number> = {};
@@ -130,10 +211,8 @@ export async function coletarContextoCompleto(): Promise<{
     metas[c.chave] = Number(c.valor) || 0;
   });
   
-  // 🆕 META DIÁRIA da IA (lê da config existente)
   const metaDiariaIA = metas['limite_tarefas_pendentes'] || 2;
   
-  // 2️⃣ Verifica tarefas geradas HOJE
   const hoje = new Date().toISOString().split('T')[0];
   
   const { count: tarefasHoje } = await supabase
@@ -146,7 +225,6 @@ export async function coletarContextoCompleto(): Promise<{
   const vagasHoje = Math.max(0, metaDiariaIA - (tarefasHoje || 0));
   const podeGerar = vagasHoje > 0;
   
-  // 3️⃣ Data e contexto temporal
   const dataAtualObj = new Date();
   const diaAtual = dataAtualObj.getDate();
   const mesAtual = dataAtualObj.getMonth() + 1;
@@ -169,6 +247,19 @@ export async function coletarContextoCompleto(): Promise<{
     diaSemana: ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'][dataAtualObj.getDay()],
   };
   
+  // 🧠 BUSCA APRENDIZADO - tarefas finalizadas nos últimos 90 dias
+  const dias90atras = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  
+  const { data: tarefasFinalizadasData } = await supabase
+    .from('tarefas')
+    .select('*')
+    .eq('gerado_por_ia', true)
+    .eq('status', 'Finalizada')
+    .gte('finalizada_em', dias90atras)
+    .not('classificacao_aprendizado', 'is', null);
+  
+  const aprendizado = analisarAprendizado(tarefasFinalizadasData || []);
+  
   if (!podeGerar) {
     return { 
       colabs: [], 
@@ -179,10 +270,10 @@ export async function coletarContextoCompleto(): Promise<{
       vagasHoje: 0,
       saudeTime: null,
       dataAtual,
+      aprendizado,
     };
   }
   
-  // 4️⃣ Pega TODOS os dados
   const { data: colabsData } = await supabase
     .from('colaboradores')
     .select('*')
@@ -191,19 +282,16 @@ export async function coletarContextoCompleto(): Promise<{
   if (!colabsData) return { 
     colabs: [], metas, metaDiariaIA, 
     tarefasGeradasHoje: tarefasHoje || 0,
-    podeGerar: false, vagasHoje: 0, saudeTime: null, dataAtual,
+    podeGerar: false, vagasHoje: 0, saudeTime: null, dataAtual, aprendizado,
   };
   
   const idsGroot = colabsData.map(c => c.id_groot);
   
-  // Período do quarter atual
   const trimestreAtual = Math.ceil(mesAtual / 3);
   const inicioQuarter = `${anoAtual}-${String((trimestreAtual - 1) * 3 + 1).padStart(2, '0')}-01`;
   
-  // Datas relativas
   const dias14atras = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const dias30atras = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const dias90atras = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
   const [
     { data: historicoData },
@@ -215,71 +303,27 @@ export async function coletarContextoCompleto(): Promise<{
     { data: tarefasRecentesData },
     { data: feedbacksRecentesData },
     { data: feedbacksHistData },
+    { data: tarefasPorColabFinalizadas },
   ] = await Promise.all([
-    // Histórico diário (3 meses pra ter visão longa)
-    supabase
-      .from('historico')
-      .select('*')
+    supabase.from('historico').select('*').in('id_groot', idsGroot).gte('data_referencia', dias90atras),
+    supabase.from('produtividade_mensal').select('*').in('id_groot', idsGroot).order('ano', { ascending: false }).order('mes', { ascending: false }),
+    supabase.from('presenca').select('*').in('id_groot', idsGroot).gte('data_referencia', dias90atras).neq('status', 'descartado'),
+    supabase.from('ima_manual').select('*').in('id_groot', idsGroot).order('data_avaliacao', { ascending: false }),
+    supabase.from('calibracoes').select('*').in('id_groot', idsGroot).order('criado_em', { ascending: false }),
+    supabase.from('tarefas').select('id_groot').eq('status', 'Pendente'),
+    supabase.from('tarefas').select('id_groot, criado_em, status, tipo, diagnostico').gte('criado_em', dias14atras),
+    supabase.from('feedbacks').select('id_groot, tipo, classificacao, observacao, registrado_em').gte('registrado_em', dias30atras).order('registrado_em', { ascending: false }),
+    supabase.from('feedbacks').select('id_groot, tipo, classificacao, observacao, registrado_em').gte('registrado_em', dias90atras),
+    // 🧠 Tarefas finalizadas POR COLAB (aprendizado individual)
+    supabase.from('tarefas')
+      .select('id_groot, tipo, classificacao_aprendizado, acao_tomada, observacao_tl, performance_depois_30d, finalizada_em')
       .in('id_groot', idsGroot)
-      .gte('data_referencia', dias90atras),
-    
-    // Produtividade mensal
-    supabase
-      .from('produtividade_mensal')
-      .select('*')
-      .in('id_groot', idsGroot)
-      .order('ano', { ascending: false })
-      .order('mes', { ascending: false }),
-    
-    // Presença (90 dias pra ver padrões)
-    supabase
-      .from('presenca')
-      .select('*')
-      .in('id_groot', idsGroot)
-      .gte('data_referencia', dias90atras)
-      .neq('status', 'descartado'),
-    
-    // IMA
-    supabase
-      .from('ima_manual')
-      .select('*')
-      .in('id_groot', idsGroot)
-      .order('data_avaliacao', { ascending: false }),
-    
-    // Calibrações
-    supabase
-      .from('calibracoes')
-      .select('*')
-      .in('id_groot', idsGroot)
-      .order('criado_em', { ascending: false }),
-    
-    // Tarefas pendentes
-    supabase
-      .from('tarefas')
-      .select('id_groot')
-      .eq('status', 'Pendente'),
-    
-    // 🆕 Tarefas recentes (anti-duplicação 14 dias)
-    supabase
-      .from('tarefas')
-      .select('id_groot, criado_em, status, tipo, diagnostico')
-      .gte('criado_em', dias14atras),
-    
-    // 🆕 Feedbacks recentes (acompanhamento)
-    supabase
-      .from('feedbacks')
-      .select('id_groot, tipo, classificacao, observacao, registrado_em')
-      .gte('registrado_em', dias30atras)
-      .order('registrado_em', { ascending: false }),
-    
-    // 🆕 Feedbacks histórico (memória)
-    supabase
-      .from('feedbacks')
-      .select('id_groot, tipo, classificacao, observacao, registrado_em')
-      .gte('registrado_em', dias90atras),
+      .eq('status', 'Finalizada')
+      .not('classificacao_aprendizado', 'is', null)
+      .gte('finalizada_em', dias90atras),
   ]);
   
-  // 5️⃣ Mapeia tudo por id_groot
+  // Mapeia tudo
   const mapaHistorico: Record<string, any[]> = {};
   (historicoData || []).forEach((h: any) => {
     if (!mapaHistorico[h.id_groot]) mapaHistorico[h.id_groot] = [];
@@ -298,12 +342,6 @@ export async function coletarContextoCompleto(): Promise<{
     mapaPresenca[p.id_groot].push(p);
   });
   
-  const mapaIma: Record<string, any[]> = {};
-  (imaData || []).forEach((i: any) => {
-    if (!mapaIma[i.id_groot]) mapaIma[i.id_groot] = [];
-    mapaIma[i.id_groot].push(i);
-  });
-  
   const mapaCalibracoes: Record<string, any[]> = {};
   (calibracoesData || []).forEach((c: any) => {
     if (!mapaCalibracoes[c.id_groot]) mapaCalibracoes[c.id_groot] = [];
@@ -315,28 +353,32 @@ export async function coletarContextoCompleto(): Promise<{
     mapaTarefasPendentes[t.id_groot] = (mapaTarefasPendentes[t.id_groot] || 0) + 1;
   });
   
-  // 🆕 Tarefas recentes (anti-duplicação)
   const mapaTarefasRecentes: Record<string, any[]> = {};
   (tarefasRecentesData || []).forEach((t: any) => {
     if (!mapaTarefasRecentes[t.id_groot]) mapaTarefasRecentes[t.id_groot] = [];
     mapaTarefasRecentes[t.id_groot].push(t);
   });
   
-  // 🆕 Feedbacks recentes (acompanhamento)
   const mapaFeedbacksRecentes: Record<string, any[]> = {};
   (feedbacksRecentesData || []).forEach((f: any) => {
     if (!mapaFeedbacksRecentes[f.id_groot]) mapaFeedbacksRecentes[f.id_groot] = [];
     mapaFeedbacksRecentes[f.id_groot].push(f);
   });
   
-  // 🆕 Feedbacks histórico (memória)
   const mapaFeedbacksHist: Record<string, any[]> = {};
   (feedbacksHistData || []).forEach((f: any) => {
     if (!mapaFeedbacksHist[f.id_groot]) mapaFeedbacksHist[f.id_groot] = [];
     mapaFeedbacksHist[f.id_groot].push(f);
   });
   
-  // 6️⃣ Constrói contexto pra CADA colab
+  // 🧠 APRENDIZADO POR COLAB
+  const mapaAprendizadoColab: Record<string, any[]> = {};
+  (tarefasPorColabFinalizadas || []).forEach((t: any) => {
+    if (!mapaAprendizadoColab[t.id_groot]) mapaAprendizadoColab[t.id_groot] = [];
+    mapaAprendizadoColab[t.id_groot].push(t);
+  });
+  
+  // Constrói contexto pra CADA colab
   const colabs = colabsData.map((c: any) => {
     const historicoColab = mapaHistorico[c.id_groot] || [];
     const mensaisColab = mapaProdMensal[c.id_groot] || [];
@@ -345,8 +387,8 @@ export async function coletarContextoCompleto(): Promise<{
     const feedbacksHist = mapaFeedbacksHist[c.id_groot] || [];
     const tarefasRec = mapaTarefasRecentes[c.id_groot] || [];
     const calibracoes = mapaCalibracoes[c.id_groot] || [];
+    const aprendizadoColab = mapaAprendizadoColab[c.id_groot] || [];
     
-    // 📅 PERFORMANCE - múltiplos prazos
     const historico7d = historicoColab.filter(h => 
       h.data_referencia >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     );
@@ -360,27 +402,17 @@ export async function coletarContextoCompleto(): Promise<{
     const media7d = liquidas7d.length > 0 ? liquidas7d.reduce((s, v) => s + v, 0) / liquidas7d.length : 0;
     const media30d = liquidas30d.length > 0 ? liquidas30d.reduce((s, v) => s + v, 0) / liquidas30d.length : 0;
     
-    // 📈 TENDÊNCIA múltipla
     const tendencia7d = analisarTendencia(liquidas7d);
     const tendencia30d = analisarTendencia(liquidas30d);
-    
-    // 🔍 PADRÕES detectados
     const padroes = detectarPadroes(historico30d);
     
-    // 📊 MENSAL atual
     const mensalAtual = mensaisColab.find(p => p.mes === mesAtual && p.ano === anoAtual);
-    const historicoMensal = mensaisColab.slice(0, 3); // últimos 3 meses
+    const historicoMensal = mensaisColab.slice(0, 3);
     
-    // 🩺 PRESENÇA (90 dias pra ver padrões)
     const presencaStats = {
-      presencas: 0,
-      atestados: 0,
-      faltasInjustificadas: 0,
-      bhPlanejado: 0,
-      bhNaoPlanejado: 0,
-      sinergiaExterna: 0,
-      abandono: 0,
-      pctAbs: 0,
+      presencas: 0, atestados: 0, faltasInjustificadas: 0,
+      bhPlanejado: 0, bhNaoPlanejado: 0, sinergiaExterna: 0,
+      abandono: 0, pctAbs: 0,
       tendenciaAtestados: 'estavel' as 'subindo' | 'estavel' | 'caindo',
     };
     
@@ -401,7 +433,6 @@ export async function coletarContextoCompleto(): Promise<{
       ? Number((((presencaStats.faltasInjustificadas + presencaStats.bhNaoPlanejado) / totalContab) * 100).toFixed(1))
       : 0;
     
-    // 🆕 Detecta tendência de atestados (radar burnout)
     const atestados30d = presencas.filter(p => 
       p.data_referencia >= dias30atras && (p.motivo || '').toLowerCase().includes('atestado')
     ).length;
@@ -417,11 +448,10 @@ export async function coletarContextoCompleto(): Promise<{
       presencaStats.tendenciaAtestados = 'caindo';
     }
     
-    // 🎯 CARREIRA
     const mesesNaEmpresa = calcularMesesEntreDatas(c.data_admissao);
     const mesesNaCarreira = calcularMesesEntreDatas(c.data_entrada_carreira);
     
-    // 🆕 ACOMPANHAMENTO DE FEEDBACK
+    // Acompanhamento de feedback
     const ultimoFeedback = feedbacksRec[0] || null;
     let acompanhamento = null;
     
@@ -430,17 +460,14 @@ export async function coletarContextoCompleto(): Promise<{
         (Date.now() - new Date(ultimoFeedback.registrado_em).getTime()) / (1000 * 60 * 60 * 24)
       );
       
-      // Compara performance ANTES x DEPOIS do feedback
       const dataFeedback = new Date(ultimoFeedback.registrado_em).toISOString().split('T')[0];
       const antesFeedback = historicoColab
         .filter(h => h.data_referencia < dataFeedback)
         .slice(-7)
-        .map(h => Number(h.liquida) || 0)
-        .filter(v => v > 0);
+        .map(h => Number(h.liquida) || 0).filter(v => v > 0);
       const depoisFeedback = historicoColab
         .filter(h => h.data_referencia >= dataFeedback)
-        .map(h => Number(h.liquida) || 0)
-        .filter(v => v > 0);
+        .map(h => Number(h.liquida) || 0).filter(v => v > 0);
       
       const mediaAntes = antesFeedback.length > 0 ? antesFeedback.reduce((s, v) => s + v, 0) / antesFeedback.length : 0;
       const mediaDepois = depoisFeedback.length > 0 ? depoisFeedback.reduce((s, v) => s + v, 0) / depoisFeedback.length : 0;
@@ -454,22 +481,18 @@ export async function coletarContextoCompleto(): Promise<{
       }
       
       acompanhamento = {
-        diasDesdeFeedback,
-        tipoFeedback: ultimoFeedback.tipo,
+        diasDesdeFeedback, tipoFeedback: ultimoFeedback.tipo,
         classificacao: ultimoFeedback.classificacao,
         observacao: ultimoFeedback.observacao?.slice(0, 200),
-        mediaAntes: Math.round(mediaAntes),
-        mediaDepois: Math.round(mediaDepois),
+        mediaAntes: Math.round(mediaAntes), mediaDepois: Math.round(mediaDepois),
         evolucao,
       };
     }
     
-    // 🆕 ANTI-DUPLICAÇÃO (14 dias)
     const temTarefaPendente = (mapaTarefasPendentes[c.id_groot] || 0) > 0;
     const tarefasRecentesPessoa = tarefasRec.length;
     const podeSerSugerido = !temTarefaPendente && tarefasRecentesPessoa === 0;
     
-    // 🆕 ANTI-VIESES (frequência de feedback)
     const feedbacksUltimos90d = feedbacksHist.length;
     const feedbacksConstrutivos = feedbacksHist.filter(f => f.tipo === 'Construtivo').length;
     const feedbacksReconhecimento = feedbacksHist.filter(f => f.tipo === 'Reconhecimento').length;
@@ -478,13 +501,10 @@ export async function coletarContextoCompleto(): Promise<{
     const nuncaReceberFeedback = feedbacksUltimos90d === 0;
     const desbalanceadoConstrutivo = feedbacksConstrutivos >= 3 && feedbacksReconhecimento === 0;
     
-    // 🆕 MEMÓRIA HISTÓRICA
     const calibracoesPassadas = calibracoes.slice(0, 3).map(c => ({
-      classificacao: c.classificacao,
-      data: c.criado_em,
+      classificacao: c.classificacao, data: c.criado_em,
     }));
     
-    // 🆕 RADAR DE BURNOUT
     const sinaisBurnout = {
       atestadosSubindo: presencaStats.tendenciaAtestados === 'subindo',
       performanceCaindo: tendencia30d.tendencia === 'caindo' && tendencia30d.forca !== 'leve',
@@ -496,10 +516,8 @@ export async function coletarContextoCompleto(): Promise<{
       (sinaisBurnout.performanceCaindo ? 1 : 0) +
       (sinaisBurnout.absAlto ? 1 : 0);
     
-    // 🆕 CONSISTÊNCIA SILENCIOSA (mérito invisível)
     const consistenteSilencioso = padroes.consistente && feedbacksReconhecimento === 0 && media30d > 0;
     
-    // 🆕 EVOLUÇÃO INVISÍVEL (subiu mas devagar)
     let evolucaoSilenciosa = false;
     if (historicoMensal.length >= 2) {
       const mensalRecente = Number(historicoMensal[0].prod_liquida_media) || 0;
@@ -510,13 +528,21 @@ export async function coletarContextoCompleto(): Promise<{
       }
     }
     
-    // 🎯 Determina fonte de dados
     let fonteDados: 'diario' | 'mensal' | 'nenhum' = 'nenhum';
     if (liquidas30d.length > 0) fonteDados = 'diario';
     else if (mensalAtual) fonteDados = 'mensal';
     
+    // 🧠 HISTÓRICO DE APRENDIZADO INDIVIDUAL
+    const aprendizadoIndividual = aprendizadoColab.map(t => ({
+      tipo: t.tipo,
+      acao: t.acao_tomada,
+      resultado: t.classificacao_aprendizado,
+      variacao: t.performance_depois_30d?.variacao_pct || null,
+      observacao: t.observacao_tl?.slice(0, 150),
+      diasAtras: t.finalizada_em ? Math.floor((Date.now() - new Date(t.finalizada_em).getTime()) / (1000 * 60 * 60 * 24)) : null,
+    }));
+    
     return {
-      // Básico
       id: c.id,
       id_groot: c.id_groot,
       nome: c.nome,
@@ -527,158 +553,83 @@ export async function coletarContextoCompleto(): Promise<{
       data_admissao: c.data_admissao,
       data_entrada_carreira: c.data_entrada_carreira,
       
-      // 📅 Performance multi-prazo
       performance: {
-        curto_prazo_7d: { 
-          dias: liquidas7d.length, 
-          media: Math.round(media7d), 
-          tendencia: tendencia7d 
-        },
-        medio_prazo_30d: { 
-          dias: liquidas30d.length, 
-          media: Math.round(media30d), 
-          tendencia: tendencia30d 
-        },
+        curto_prazo_7d: { dias: liquidas7d.length, media: Math.round(media7d), tendencia: tendencia7d },
+        medio_prazo_30d: { dias: liquidas30d.length, media: Math.round(media30d), tendencia: tendencia30d },
         mensal_atual: mensalAtual ? {
-          mes: mensalAtual.mes,
-          ano: mensalAtual.ano,
+          mes: mensalAtual.mes, ano: mensalAtual.ano,
           liquida: Number(mensalAtual.prod_liquida_media),
           unidades: Number(mensalAtual.unidades_total),
           dias: Number(mensalAtual.dias_trabalhados),
         } : null,
         historico_mensal: historicoMensal.map(h => ({
-          mes: h.mes,
-          ano: h.ano,
-          liquida: Number(h.prod_liquida_media),
+          mes: h.mes, ano: h.ano, liquida: Number(h.prod_liquida_media),
         })),
         fonteDados,
       },
       
-      // 🔍 Padrões
       padroes,
-      
-      // 🩺 Presença
       presenca: presencaStats,
       
-      // 🎯 Carreira
       carreira_info: {
-        mesesNaEmpresa,
-        mesesNaCarreira,
+        mesesNaEmpresa, mesesNaCarreira,
         podePromover: mesesNaCarreira >= 6 && !!c.proxima_carreira,
         nuncaCalibrouComoApto: !calibracoesPassadas.some(c => c.classificacao === 'APTO'),
       },
       
-      // 🆕 Acompanhamento de feedback
       acompanhamento,
       
-      // 🆕 Memória histórica
       memoria: {
-        feedbacksUltimos90d,
-        feedbacksConstrutivos,
-        feedbacksReconhecimento,
+        feedbacksUltimos90d, feedbacksConstrutivos, feedbacksReconhecimento,
         calibracoesPassadas,
         ultimoFeedback: ultimoFeedback ? {
-          tipo: ultimoFeedback.tipo,
-          dataISO: ultimoFeedback.registrado_em,
-          diasAtras: ultimoFeedback ? Math.floor(
-            (Date.now() - new Date(ultimoFeedback.registrado_em).getTime()) / (1000 * 60 * 60 * 24)
-          ) : null,
+          tipo: ultimoFeedback.tipo, dataISO: ultimoFeedback.registrado_em,
+          diasAtras: Math.floor((Date.now() - new Date(ultimoFeedback.registrado_em).getTime()) / (1000 * 60 * 60 * 24)),
         } : null,
       },
       
-      // 🆕 Anti-vieses
-      vieses: {
-        recebeMuitoFeedback,
-        nuncaReceberFeedback,
-        desbalanceadoConstrutivo,
-      },
+      // 🧠 APRENDIZADO INDIVIDUAL
+      aprendizadoColab: aprendizadoIndividual,
       
-      // 🆕 Radar de burnout
+      vieses: { recebeMuitoFeedback, nuncaReceberFeedback, desbalanceadoConstrutivo },
       burnout: sinaisBurnout,
+      reconhecimentoInvisivel: { consistenteSilencioso, evolucaoSilenciosa },
       
-      // 🆕 Reconhecimento invisível
-      reconhecimentoInvisivel: {
-        consistenteSilencioso,
-        evolucaoSilenciosa,
-      },
-      
-      // 🚧 Sistema
       tarefasPendentes: mapaTarefasPendentes[c.id_groot] || 0,
       podeSerSugerido,
       tarefasRecentes14d: tarefasRecentesPessoa,
     };
   });
   
-  // ============================================
-  // 🆕 SAÚDE SISTÊMICA DO TIME
-  // ============================================
   const saudeTime = {
     total: colabs.length,
-    
-    // Performance geral
     performance: {
-      acimaMetaP2M: colabs.filter(c => 
-        c.processo === 'P2M' && c.performance.medio_prazo_30d.media >= (metas['meta_liquida_p2m'] || 280)
-      ).length,
-      acimaMetaCheckin: colabs.filter(c => 
-        c.processo === 'Checkin' && c.performance.medio_prazo_30d.media >= (metas['meta_liquida_checkin'] || 100)
-      ).length,
-      caindoTodos: colabs.filter(c => 
-        c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo'
-      ).length,
-      subindo: colabs.filter(c => 
-        c.performance.medio_prazo_30d.tendencia.tendencia === 'subindo'
-      ).length,
+      acimaMetaP2M: colabs.filter(c => c.processo === 'P2M' && c.performance.medio_prazo_30d.media >= (metas['meta_liquida_p2m'] || 280)).length,
+      acimaMetaCheckin: colabs.filter(c => c.processo === 'Checkin' && c.performance.medio_prazo_30d.media >= (metas['meta_liquida_checkin'] || 100)).length,
+      caindoTodos: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo').length,
+      subindo: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'subindo').length,
     },
-    
-    // 🆕 Alertas sistêmicos
     alertas: {
-      muitasQuedasJuntas: colabs.filter(c => 
-        c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo'
-      ).length >= 5,
-      
-      atestadosEmAlta: colabs.filter(c => 
-        c.presenca.tendenciaAtestados === 'subindo'
-      ).length >= 3,
-      
-      burnoutColetivo: colabs.filter(c => 
-        c.burnout.pontuacao >= 2
-      ).length >= 3,
+      muitasQuedasJuntas: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo').length >= 5,
+      atestadosEmAlta: colabs.filter(c => c.presenca.tendenciaAtestados === 'subindo').length >= 3,
+      burnoutColetivo: colabs.filter(c => c.burnout.pontuacao >= 2).length >= 3,
     },
-    
-    // 🆕 Memória do TL (anti-vieses agregados)
     distribuicaoFeedback: {
       semFeedback90d: colabs.filter(c => c.memoria.feedbacksUltimos90d === 0).length,
-      poucoConstrutivos: colabs.filter(c => 
-        c.memoria.feedbacksConstrutivos === 0 && c.performance.medio_prazo_30d.media > 0
-      ).length,
-      poucoReconhecimentos: colabs.filter(c => 
-        c.memoria.feedbacksReconhecimento === 0
-      ).length,
+      poucoConstrutivos: colabs.filter(c => c.memoria.feedbacksConstrutivos === 0 && c.performance.medio_prazo_30d.media > 0).length,
+      poucoReconhecimentos: colabs.filter(c => c.memoria.feedbacksReconhecimento === 0).length,
     },
-    
-    // 🆕 Oportunidades
     oportunidades: {
-      prontosPromocao: colabs.filter(c => 
-        c.carreira_info.podePromover
-      ).length,
-      consistentesSilenciosos: colabs.filter(c => 
-        c.reconhecimentoInvisivel.consistenteSilencioso
-      ).length,
-      evolucoesInvisiveis: colabs.filter(c => 
-        c.reconhecimentoInvisivel.evolucaoSilenciosa
-      ).length,
+      prontosPromocao: colabs.filter(c => c.carreira_info.podePromover).length,
+      consistentesSilenciosos: colabs.filter(c => c.reconhecimentoInvisivel.consistenteSilencioso).length,
+      evolucoesInvisiveis: colabs.filter(c => c.reconhecimentoInvisivel.evolucaoSilenciosa).length,
     },
   };
   
   return { 
-    colabs, 
-    metas, 
-    metaDiariaIA,
+    colabs, metas, metaDiariaIA,
     tarefasGeradasHoje: tarefasHoje || 0,
-    podeGerar,
-    vagasHoje,
-    saudeTime,
-    dataAtual,
+    podeGerar, vagasHoje, saudeTime, dataAtual,
+    aprendizado,
   };
 }
