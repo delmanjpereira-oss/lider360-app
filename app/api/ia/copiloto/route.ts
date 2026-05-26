@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { coletarContextoCompleto } from '../../../../lib/copiloto/coletor-contexto';
+import { chamarClaudeJson } from '../../../../lib/ia/claude-client';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
-
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
 export const maxDuration = 60;
 
@@ -27,7 +25,6 @@ export async function POST() {
       return NextResponse.json({ sucesso: true, tarefas_geradas: 0 });
     }
     
-    // Filtra colabs sem tarefa pendente E com algum dado
     const colabsComVaga = colabs.filter(c => 
       c.tarefasPendentes === 0 && c.fonteDados !== 'nenhum'
     );
@@ -44,14 +41,32 @@ export async function POST() {
     const colabsAnalisar = colabsComVaga.slice(0, Math.min(vagasDisponiveis, 20));
     
     const prompt = construirPrompt(colabsAnalisar, metas);
-    const tarefasGeradas = await chamarIA(prompt);
+    const systemPrompt = construirSystemPrompt();
+    
+    // 🎯 USA CLAUDE em vez de Groq
+    const tarefasGeradas = await chamarClaudeJson<any[]>(
+      [{ role: 'user', content: prompt }],
+      {
+        systemPrompt,
+        temperature: 0.3,
+        maxTokens: 4000,
+      }
+    ).catch(e => {
+      console.error('Erro Claude:', e);
+      return [];
+    });
     
     if (!tarefasGeradas || tarefasGeradas.length === 0) {
       return NextResponse.json({ sucesso: true, tarefas_geradas: 0 });
     }
     
+    // Aceita tanto array quanto { tarefas: [...] }
+    const tarefas = Array.isArray(tarefasGeradas) 
+      ? tarefasGeradas 
+      : (tarefasGeradas as any).tarefas || (tarefasGeradas as any).tasks || [];
+    
     let inseridas = 0;
-    for (const tarefa of tarefasGeradas) {
+    for (const tarefa of tarefas) {
       const colab = colabs.find(c => c.id_groot === tarefa.id_groot);
       if (!colab) continue;
       
@@ -100,7 +115,8 @@ export async function POST() {
     return NextResponse.json({ 
       sucesso: true, 
       tarefas_geradas: inseridas,
-      analisados: colabsAnalisar.length
+      analisados: colabsAnalisar.length,
+      modelo: 'claude-sonnet-4-5'
     });
     
   } catch (e: any) {
@@ -113,7 +129,34 @@ export async function POST() {
 }
 
 // ============================================
-// PROMPT - DIÁRIO base, MENSAL fallback
+// SYSTEM PROMPT - persona da Claude
+// ============================================
+
+function construirSystemPrompt(): string {
+  return `Você é um analista sênior do MELI (Mercado Livre), especialista em gestão de operações e desempenho de equipes em centros de distribuição.
+
+Sua experiência cobre:
+- **Operações P2M e Checkin**: processos, métricas, KPIs
+- **Produtividade**: Líquida, Supera, NET, Ociosidade, Velocidade Efetiva
+- **Qualidade**: DPMO, IMA, defeitos, auditorias
+- **Carreira**: trilhas P1→P2→P3→P4, critérios de promoção, tempo mínimo
+- **Presença**: ABS, atestados, faltas justificadas/injustificadas, BH
+- **Calibração**: classificação Supera/Alinhado/Abaixo
+
+Sua MISSÃO:
+- Analisar com PROFUNDIDADE (não superficialmente)
+- Propor AÇÕES CONCRETAS (não genéricas como "fazer feedback")
+- Mencionar NÚMEROS específicos no diagnóstico
+- Considerar CONTEXTO COMPLETO (performance + presença + carreira)
+- Pensar como um TL EXPERIENTE que conhece o operacional
+- NÃO bloquear promoções automaticamente - mostrar dados para o líder decidir
+- Ser DIRETO e ACIONÁVEL
+
+Você responde SEMPRE em JSON válido, sem texto antes ou depois.`;
+}
+
+// ============================================
+// PROMPT PRINCIPAL
 // ============================================
 
 function construirPrompt(colabs: any[], metas: Record<string, number>): string {
@@ -127,7 +170,6 @@ function construirPrompt(colabs: any[], metas: Record<string, number>): string {
     descricao += `   ${c.cargo || 'sem cargo'} | ${c.carreira || 'sem carreira'}\n`;
     descricao += `   🔍 Fonte: ${c.fonteDados.toUpperCase()}\n`;
     
-    // 📅 DIÁRIO (FONTE PRINCIPAL)
     if (c.diarioRecente && c.diarioRecente.dias_com_dado > 0) {
       descricao += `\n📅 PERFORMANCE DIÁRIA (últimos 30 dias):\n`;
       descricao += `   • Líquida média: ${c.diarioRecente.liquida_media.toFixed(0)} pç/h\n`;
@@ -137,13 +179,11 @@ function construirPrompt(colabs: any[], metas: Record<string, number>): string {
         descricao += `   • Último dia: ${c.diarioRecente.ultimo_dia}\n`;
       }
       
-      // Compara com meta
       const meta = c.processo === 'P2M' ? META_LIQUIDA_P2M : META_LIQUIDA_CHECKIN;
       const pctMeta = ((c.diarioRecente.liquida_media / meta) * 100).toFixed(1);
       descricao += `   • % da meta (${meta}): ${pctMeta}%\n`;
     }
     
-    // 📊 MENSAL (FALLBACK ou complementar)
     if (c.mensalAtual) {
       const labelFonte = c.fonteDados === 'mensal' 
         ? '📊 PRODUTIVIDADE MENSAL (fonte principal - sem diário disponível):'
@@ -160,7 +200,6 @@ function construirPrompt(colabs: any[], metas: Record<string, number>): string {
       descricao += `   • % da meta (${meta}): ${pctMeta}%\n`;
     }
     
-    // Presença
     const p = c.presencaQuarter;
     if (p.presencas > 0 || p.atestados > 0 || p.faltasInjustificadas > 0) {
       descricao += `\n🩺 PRESENÇA NO QUARTER:\n`;
@@ -172,7 +211,6 @@ function construirPrompt(colabs: any[], metas: Record<string, number>): string {
       if (p.pctAbs > 0) descricao += `   • % ABS: ${p.pctAbs}%\n`;
     }
     
-    // Carreira
     if (c.analiseCarreira) {
       descricao += `\n🎯 CARREIRA:\n`;
       descricao += `   • ${c.analiseCarreira.mesesNaEmpresa} meses na empresa\n`;
@@ -191,32 +229,30 @@ function construirPrompt(colabs: any[], metas: Record<string, number>): string {
     return descricao;
   }).join('\n');
   
-  return `Você é um analista sênior do MELI. Analisa dados de produtividade dos colaboradores e identifica quem precisa de atenção.
+  return `Analise os dados dos colaboradores abaixo e gere tarefas de feedback PRIORITÁRIAS.
 
-🎯 OBJETIVO: Gerar tarefas de feedback INTELIGENTES baseadas em DADOS REAIS.
+🎯 OBJETIVO: Identificar quem precisa de atenção e gerar tarefas ACIONÁVEIS.
 
-📋 INSTRUÇÕES CRÍTICAS:
-1. PRIORIZE dados DIÁRIOS (são mais granulares e atuais)
-2. Se NÃO TIVER diário, use MENSAL como fallback
-3. Sempre referencie o NÚMERO específico no diagnóstico
-4. CONSIDERE presença - alto ABS é sinal de problema
-5. RESPEITE carreira - quem está apto pra promoção MERECE conversa
-6. NÃO BLOQUEIE PROMOÇÃO automaticamente - MOSTRA os dados pro líder decidir
-7. Se NÃO TEM dados (fonte = 'nenhum'), PULA o colab
+📋 INSTRUÇÕES:
+1. PRIORIZE dados DIÁRIOS (mais granulares); MENSAL como fallback
+2. Sempre referencie NÚMEROS específicos no diagnóstico
+3. CONSIDERE presença - alto ABS é sinal vermelho
+4. RESPEITE carreira - quem está apto pra promoção MERECE conversa
+5. NÃO BLOQUEIE PROMOÇÃO automaticamente - mostre os dados pro líder
+6. Se NÃO TEM dados, NÃO gere tarefa (fonte = 'nenhum')
 
-🎯 PRIORIDADES:
-- **CRÍTICA**: Líquida MUITO abaixo da meta (>20%) OU ABS > 10%
-- **ALTA**: Líquida abaixo da meta (10-20%) 
-- **MEDIA**: Performance ok mas pode melhorar OU pode promover
-- **BAIXA**: Performance excelente - reconhecimento
+🎯 NÍVEIS DE PRIORIDADE:
+- **critica**: Líquida >20% abaixo da meta OU ABS >10%
+- **alta**: Líquida 10-20% abaixo da meta
+- **media**: Performance ok mas pode melhorar OU pode promover
+- **baixa**: Performance excelente - reconhecimento
 
 📋 TIPOS DE TAREFA:
-- "Performance Crítica" - quando tá MUITO abaixo
-- "Performance Abaixo" - quando tá um pouco abaixo  
-- "Oportunidade de Promoção" - quando atende critérios
-- "Reconhecimento" - quando tá ÓTIMO
-- "ABS Alto" - quando presença tá ruim
-- "Sem Dados Recentes" - quando só tem mensal antigo
+- "Performance Crítica"
+- "Performance Abaixo"
+- "Oportunidade de Promoção"
+- "Reconhecimento"
+- "ABS Alto"
 
 ═══════════════════════════════════════════════════════════
 📊 DADOS DOS COLABORADORES:
@@ -232,7 +268,7 @@ ${colabsDescricao}
 - VAGAS DISPONÍVEIS: ${colabs[0]?.vagasNoLimite || 10}
 - Gere NO MÁXIMO esse número de tarefas
 - Priorize por urgência (críticas primeiro)
-- Pra cada tarefa, MENCIONE A FONTE no diagnóstico (ex: "dados diários" ou "dados mensais")
+- Pra cada tarefa, MENCIONE A FONTE no diagnóstico
 
 Responda APENAS um JSON array (sem texto antes/depois):
 [
@@ -241,68 +277,11 @@ Responda APENAS um JSON array (sem texto antes/depois):
     "tipo": "Reconhecimento",
     "prioridade": "baixa",
     "diagnostico": "Jessiele com 324 pç/h em Maio (dados mensais), 15.7% acima da meta P2M",
-    "analise_ia": "Performance consistente com 24 dias trabalhados e 45.425 unidades",
-    "hipotese": "Pode estar apta pra próxima carreira (8m em P2)",
-    "acao_sugerida": "Conversa de reconhecimento + alinhar trilha de carreira",
+    "analise_ia": "Performance consistente com 24 dias trabalhados e 45.425 unidades, indicando estabilidade operacional",
+    "hipotese": "Combina velocidade com consistência. Apta pra próxima carreira (8m em P2)",
+    "acao_sugerida": "Conversa de reconhecimento + alinhar trilha de carreira P3",
     "gatilho": "mensal_acima_meta",
     "feedback_obrigatorio": true
   }
 ]`;
-}
-
-async function chamarIA(prompt: string): Promise<any[]> {
-  if (!GROQ_API_KEY) {
-    console.error('GROQ_API_KEY não configurada');
-    return [];
-  }
-  
-  try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [
-          { role: 'system', content: 'Você é um analista de RH sênior do MELI. Responde sempre em JSON válido.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.3,
-        max_tokens: 4000,
-        response_format: { type: 'json_object' },
-      }),
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Groq erro:', response.status, errorText);
-      return [];
-    }
-    
-    const data = await response.json();
-    const conteudo = data.choices?.[0]?.message?.content || '';
-    
-    let resultado: any;
-    try {
-      resultado = JSON.parse(conteudo);
-    } catch (e) {
-      const match = conteudo.match(/\[[\s\S]*\]/);
-      if (match) {
-        resultado = JSON.parse(match[0]);
-      } else {
-        return [];
-      }
-    }
-    
-    if (Array.isArray(resultado)) return resultado;
-    if (resultado.tarefas && Array.isArray(resultado.tarefas)) return resultado.tarefas;
-    if (resultado.tasks && Array.isArray(resultado.tasks)) return resultado.tasks;
-    
-    return [];
-  } catch (e: any) {
-    console.error('Erro chamando IA:', e);
-    return [];
-  }
 }
