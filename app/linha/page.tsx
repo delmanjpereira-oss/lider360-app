@@ -666,9 +666,25 @@ export default function LinhaPage() {
   }
 
   // Coluna de bancadas (esquerda ou direita de uma linha)
-  function ColunaBancadas({ linha, lado, qtd }: { linha: number; lado: string; qtd: number }) {
+  // alinharFundo=true → empurra as bancadas pra baixo (espaço vazio fica em cima,
+  // pra deixar livre o espaço onde fica a Zona Central PESCA/CATEGORIA)
+  function ColunaBancadas({
+    linha,
+    lado,
+    qtd,
+    alinharFundo = false,
+  }: {
+    linha: number;
+    lado: string;
+    qtd: number;
+    alinharFundo?: boolean;
+  }) {
     return (
-      <div className="flex flex-col gap-2">
+      <div
+        className={`flex flex-col gap-2 h-full ${
+          alinharFundo ? 'justify-end' : 'justify-start'
+        }`}
+      >
         {Array.from({ length: qtd }, (_, i) => (
           <SlotBancada key={`${linha}-${lado}-${i + 1}`} linha={linha} lado={lado} posicao={i + 1} />
         ))}
@@ -773,7 +789,7 @@ export default function LinhaPage() {
               <div className="flex gap-1 items-stretch">
                 <ColunaBancadas linha={1} lado="esquerdo" qtd={LAYOUT.L1_ESQ} />
                 <Esteira />
-                <ColunaBancadas linha={1} lado="direito" qtd={LAYOUT.L1_DIR} />
+                <ColunaBancadas linha={1} lado="direito" qtd={LAYOUT.L1_DIR} alinharFundo />
               </div>
               <div className="text-gray-700 text-xs mt-2">↓</div>
             </section>
@@ -789,7 +805,7 @@ export default function LinhaPage() {
                 Linha 2
               </div>
               <div className="flex gap-1 items-stretch">
-                <ColunaBancadas linha={2} lado="esquerdo" qtd={LAYOUT.L2_ESQ} />
+                <ColunaBancadas linha={2} lado="esquerdo" qtd={LAYOUT.L2_ESQ} alinharFundo />
                 <Esteira />
                 <ColunaBancadas linha={2} lado="direito" qtd={LAYOUT.L2_DIR} />
               </div>
