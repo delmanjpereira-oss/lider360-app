@@ -40,8 +40,6 @@ interface Alocacao {
   data_referencia: string;
 }
 
-type TipoBancada = 'GM' | 'PESCA' | 'CATEGORIA';
-
 // ============================================================
 // CONSTANTES
 // ============================================================
@@ -145,7 +143,6 @@ export default function LinhaPage() {
     posicao: number;
     bancadaExistente?: Bancada;
   } | null>(null);
-  const [modalTipo, setModalTipo] = useState<TipoBancada>('GM');
   const [modalSubtipo, setModalSubtipo] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -325,17 +322,32 @@ export default function LinhaPage() {
   }
 
   // ============================================================
-  // MODAL CONFIGURAR BANCADA
+  // CRIAR BANCADA LATERAL (sempre GM, sem modal)
   // ============================================================
-  function abrirModalConfigurar(linha: number, lado: string, posicao: number) {
-    setModal({ linha, lado, posicao });
-    setModalTipo('GM');
-    setModalSubtipo('');
+  async function criarBancadaGM(linha: number, lado: string, posicao: number) {
+    const hoje = new Date().toISOString().split('T')[0];
+    const { error } = await supabase.from('layout_bancadas').insert({
+      zona: ZONA,
+      linha,
+      lado,
+      posicao,
+      tipo_principal: 'GM',
+      subtipo: null,
+      fixo_categoria: false,
+      data_referencia: hoje,
+    });
+    if (error) {
+      alert('Erro ao criar bancada: ' + error.message);
+      return;
+    }
+    await carregarBancadas();
   }
 
+  // ============================================================
+  // MODAL EDITAR SUBTIPO DA CATEGORIA (Zona Central)
+  // ============================================================
   function abrirModalEditarSubtipo(b: Bancada) {
     setModal({ linha: b.linha, lado: b.lado, posicao: b.posicao, bancadaExistente: b });
-    setModalTipo(b.tipo_principal as TipoBancada);
     setModalSubtipo(b.subtipo || '');
   }
 
@@ -345,45 +357,19 @@ export default function LinhaPage() {
   }
 
   async function salvarModal() {
-    if (!modal) return;
-    if (modalTipo === 'CATEGORIA' && !modalSubtipo) {
+    if (!modal || !modal.bancadaExistente) return;
+    if (!modalSubtipo) {
       alert('Escolha um sub-tipo de categoria.');
       return;
     }
 
-    const hoje = new Date().toISOString().split('T')[0];
-
-    // Editando bancada existente (só subtipo, em geral)
-    if (modal.bancadaExistente) {
-      const { error } = await supabase
-        .from('layout_bancadas')
-        .update({
-          tipo_principal: modal.bancadaExistente.fixo_categoria
-            ? modal.bancadaExistente.tipo_principal
-            : modalTipo,
-          subtipo: modalTipo === 'CATEGORIA' ? modalSubtipo : null,
-        })
-        .eq('id', modal.bancadaExistente.id);
-      if (error) {
-        alert('Erro: ' + error.message);
-        return;
-      }
-    } else {
-      // Criando bancada nova
-      const { error } = await supabase.from('layout_bancadas').insert({
-        zona: ZONA,
-        linha: modal.linha,
-        lado: modal.lado,
-        posicao: modal.posicao,
-        tipo_principal: modalTipo,
-        subtipo: modalTipo === 'CATEGORIA' ? modalSubtipo : null,
-        fixo_categoria: false,
-        data_referencia: hoje,
-      });
-      if (error) {
-        alert('Erro: ' + error.message);
-        return;
-      }
+    const { error } = await supabase
+      .from('layout_bancadas')
+      .update({ subtipo: modalSubtipo })
+      .eq('id', modal.bancadaExistente.id);
+    if (error) {
+      alert('Erro: ' + error.message);
+      return;
     }
 
     await carregarBancadas();
@@ -552,20 +538,21 @@ export default function LinhaPage() {
   }) {
     const b = getBancada(linha, lado, posicao);
 
-    // Slot vazio
+    // Slot vazio → click cria GM direto (sem modal)
     if (!b) {
       return (
         <div
-          onClick={() => abrirModalConfigurar(linha, lado, posicao)}
+          onClick={() => criarBancadaGM(linha, lado, posicao)}
           className="
             w-[140px] h-[78px]
             border-2 border-dashed border-[#2a2a2a]
             rounded-md
             flex items-center justify-center
             cursor-pointer
-            hover:border-[#444] hover:bg-[#111]
+            hover:border-yellow-500/40 hover:bg-yellow-500/5
             transition
           "
+          title="Criar bancada GM"
         >
           <span className="text-2xl text-[#3a3a3a]">+</span>
         </div>
@@ -699,6 +686,8 @@ export default function LinhaPage() {
   }
 
   // Zona Central (4 slots fixos)
+  //   linha 1 da grid (em cima):  PESCA L1  |  PESCA L2
+  //   linha 2 da grid (embaixo):  CAT L1    |  CAT L2
   function ZonaCentral() {
     return (
       <div className="border-2 border-dashed border-[#3a3a2a] rounded-md p-3 self-start">
@@ -708,9 +697,11 @@ export default function LinhaPage() {
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2">
+          {/* Topo: as duas PESCAs */}
           <SlotBancada linha={1} lado="centro" posicao={1} />
-          <SlotBancada linha={1} lado="centro" posicao={2} />
           <SlotBancada linha={2} lado="centro" posicao={1} />
+          {/* Embaixo: as duas CATEGORIAs */}
+          <SlotBancada linha={1} lado="centro" posicao={2} />
           <SlotBancada linha={2} lado="centro" posicao={2} />
         </div>
       </div>
@@ -821,8 +812,8 @@ export default function LinhaPage() {
         </div>
       )}
 
-      {/* MODAL CONFIGURAR BANCADA */}
-      {modal && (
+      {/* MODAL EDITAR SUBTIPO DA CATEGORIA */}
+      {modal && modal.bancadaExistente && (
         <div
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
           onClick={fecharModal}
@@ -831,76 +822,34 @@ export default function LinhaPage() {
             className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-md w-full"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-base font-bold text-white mb-1">
-              {modal.bancadaExistente ? 'Editar Bancada' : 'Configurar Bancada'}
-            </h2>
+            <h2 className="text-base font-bold text-white mb-1">Editar Categoria</h2>
             <p className="text-xs text-gray-500 mb-4">
-              Linha {modal.linha} ·{' '}
-              <span className="capitalize">
-                {modal.lado === 'centro' ? 'Zona Central' : modal.lado}
-              </span>
+              Linha {modal.linha} · Zona Central
             </p>
 
-            {/* Tipo (oculto se é fixo da zona central) */}
-            {!modal.bancadaExistente?.fixo_categoria && (
-              <div className="mb-4">
-                <label className="text-xs text-gray-400 mb-1.5 block">Tipo:</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['GM', 'PESCA', 'CATEGORIA'] as TipoBancada[]).map((t) => {
-                    const c = corTipo(t);
-                    const ativo = modalTipo === t;
-                    return (
-                      <button
-                        key={t}
-                        onClick={() => {
-                          setModalTipo(t);
-                          if (t !== 'CATEGORIA') setModalSubtipo('');
-                        }}
-                        className={`
-                          py-2 px-2 rounded text-xs font-bold
-                          border-2 transition
-                          ${ativo ? 'bg-[#0f0f0f]' : 'bg-transparent opacity-60 hover:opacity-100'}
-                        `}
-                        style={{
-                          borderColor: ativo ? c.hex : '#2a2a2a',
-                          color: ativo ? c.hex : '#888',
-                        }}
-                      >
-                        {c.emoji} {t}
-                      </button>
-                    );
-                  })}
-                </div>
+            <div className="mb-4">
+              <label className="text-xs text-gray-400 mb-1.5 block">Sub-tipo:</label>
+              <div className="grid grid-cols-2 gap-2">
+                {SUBTIPOS_CATEGORIA.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setModalSubtipo(s)}
+                    className={`
+                      py-1.5 px-2 rounded text-xs font-medium
+                      border transition
+                      ${
+                        modalSubtipo === s
+                          ? 'border-purple-500 bg-purple-500/20 text-purple-300'
+                          : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]'
+                      }
+                    `}
+                  >
+                    {s}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
 
-            {/* Sub-tipo (só CATEGORIA) */}
-            {modalTipo === 'CATEGORIA' && (
-              <div className="mb-4">
-                <label className="text-xs text-gray-400 mb-1.5 block">Sub-tipo:</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {SUBTIPOS_CATEGORIA.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setModalSubtipo(s)}
-                      className={`
-                        py-1.5 px-2 rounded text-xs font-medium
-                        border transition
-                        ${
-                          modalSubtipo === s
-                            ? 'border-purple-500 bg-purple-500/20 text-purple-300'
-                            : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]'
-                        }
-                      `}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Ações */}
             <div className="flex gap-2 justify-end pt-2 border-t border-[#2a2a2a]">
               <button
                 onClick={fecharModal}
