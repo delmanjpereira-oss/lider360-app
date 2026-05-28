@@ -2,9 +2,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 
-// ============================================================
-// TIPOS
-// ============================================================
 interface Colaborador {
   id_groot: string;
   nome: string;
@@ -42,34 +39,20 @@ interface MetasConfig {
   p2m_alinhado_max: number;
 }
 
-// ============================================================
-// CONSTANTES
-// ============================================================
 const ZONA = 'p2m';
-const LAYOUT = {
-  L1_ESQ: 5,
-  L1_DIR: 3,
-  L2_ESQ: 3,
-  L2_DIR: 5,
-};
+const LAYOUT = { L1_ESQ: 5, L1_DIR: 3, L2_ESQ: 3, L2_DIR: 5 };
 const ALTURA_COLUNA = 422;
-const SUBTIPOS_CATEGORIA = [
-  'Saneante', 'High Value', 'Cosméticos', 'Mapa', 'Saúde', 'Alimento',
-];
+const SUBTIPOS_CATEGORIA = ['Saneante', 'High Value', 'Cosméticos', 'Mapa', 'Saúde', 'Alimento'];
 
 function maxColabsPorTipo(tipo: string): number {
   if (tipo === 'CATEGORIA') return 999;
   return 2;
 }
 
-// Tipos que viram FIXO automático
 function tipoEFixoAutomatico(tipo: string): boolean {
   return tipo === 'GM' || tipo === 'PESCA';
 }
 
-// ============================================================
-// HELPERS DE COR
-// ============================================================
 function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
   if (liquida == null || liquida === 0) {
     return { status: 'sem_dado' as const, texto: 'text-gray-400', borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', emoji: '⚪', label: 'Sem dado' };
@@ -102,31 +85,14 @@ function primeiroNome(nome: string) {
   return nome.trim().split(/\s+/)[0];
 }
 
-// ============================================================
-// CSS DAS ANIMAÇÕES (injetado uma vez)
-// ============================================================
 const STYLES = `
   @keyframes pulseGold {
-    0%, 100% {
-      box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7), 0 0 30px rgba(255, 215, 0, 0.4);
-      transform: scale(1.08);
-    }
-    50% {
-      box-shadow: 0 0 0 12px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.6);
-      transform: scale(1.12);
-    }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7), 0 0 30px rgba(255, 215, 0, 0.4); transform: scale(1.08); }
+    50% { box-shadow: 0 0 0 12px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.6); transform: scale(1.12); }
   }
   @keyframes pulseGreen {
-    0%, 100% {
-      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7), 0 0 20px rgba(34, 197, 94, 0.3);
-      border-color: rgba(34, 197, 94, 0.6);
-      transform: scale(1);
-    }
-    50% {
-      box-shadow: 0 0 0 8px rgba(34, 197, 94, 0), 0 0 30px rgba(34, 197, 94, 0.5);
-      border-color: rgba(34, 197, 94, 1);
-      transform: scale(1.03);
-    }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7), 0 0 20px rgba(34, 197, 94, 0.3); border-color: rgba(34, 197, 94, 0.6); transform: scale(1); }
+    50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0), 0 0 30px rgba(34, 197, 94, 0.5); border-color: rgba(34, 197, 94, 1); transform: scale(1.03); }
   }
   @keyframes successFlash {
     0% { transform: scale(0.85); background: rgba(34, 197, 94, 0.4); box-shadow: 0 0 20px rgba(34, 197, 94, 0.8); }
@@ -164,17 +130,12 @@ const STYLES = `
     animation: pulseGreen 1s ease-in-out infinite;
     cursor: pointer !important;
   }
-  .bancada-encaixe {
-    animation: successFlash 0.5s ease-out;
-  }
-  .bancada-erro {
-    animation: shakeError 0.3s ease-in-out;
-  }
+  .bancada-encaixe { animation: successFlash 0.5s ease-out; }
+  .bancada-erro { animation: shakeError 0.3s ease-in-out; }
   .card-sinergia {
-    animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite;
+    animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite, shimmer 3s linear infinite;
     background: linear-gradient(110deg, rgba(255, 215, 0, 0.05) 0%, rgba(255, 215, 0, 0.15) 50%, rgba(255, 215, 0, 0.05) 100%) !important;
     background-size: 200% 100% !important;
-    animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite, shimmer 3s linear infinite;
     border: 2px dashed #FFD700 !important;
     position: relative;
     overflow: hidden;
@@ -191,50 +152,16 @@ const STYLES = `
     pointer-events: none;
     white-space: nowrap;
   }
-  .card-sidebar-hover {
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .card-sidebar-hover:hover {
-    transform: scale(1.05) translateX(2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  }
-  .card-arrastando {
-    opacity: 0.35;
-    transform: scale(0.92);
-  }
-  .nome-linha-input {
-    background: transparent;
-    border: none;
-    outline: 1px solid #FFD700;
-    color: #FFD700;
-    font-size: 10px;
-    font-weight: bold;
-    text-align: center;
-    width: 100%;
-    padding: 2px 4px;
-    border-radius: 3px;
-  }
-  .nome-linha-display {
-    cursor: pointer;
-    transition: all 0.15s ease;
-    padding: 2px 6px;
-    border-radius: 3px;
-  }
-  .nome-linha-display:hover {
-    background: rgba(255, 215, 0, 0.1);
-    color: #FFD700;
-  }
-  .badge-fixo {
-    animation: synergyGlow 2s ease-in-out infinite;
-  }
-  .slide-in {
-    animation: slideIn 0.3s ease-out;
-  }
+  .card-sidebar-hover { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+  .card-sidebar-hover:hover { transform: scale(1.05) translateX(2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
+  .card-arrastando { opacity: 0.35; transform: scale(0.92); }
+  .nome-linha-input { background: transparent; border: none; outline: 1px solid #FFD700; color: #FFD700; font-size: 10px; font-weight: bold; text-align: center; width: 100%; padding: 2px 4px; border-radius: 3px; }
+  .nome-linha-display { cursor: pointer; transition: all 0.15s ease; padding: 2px 6px; border-radius: 3px; }
+  .nome-linha-display:hover { background: rgba(255, 215, 0, 0.1); color: #FFD700; }
+  .badge-fixo { animation: synergyGlow 2s ease-in-out infinite; }
+  .slide-in { animation: slideIn 0.3s ease-out; }
 `;
 
-// ============================================================
-// COMPONENTE PRINCIPAL
-// ============================================================
 export default function LinhaPage() {
   const [colabs, setColabs] = useState<Colaborador[]>([]);
   const [ritmos, setRitmos] = useState<Record<string, Ritmo>>({});
@@ -245,29 +172,20 @@ export default function LinhaPage() {
   const [editandoLinha, setEditandoLinha] = useState<number | null>(null);
   const [nomeTemp, setNomeTemp] = useState('');
   const [loading, setLoading] = useState(true);
-  
-  // Drag e seleção
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [cardAtivo, setCardAtivo] = useState<string | null>(null);  // double-click
+  const [cardAtivo, setCardAtivo] = useState<string | null>(null);
   const [hoverBancada, setHoverBancada] = useState<number | null>(null);
-  const [encaixeBancada, setEncaixeBancada] = useState<number | null>(null);  // animação flash
-  const [erroBancada, setErroBancada] = useState<number | null>(null);  // animação shake
-  
-  const [modal, setModal] = useState<{
-    linha: number; lado: string; posicao: number; bancadaExistente?: Bancada;
-  } | null>(null);
+  const [encaixeBancada, setEncaixeBancada] = useState<number | null>(null);
+  const [erroBancada, setErroBancada] = useState<number | null>(null);
+  const [modal, setModal] = useState<{ linha: number; lado: string; posicao: number; bancadaExistente?: Bancada } | null>(null);
   const [modalSubtipo, setModalSubtipo] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { carregarTudo(); }, []);
 
-  // ESC pra desativar card
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setCardAtivo(null);
-        setDraggingId(null);
-      }
+      if (e.key === 'Escape') { setCardAtivo(null); setDraggingId(null); }
     }
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
@@ -283,63 +201,38 @@ export default function LinhaPage() {
   }
 
   async function carregarMetas() {
-    const { data } = await supabase
-      .from('config')
-      .select('chave, valor')
-      .in('chave', ['meta_p2m_base', 'meta_p2m_alinhado_max']);
+    const { data } = await supabase.from('config').select('chave, valor').in('chave', ['meta_p2m_base', 'meta_p2m_alinhado_max']);
     const map: Record<string, number> = {};
     (data || []).forEach((c: any) => { map[c.chave] = Number(c.valor) || 0; });
-    setMetas({
-      p2m_base: map.meta_p2m_base || 329,
-      p2m_alinhado_max: map.meta_p2m_alinhado_max || 350,
-    });
+    setMetas({ p2m_base: map.meta_p2m_base || 329, p2m_alinhado_max: map.meta_p2m_alinhado_max || 350 });
   }
 
   async function carregarNomesLinhas() {
-    const { data } = await supabase
-      .from('config')
-      .select('chave, valor')
-      .in('chave', ['nome_linha_1', 'nome_linha_2']);
+    const { data } = await supabase.from('config').select('chave, valor').in('chave', ['nome_linha_1', 'nome_linha_2']);
     const map: Record<string, string> = {};
     (data || []).forEach((c: any) => { map[c.chave] = String(c.valor); });
-    setNomesLinhas({
-      linha1: map.nome_linha_1 || 'Linha 1',
-      linha2: map.nome_linha_2 || 'Linha 2',
-    });
+    setNomesLinhas({ linha1: map.nome_linha_1 || 'Linha 1', linha2: map.nome_linha_2 || 'Linha 2' });
   }
 
   async function salvarNomeLinha(linha: number, nome: string) {
     const chave = 'nome_linha_' + linha;
     await supabase.from('config').upsert({ chave, valor: nome }, { onConflict: 'chave' });
-    setNomesLinhas((prev) => ({
-      ...prev,
-      [linha === 1 ? 'linha1' : 'linha2']: nome,
-    }));
+    setNomesLinhas((prev) => ({ ...prev, [linha === 1 ? 'linha1' : 'linha2']: nome }));
     setEditandoLinha(null);
   }
 
   async function carregarColabs() {
-    const { data } = await supabase
-      .from('colaboradores')
-      .select('id_groot, nome, processo, status')
-      .eq('status', 'Ativo')
-      .eq('processo', 'P2M')
-      .order('nome');
+    const { data } = await supabase.from('colaboradores').select('id_groot, nome, processo, status').eq('status', 'Ativo').eq('processo', 'P2M').order('nome');
     setColabs(data || []);
   }
 
   async function carregarRitmos() {
     const hoje = new Date().toISOString().split('T')[0];
-    const { data } = await supabase
-      .from('ritmo_atual')
-      .select('id_groot, ritmo_pct, unidades, horas')
-      .eq('data_referencia', hoje);
+    const { data } = await supabase.from('ritmo_atual').select('id_groot, ritmo_pct, unidades, horas').eq('data_referencia', hoje);
     const map: Record<string, Ritmo> = {};
     (data || []).forEach((r: any) => {
       let liquida = r.ritmo_pct;
-      if (r.unidades && r.horas && r.horas > 0) {
-        liquida = Math.round(r.unidades / r.horas);
-      }
+      if (r.unidades && r.horas && r.horas > 0) liquida = Math.round(r.unidades / r.horas);
       map[r.id_groot] = { ...r, liquida };
     });
     setRitmos(map);
@@ -347,30 +240,19 @@ export default function LinhaPage() {
 
   async function carregarBancadas() {
     const hoje = new Date().toISOString().split('T')[0];
-    const { data } = await supabase
-      .from('layout_bancadas')
-      .select('*')
-      .eq('zona', ZONA)
-      .eq('data_referencia', hoje)
-      .order('posicao');
+    const { data } = await supabase.from('layout_bancadas').select('*').eq('zona', ZONA).eq('data_referencia', hoje).order('posicao');
     setBancadas(data || []);
   }
 
   async function carregarAlocacoes() {
     const hoje = new Date().toISOString().split('T')[0];
-    const { data } = await supabase
-      .from('layout_alocacao')
-      .select('*')
-      .eq('data_referencia', hoje);
+    const { data } = await supabase.from('layout_alocacao').select('*').eq('data_referencia', hoje);
     setAlocacoes(data || []);
   }
 
   async function garantirSlotsFixos() {
     const hoje = new Date().toISOString().split('T')[0];
-    const { data: existentes } = await supabase
-      .from('layout_bancadas')
-      .select('id, linha, posicao')
-      .eq('zona', ZONA).eq('lado', 'centro').eq('fixo_categoria', true).eq('data_referencia', hoje);
+    const { data: existentes } = await supabase.from('layout_bancadas').select('id, linha, posicao').eq('zona', ZONA).eq('lado', 'centro').eq('fixo_categoria', true).eq('data_referencia', hoje);
     const jaTem = new Set((existentes || []).map((b: any) => b.linha + '-' + b.posicao));
     const slotsFixos = [
       { linha: 1, posicao: 1, tipo_principal: 'PESCA' },
@@ -380,12 +262,10 @@ export default function LinhaPage() {
     ];
     const aCriar = slotsFixos.filter((s) => !jaTem.has(s.linha + '-' + s.posicao));
     if (aCriar.length === 0) return;
-    await supabase.from('layout_bancadas').insert(
-      aCriar.map((s) => ({
-        zona: ZONA, linha: s.linha, lado: 'centro', posicao: s.posicao,
-        tipo_principal: s.tipo_principal, subtipo: null, fixo_categoria: true, data_referencia: hoje,
-      }))
-    );
+    await supabase.from('layout_bancadas').insert(aCriar.map((s) => ({
+      zona: ZONA, linha: s.linha, lado: 'centro', posicao: s.posicao,
+      tipo_principal: s.tipo_principal, subtipo: null, fixo_categoria: true, data_referencia: hoje,
+    })));
   }
 
   async function handleUploadCSV(e: React.ChangeEvent<HTMLInputElement>) {
@@ -402,10 +282,7 @@ export default function LinhaPage() {
       const idxRitmo = header.findIndex((h) => h.includes('ritmo') || h.includes('pct') || h === '%' || h.includes('liquid') || h.includes('produtividade') || h === 'prod' || h === 'prod_liquida');
       const idxUnid = header.findIndex((h) => h.includes('unid') || h.includes('qtd') || h.includes('quantidade') || h === 'pcs');
       const idxHoras = header.findIndex((h) => h.includes('hora') || h === 'h' || h === 'tempo');
-      if (idxGroot === -1 || idxRitmo === -1) {
-        alert('CSV inválido!\nColunas: ' + header.join(' | '));
-        return;
-      }
+      if (idxGroot === -1 || idxRitmo === -1) { alert('CSV inválido!\nColunas: ' + header.join(' | ')); return; }
       const hoje = new Date().toISOString().split('T')[0];
       const registros: any[] = [];
       let pulou = 0;
@@ -418,14 +295,8 @@ export default function LinhaPage() {
         if (isNaN(ritmo_pct) || ritmo_pct < 0) { pulou++; continue; }
         const reg: any = { id_groot, ritmo_pct, data_referencia: hoje, hora_atualizacao: new Date().toISOString() };
         if (idxNome !== -1 && cols[idxNome]) reg.nome = cols[idxNome];
-        if (idxUnid !== -1 && cols[idxUnid]) {
-          const u = parseInt(cols[idxUnid].replace(/\./g, ''), 10);
-          if (!isNaN(u)) reg.unidades = u;
-        }
-        if (idxHoras !== -1 && cols[idxHoras]) {
-          const h = parseFloat(cols[idxHoras].replace(',', '.'));
-          if (!isNaN(h)) reg.horas = h;
-        }
+        if (idxUnid !== -1 && cols[idxUnid]) { const u = parseInt(cols[idxUnid].replace(/\./g, ''), 10); if (!isNaN(u)) reg.unidades = u; }
+        if (idxHoras !== -1 && cols[idxHoras]) { const h = parseFloat(cols[idxHoras].replace(',', '.')); if (!isNaN(h)) reg.horas = h; }
         registros.push(reg);
       }
       if (registros.length === 0) { alert('Nenhum registro válido.'); return; }
@@ -476,55 +347,30 @@ export default function LinhaPage() {
     await Promise.all([carregarBancadas(), carregarAlocacoes()]);
   }
 
-  // ============================================================
-  // ALOCAÇÃO COM LÓGICA DE FIXO/SINERGIA
-  // ============================================================
   async function alocarColab(idGroot: string, bancada: Bancada) {
     const hoje = new Date().toISOString().split('T')[0];
     const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
     const maxColabs = maxColabsPorTipo(bancada.tipo_principal);
-    
     if (atuais.length >= maxColabs) {
-      // Mostra erro com shake
       setErroBancada(bancada.id);
       setTimeout(() => setErroBancada(null), 400);
       return;
     }
-    
-    // Busca alocação atual do colab (se houver)
     const alocAtual = alocacoes.find((a) => a.id_groot === idGroot);
-    
-    // Determina bancada_fixa_id:
-    // - Se já tinha bancada_fixa_id, mantém
-    // - Se está sendo alocado pela 1ª vez em GM ou PESCA → marca como fixa
     let bancadaFixaId: number | null = null;
-    
     if (alocAtual?.bancada_fixa_id) {
-      // Já tinha fixo de antes - mantém
       bancadaFixaId = alocAtual.bancada_fixa_id;
     } else if (tipoEFixoAutomatico(bancada.tipo_principal)) {
-      // Está indo pra GM ou PESCA pela 1ª vez → vira fixo aqui
       bancadaFixaId = bancada.id;
     }
-    
-    // Remove alocação anterior
     await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot).eq('data_referencia', hoje);
-    
-    // Cria nova
     const { error } = await supabase.from('layout_alocacao').insert({
-      bancada_id: bancada.id,
-      id_groot: idGroot,
-      tipo_alocacao: 'fixo',
-      bancada_fixa_id: bancadaFixaId,
-      data_referencia: hoje,
+      bancada_id: bancada.id, id_groot: idGroot, tipo_alocacao: 'fixo',
+      bancada_fixa_id: bancadaFixaId, data_referencia: hoje,
     });
-    
     if (error) { alert('Erro: ' + error.message); return; }
-    
-    // Animação de encaixe
     setEncaixeBancada(bancada.id);
     setTimeout(() => setEncaixeBancada(null), 500);
-    
     setCardAtivo(null);
     setDraggingId(null);
     await carregarAlocacoes();
@@ -536,14 +382,12 @@ export default function LinhaPage() {
     await carregarAlocacoes();
   }
 
-  // Retornar colab pra bancada fixa (click na sinergia)
   async function voltarParaBancadaFixa(idGroot: string, bancadaFixaId: number) {
     const bancadaFixa = bancadas.find((b) => b.id === bancadaFixaId);
     if (!bancadaFixa) return;
     await alocarColab(idGroot, bancadaFixa);
   }
 
-  // Remover marca de fixo (desativar sinergia permanente)
   async function removerFixo(alocId: number) {
     const { error } = await supabase.from('layout_alocacao').update({ bancada_fixa_id: null }).eq('id', alocId);
     if (error) { alert('Erro: ' + error.message); return; }
@@ -567,60 +411,48 @@ export default function LinhaPage() {
     return colabs.filter((c) => !alocadosIds.has(c.id_groot));
   }
 
-  // Retorna sinergias visíveis pra uma bancada (colabs que tem essa bancada como fixa MAS estão alocados em outra)
   function sinergiasDe(bancadaId: number) {
-    return alocacoes.filter(
-      (a) => a.bancada_fixa_id === bancadaId && a.bancada_id !== bancadaId
-    );
+    return alocacoes.filter((a) => a.bancada_fixa_id === bancadaId && a.bancada_id !== bancadaId);
   }
 
-  // Card pode ser arrastado pra essa bancada?
   function bancadaCompativel(bancada: Bancada): boolean {
     if (!cardAtivo && !draggingId) return false;
+    const idCheck = cardAtivo || draggingId;
+    // Não permite alocar na bancada onde já está
+    const alocAtual = alocacoes.find((a) => a.id_groot === idCheck);
+    if (alocAtual?.bancada_id === bancada.id) return false;
     const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
     return atuais.length < maxColabsPorTipo(bancada.tipo_principal);
   }
 
-  // ============================================================
-  // CARD COLAB SIDEBAR
-  // ============================================================
   function CardColabSidebar({ c }: { c: Colaborador }) {
     const ritmo = ritmos[c.id_groot];
     const cor = corPorMeta(ritmo?.liquida, metas);
     const isDragging = draggingId === c.id_groot;
     const isAtivo = cardAtivo === c.id_groot;
-    
     return (
       <div
         draggable
         onDragStart={(e) => {
           setDraggingId(c.id_groot);
           e.dataTransfer.effectAllowed = 'move';
-          // Imagem de drag customizada (transparente)
           const img = new Image();
           img.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
           e.dataTransfer.setDragImage(img, 0, 0);
         }}
         onDragEnd={() => { setDraggingId(null); setHoverBancada(null); }}
-        onDoubleClick={() => {
-          // Toggle ativo
-          setCardAtivo(isAtivo ? null : c.id_groot);
-        }}
+        onDoubleClick={() => setCardAtivo(isAtivo ? null : c.id_groot)}
         className={
-          cor.bg + ' ' + cor.borda +
-          ' border-2 rounded-md px-2 py-1.5 mb-1.5' +
-          ' cursor-grab active:cursor-grabbing' +
-          ' card-sidebar-hover' +
+          cor.bg + ' ' + cor.borda + ' border-2 rounded-md px-2 py-1.5 mb-1.5' +
+          ' cursor-grab active:cursor-grabbing card-sidebar-hover' +
           (isDragging ? ' card-arrastando' : '') +
           (isAtivo ? ' card-ativo' : '')
         }
-        title={'Double-click pra ativar | Arrasta pra alocar'}
+        title="Double-click pra ativar | Arrasta pra alocar"
       >
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className={'text-[10px] font-bold ' + cor.texto + ' flex-shrink-0'}>
-              {iniciais(c.nome)}
-            </span>
+            <span className={'text-[10px] font-bold ' + cor.texto + ' flex-shrink-0'}>{iniciais(c.nome)}</span>
             <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -634,26 +466,48 @@ export default function LinhaPage() {
     );
   }
 
-  // ============================================================
-  // CARD COLAB NA BANCADA
-  // ============================================================
   function CardColabBancada({ aloc, expandido, bancadaAtual }: { aloc: Alocacao; expandido?: boolean; bancadaAtual: Bancada }) {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
     const ritmo = ritmos[aloc.id_groot];
     const cor = corPorMeta(ritmo?.liquida, metas);
     const liquida = ritmo?.liquida;
-    
-    // É fixo nesta bancada?
     const eFixoAqui = aloc.bancada_fixa_id === bancadaAtual.id;
-    // Tem fixo em outro lugar?
     const eFixoEmOutro = aloc.bancada_fixa_id && aloc.bancada_fixa_id !== bancadaAtual.id;
-    
+    const isDragging = draggingId === aloc.id_groot;
+    const isAtivo = cardAtivo === aloc.id_groot;
+
+    const dragHandlers = {
+      draggable: true,
+      onDragStart: (e: React.DragEvent) => {
+        e.stopPropagation();
+        setDraggingId(aloc.id_groot);
+        e.dataTransfer.effectAllowed = 'move';
+        const img = new Image();
+        img.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+        e.dataTransfer.setDragImage(img, 0, 0);
+      },
+      onDragEnd: () => { setDraggingId(null); setHoverBancada(null); },
+      onDoubleClick: (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setCardAtivo(isAtivo ? null : aloc.id_groot);
+      },
+    };
+
+    const titulo = c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoEmOutro ? ' · sinergia em outra' : '') + ' · double-click pra ativar';
+
     if (expandido) {
       return (
         <div
-          className={'relative group ' + cor.borda + ' ' + cor.bg + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in'}
-          title={c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoEmOutro ? ' · sinergia em outra' : '')}
+          {...dragHandlers}
+          title={titulo}
+          className={
+            'relative group ' + cor.borda + ' ' + cor.bg +
+            ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in' +
+            ' cursor-grab active:cursor-grabbing card-sidebar-hover' +
+            (isDragging ? ' card-arrastando' : '') +
+            (isAtivo ? ' card-ativo' : '')
+          }
         >
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
@@ -668,7 +522,7 @@ export default function LinhaPage() {
               <span className="text-gray-600 text-[10px]">—</span>
             )}
             <button
-              onClick={() => removerColab(aloc.id)}
+              onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
               className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
               title="Remover"
             >×</button>
@@ -676,11 +530,18 @@ export default function LinhaPage() {
         </div>
       );
     }
-    
+
     return (
       <div
-        className={'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg + ' flex flex-col items-center justify-center cursor-default transition-all slide-in'}
-        title={c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoEmOutro ? ' · sinergia em outra' : '')}
+        {...dragHandlers}
+        title={titulo}
+        className={
+          'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg +
+          ' flex flex-col items-center justify-center transition-all slide-in' +
+          ' cursor-grab active:cursor-grabbing card-sidebar-hover' +
+          (isDragging ? ' card-arrastando' : '') +
+          (isAtivo ? ' card-ativo' : '')
+        }
       >
         {eFixoAqui && (
           <span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo aqui">📍</span>
@@ -695,7 +556,7 @@ export default function LinhaPage() {
         )}
         <span className="text-[7px] text-gray-500 mt-0.5">{primeiroNome(c.nome)}</span>
         <button
-          onClick={() => removerColab(aloc.id)}
+          onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
           className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
           title="Remover"
         >×</button>
@@ -703,24 +564,18 @@ export default function LinhaPage() {
     );
   }
 
-  // ============================================================
-  // CARD SINERGIA (transparente)
-  // ============================================================
   function CardSinergia({ aloc, expandido }: { aloc: Alocacao; expandido?: boolean }) {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
-    
     if (expandido) {
       return (
         <div
           className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2 cursor-pointer"
           onClick={() => aloc.bancada_fixa_id && voltarParaBancadaFixa(aloc.id_groot, aloc.bancada_fixa_id)}
-          title={c.nome + ' (fixo aqui · click pra trazer de volta · shift+click pra remover fixo)'}
+          title={c.nome + ' (fixo aqui · click pra trazer de volta · right-click pra remover fixo)'}
           onContextMenu={(e) => {
             e.preventDefault();
-            if (confirm('Remover marca de fixo de ' + c.nome + '?')) {
-              removerFixo(aloc.id);
-            }
+            if (confirm('Remover marca de fixo de ' + c.nome + '?')) removerFixo(aloc.id);
           }}
         >
           <div className="flex items-center gap-1.5 min-w-0">
@@ -731,7 +586,6 @@ export default function LinhaPage() {
         </div>
       );
     }
-    
     return (
       <div
         className="card-sinergia flex-1 h-full rounded flex flex-col items-center justify-center cursor-pointer"
@@ -739,9 +593,7 @@ export default function LinhaPage() {
         title={c.nome + ' (fixo aqui · click pra trazer de volta)'}
         onContextMenu={(e) => {
           e.preventDefault();
-          if (confirm('Remover marca de fixo de ' + c.nome + '?')) {
-            removerFixo(aloc.id);
-          }
+          if (confirm('Remover marca de fixo de ' + c.nome + '?')) removerFixo(aloc.id);
         }}
       >
         <span className="text-[10px] font-bold text-yellow-400/70 leading-none">{iniciais(c.nome)}</span>
@@ -750,12 +602,8 @@ export default function LinhaPage() {
     );
   }
 
-  // ============================================================
-  // SLOT BANCADA
-  // ============================================================
   function SlotBancada({ linha, lado, posicao }: { linha: number; lado: string; posicao: number }) {
     const b = getBancada(linha, lado, posicao);
-
     if (!b) {
       return (
         <div
@@ -767,7 +615,6 @@ export default function LinhaPage() {
         </div>
       );
     }
-
     const cor = corTipo(b.tipo_principal);
     const alocs = getAlocacoesBancada(b.id);
     const sinergias = sinergiasDe(b.id);
@@ -776,11 +623,9 @@ export default function LinhaPage() {
     const isErro = erroBancada === b.id;
     const isCategoria = b.tipo_principal === 'CATEGORIA';
     const isCompativel = (cardAtivo || draggingId) && bancadaCompativel(b);
-    
     const alturaClass = isCategoria 
       ? (alocs.length > 0 || sinergias.length > 0 ? 'min-h-[78px]' : 'h-[78px]') 
       : 'h-[78px]';
-    
     const classes = [
       'w-[140px]', alturaClass,
       'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200',
@@ -789,7 +634,6 @@ export default function LinhaPage() {
       isErro ? 'bancada-erro' : '',
       isHover && !isCompativel ? 'ring-2 ring-green-500/80 scale-[1.03] shadow-xl shadow-green-500/20' : '',
     ].join(' ');
-    
     return (
       <div
         onDragOver={(e) => {
@@ -801,24 +645,17 @@ export default function LinhaPage() {
         onDrop={(e) => {
           e.preventDefault();
           setHoverBancada(null);
-          if (draggingId) {
-            alocarColab(draggingId, b);
-          }
+          if (draggingId) alocarColab(draggingId, b);
         }}
         onClick={() => {
-          // Click direto quando há card ativo (substitui drag)
-          if (cardAtivo && bancadaCompativel(b)) {
-            alocarColab(cardAtivo, b);
-          }
+          if (cardAtivo && bancadaCompativel(b)) alocarColab(cardAtivo, b);
         }}
         className={classes}
         style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}
       >
         <div className="flex items-center justify-between px-1.5 pt-0.5 pb-0">
           <div className="flex items-center gap-1 min-w-0">
-            <span className={'text-[9px] font-bold ' + cor.text + ' uppercase tracking-wider'}>
-              {b.tipo_principal}
-            </span>
+            <span className={'text-[9px] font-bold ' + cor.text + ' uppercase tracking-wider'}>{b.tipo_principal}</span>
             {b.subtipo && <span className="text-[8px] text-purple-300/70 truncate">· {b.subtipo}</span>}
             {isCategoria && alocs.length > 0 && (
               <span className="text-[8px] text-gray-500 ml-0.5">({alocs.length})</span>
@@ -841,13 +678,10 @@ export default function LinhaPage() {
             )}
           </div>
         </div>
-        
         {isCategoria ? (
           <div className="flex-1 flex flex-col gap-0.5 px-1 pb-1 pt-0.5">
             {alocs.length === 0 && sinergias.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-[9px] text-gray-700 italic">
-                Arrasta colabs
-              </div>
+              <div className="flex-1 flex items-center justify-center text-[9px] text-gray-700 italic">Arrasta colabs</div>
             ) : (
               <>
                 {alocs.map((a) => <CardColabBancada key={a.id} aloc={a} expandido bancadaAtual={b} />)}
@@ -901,9 +735,7 @@ export default function LinhaPage() {
     return (
       <div className="border-2 border-dashed border-[#3a3a2a] rounded-md p-3 self-start">
         <div className="text-center mb-2">
-          <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">
-            Zona Central
-          </span>
+          <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
         </div>
         <div className="grid grid-cols-2 gap-2 items-start">
           <SlotBancada linha={1} lado="centro" posicao={1} />
@@ -918,7 +750,6 @@ export default function LinhaPage() {
   function NomeLinha({ linha }: { linha: number }) {
     const nome = linha === 1 ? nomesLinhas.linha1 : nomesLinhas.linha2;
     const editando = editandoLinha === linha;
-    
     if (editando) {
       return (
         <input
@@ -939,7 +770,6 @@ export default function LinhaPage() {
         />
       );
     }
-    
     return (
       <span
         className="nome-linha-display text-[10px] text-gray-500 font-bold uppercase tracking-widest"
@@ -956,7 +786,6 @@ export default function LinhaPage() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
-      
       <header className="border-b border-[#1a1a1a] px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-bold">
@@ -976,16 +805,12 @@ export default function LinhaPage() {
           <button
             onClick={() => fileInputRef.current?.click()}
             className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition"
-          >
-            ↑ Upload Boletim
-          </button>
+          >↑ Upload Boletim</button>
         </div>
       </header>
-
       {loading && (
         <div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>
       )}
-
       {!loading && (
         <div className="flex gap-3 p-3">
           <aside className="w-[180px] flex-shrink-0">
@@ -1006,12 +831,9 @@ export default function LinhaPage() {
               </div>
             </div>
           </aside>
-
           <main className="flex-1 flex gap-4 items-start justify-center overflow-x-auto">
             <section className="flex flex-col items-center">
-              <div className="mb-2">
-                <NomeLinha linha={1} />
-              </div>
+              <div className="mb-2"><NomeLinha linha={1} /></div>
               <div className="flex gap-1 items-stretch">
                 <ColunaBancadas linha={1} lado="esquerdo" qtd={LAYOUT.L1_ESQ} />
                 <Esteira />
@@ -1019,15 +841,11 @@ export default function LinhaPage() {
               </div>
               <div className="text-gray-700 text-xs mt-2">↓</div>
             </section>
-
             <section className="flex flex-col items-center mt-5">
               <ZonaCentral />
             </section>
-
             <section className="flex flex-col items-center">
-              <div className="mb-2">
-                <NomeLinha linha={2} />
-              </div>
+              <div className="mb-2"><NomeLinha linha={2} /></div>
               <div className="flex gap-1 items-stretch">
                 <ColunaBancadas linha={2} lado="esquerdo" qtd={LAYOUT.L2_ESQ} alinharFundo />
                 <Esteira />
@@ -1038,7 +856,6 @@ export default function LinhaPage() {
           </main>
         </div>
       )}
-
       {modal && modal.bancadaExistente && (
         <div
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
