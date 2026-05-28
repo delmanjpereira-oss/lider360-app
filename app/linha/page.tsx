@@ -50,9 +50,13 @@ const ZONA = 'p2m';
 const LAYOUT = {
   L1_ESQ: 5,
   L1_DIR: 3,
-  L2_ESQ: 4,
+  L2_ESQ: 3,
   L2_DIR: 5,
 };
+
+// Altura total de uma coluna com o maior número de bancadas (5)
+// 5 bancadas × 78px + 4 gaps × 8px = 422px
+const ALTURA_COLUNA = 422;
 
 const SUBTIPOS_CATEGORIA = [
   'Saneante',
@@ -655,8 +659,9 @@ export default function LinhaPage() {
   function Esteira() {
     return (
       <div
-        className="w-[44px] h-full min-h-[420px] mx-1 rounded-sm border border-[#444]"
+        className="w-[44px] mx-1 rounded-sm border border-[#444]"
         style={{
+          minHeight: `${ALTURA_COLUNA}px`,
           background:
             'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)',
         }}
@@ -666,8 +671,8 @@ export default function LinhaPage() {
   }
 
   // Coluna de bancadas (esquerda ou direita de uma linha)
-  // alinharFundo=true → empurra as bancadas pra baixo (espaço vazio fica em cima,
-  // pra deixar livre o espaço onde fica a Zona Central PESCA/CATEGORIA)
+  // alinharFundo=true → empurra as bancadas pra baixo, deixando o topo vazio
+  // (pra alinhar com a altura da Zona Central no canvas).
   function ColunaBancadas({
     linha,
     lado,
@@ -681,9 +686,10 @@ export default function LinhaPage() {
   }) {
     return (
       <div
-        className={`flex flex-col gap-2 h-full ${
+        className={`flex flex-col gap-2 ${
           alinharFundo ? 'justify-end' : 'justify-start'
         }`}
+        style={{ minHeight: `${ALTURA_COLUNA}px` }}
       >
         {Array.from({ length: qtd }, (_, i) => (
           <SlotBancada key={`${linha}-${lado}-${i + 1}`} linha={linha} lado={lado} posicao={i + 1} />
