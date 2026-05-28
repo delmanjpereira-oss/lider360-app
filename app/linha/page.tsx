@@ -1,10 +1,22 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 
 // ============================================
 // TIPOS
 // ============================================
+type SubtipoBancada = 'GM' | 'PESCA' | 'CATEGORIA' | null;
+type CategoriaSubtipo = 'Saneante' | 'High Value' | 'Cosméticos' | 'Mapa' | 'Saúde' | 'Alimento' | null;
+
+type Bancada = {
+  id: string;
+  posicao: string;           // identifica o slot fixo no layout
+  subtipo: SubtipoBancada;
+  categoria?: CategoriaSubtipo;
+  linha: 1 | 2;
+  fixo_categoria?: boolean;  // pros 4 slots centrais q tem tipo travado
+};
+
 type Colaborador = {
   id: number;
   id_groot: string;
@@ -13,49 +25,55 @@ type Colaborador = {
   status: string;
 };
 
-type Bancada = {
-  id: number;
-  zona: 'checkin' | 'p2m' | 'sorting';
-  linha: 1 | 2;
-  lado: 'esquerdo' | 'direito';
-  posicao: number;
-  tipo_principal: 'GM' | 'Categoria';
-  subtipo?: string | null;
-};
-
-type Alocacao = {
-  id: number;
-  bancada_id: number;
-  id_groot: string;
-  tipo_alocacao: 'fixo' | 'temporario' | 'fantasma';
-};
-
 type Ritmo = {
   id_groot: string;
   ritmo_pct: number;
 };
 
-const SUBTIPOS_CATEGORIA = ['Pesca', 'Saneante', 'High Value', 'Cosméticos', 'Mapa', 'Saúde', 'Alimento'];
+type Alocacao = {
+  id: number;
+  bancada_id: string;
+  id_groot: string;
+  tipo_alocacao: 'fixo' | 'temporario';
+};
 
-const ZONAS_ORDEM = ['checkin', 'p2m', 'sorting'] as const;
+const CATEGORIAS = ['Saneante', 'High Value', 'Cosméticos', 'Mapa', 'Saúde', 'Alimento'] as const;
 
-function ehUpstream(zonaAtual: string, setorPrincipal: string): boolean {
-  return ZONAS_ORDEM.indexOf(zonaAtual as any) < ZONAS_ORDEM.indexOf(setorPrincipal as any);
-}
-function ehSetorPrincipal(zonaAtual: string, setorPrincipal: string): boolean {
-  return zonaAtual.toLowerCase() === setorPrincipal.toLowerCase();
-}
-function ehDownstream(zonaAtual: string, setorPrincipal: string): boolean {
-  return ZONAS_ORDEM.indexOf(zonaAtual as any) > ZONAS_ORDEM.indexOf(setorPrincipal as any);
+// ============================================
+// 🎯 LAYOUT FIXO (template definido por nós)
+// ============================================
+const LAYOUT_INICIAL: Bancada[] = [
+  // LINHA 1 - lado esquerdo (5 slots verticais)
+  { id: 'l1-s1', posicao: 'L1-slot-1', subtipo: null, linha: 1 },
+  { id: 'l1-s2', posicao: 'L1-slot-2', subtipo: null, linha: 1 },
+  { id: 'l1-s3', posicao: 'L1-slot-3', subtipo: null, linha: 1 },
+  { id: 'l1-s4', posicao: 'L1-slot-4', subtipo: null, linha: 1 },
+  { id: 'l1-s5', posicao: 'L1-slot-5', subtipo: null, linha: 1 },
+  
+  // ZONA CENTRO - 4 slots FIXOS (Pesca L1/L2, Cat L1/L2)
+  { id: 'centro-pesca-l1', posicao: 'centro-pesca-l1', subtipo: 'PESCA', linha: 1, fixo_categoria: true },
+  { id: 'centro-cat-l1',   posicao: 'centro-cat-l1',   subtipo: 'CATEGORIA', linha: 1, fixo_categoria: true },
+  { id: 'centro-pesca-l2', posicao: 'centro-pesca-l2', subtipo: 'PESCA', linha: 2, fixo_categoria: true },
+  { id: 'centro-cat-l2',   posicao: 'centro-cat-l2',   subtipo: 'CATEGORIA', linha: 2, fixo_categoria: true },
+  
+  // LINHA 2 - lado direito (5 slots verticais)
+  { id: 'l2-s1', posicao: 'L2-slot-1', subtipo: null, linha: 2 },
+  { id: 'l2-s2', posicao: 'L2-slot-2', subtipo: null, linha: 2 },
+  { id: 'l2-s3', posicao: 'L2-slot-3', subtipo: null, linha: 2 },
+  { id: 'l2-s4', posicao: 'L2-slot-4', subtipo: null, linha: 2 },
+  { id: 'l2-s5', posicao: 'L2-slot-5', subtipo: null, linha: 2 },
+];
+
+// ============================================
+// HELPERS
+// ============================================
+function corRitmo(pct: number) {
+  if (pct >= 70) return { cor: 'text-green-400', borda: 'border-green-500/50', bg: 'bg-green-500/20', emoji: '🟢' };
+  if (pct >= 45) return { cor: 'text-yellow-400', borda: 'border-yellow-500/50', bg: 'bg-yellow-500/20', emoji: '🟡' };
+  return { cor: 'text-red-400', borda: 'border-red-500/50', bg: 'bg-red-500/20', emoji: '🔴' };
 }
 
-function corRitmo(pct: number): { cor: string; bg: string; emoji: string } {
-  if (pct >= 70) return { cor: 'text-green-400', bg: 'bg-green-500/20', emoji: '🟢' };
-  if (pct >= 45) return { cor: 'text-yellow-400', bg: 'bg-yellow-500/20', emoji: '🟡' };
-  return { cor: 'text-red-400', bg: 'bg-red-500/20', emoji: '🔴' };
-}
-
-function iniciais(nome: string): string {
+function iniciais(nome: string) {
   const partes = nome.trim().split(' ');
   if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
   return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
@@ -65,545 +83,489 @@ function iniciais(nome: string): string {
 // COMPONENTE PRINCIPAL
 // ============================================
 export default function MapeamentoLinhaPage() {
-  const [setorPrincipal, setSetorPrincipal] = useState<string>('p2m');
+  const [bancadas, setBancadas] = useState<Bancada[]>(LAYOUT_INICIAL);
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
-  const [bancadas, setBancadas] = useState<Bancada[]>([]);
-  const [alocacoes, setAlocacoes] = useState<Alocacao[]>([]);
   const [ritmos, setRitmos] = useState<Ritmo[]>([]);
+  const [alocacoes, setAlocacoes] = useState<Alocacao[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Modal de criar bancada
-  const [criandoBancada, setCriandoBancada] = useState<{ linha: 1 | 2; lado: 'esquerdo' | 'direito' } | null>(null);
-  const [tipoSelecionado, setTipoSelecionado] = useState<'GM' | 'Categoria' | null>(null);
-  const [subtipoSelecionado, setSubtipoSelecionado] = useState<string>('');
-  
-  // Drag
   const [colabArrastando, setColabArrastando] = useState<string | null>(null);
-  
-  // ============================================
-  // CARREGAR DADOS
-  // ============================================
-  
-  const carregarDados = useCallback(async () => {
+  const [bancadaConfig, setBancadaConfig] = useState<string | null>(null);
+  const [hoverBancada, setHoverBancada] = useState<string | null>(null);
+
+  const carregar = useCallback(async () => {
     try {
       const hoje = new Date().toISOString().split('T')[0];
-      
-      const [confResp, colabsResp, bancadasResp, alocacoesResp, ritmoResp] = await Promise.all([
-        supabase.from('config').select('chave, valor').eq('chave', 'setor_principal'),
+      const [colabsResp, ritmoResp, alocResp] = await Promise.all([
         supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
-        supabase.from('layout_bancadas').select('*').eq('data_referencia', hoje).order('posicao'),
-        supabase.from('layout_alocacao').select('*').eq('data_referencia', hoje),
         supabase.from('ritmo_atual').select('id_groot, ritmo_pct').eq('data_referencia', hoje),
+        supabase.from('layout_alocacao').select('*').eq('data_referencia', hoje),
       ]);
-      
-      if (confResp.data && confResp.data[0]) {
-        setSetorPrincipal(String(confResp.data[0].valor).toLowerCase());
-      }
-      
       if (colabsResp.data) setColaboradores(colabsResp.data as any);
-      if (bancadasResp.data) setBancadas(bancadasResp.data as any);
-      if (alocacoesResp.data) setAlocacoes(alocacoesResp.data as any);
       if (ritmoResp.data) setRitmos(ritmoResp.data as any);
+      if (alocResp.data) setAlocacoes(alocResp.data.map((a: any) => ({ ...a, bancada_id: String(a.bancada_id) })) as any);
     } catch (e) {
       console.error('Erro:', e);
     } finally {
       setLoading(false);
     }
   }, []);
-  
-  useEffect(() => {
-    carregarDados();
-  }, [carregarDados]);
-  
+
+  useEffect(() => { carregar(); }, [carregar]);
+
   // ============================================
   // HELPERS
   // ============================================
-  
-  // Colabs ALOCADOS (já estão em alguma bancada)
-  const colabsAlocadosIds = new Set(alocacoes.filter(a => a.tipo_alocacao !== 'fantasma').map(a => a.id_groot));
-  
-  // Colabs LIVRES (na sidebar lateral)
-  const colabsLivres = colaboradores.filter(c => 
-    !colabsAlocadosIds.has(c.id_groot) && 
-    (c.processo === 'P2M' || setorPrincipal !== 'p2m')
-  );
-  
-  // Ritmo de um colab
+  const colabsAlocadosIds = new Set(alocacoes.map(a => a.id_groot));
+  const colabsLivres = colaboradores.filter(c => !colabsAlocadosIds.has(c.id_groot) && c.processo === 'P2M');
+
   function ritmoDoColab(idGroot: string): number | null {
     const r = ritmos.find(r => r.id_groot === idGroot);
     return r ? r.ritmo_pct : null;
   }
-  
-  // Bancadas de uma zona/linha/lado
-  function bancadasDe(zona: string, linha: 1 | 2, lado: 'esquerdo' | 'direito'): Bancada[] {
-    return bancadas.filter(b => b.zona === zona && b.linha === linha && b.lado === lado);
-  }
-  
-  // Colabs de uma bancada
-  function alocacoesDe(bancadaId: number): Alocacao[] {
+
+  function alocacoesDe(bancadaId: string): Alocacao[] {
     return alocacoes.filter(a => a.bancada_id === bancadaId);
   }
-  
+
+  function getBancada(id: string) {
+    return bancadas.find(b => b.id === id);
+  }
+
   // ============================================
   // AÇÕES
   // ============================================
-  
-  async function criarBancada(zona: string, linha: 1 | 2, lado: 'esquerdo' | 'direito', tipoPrincipal: 'GM' | 'Categoria', subtipo?: string) {
-    const novaPosicao = bancadasDe(zona, linha, lado).length;
+  async function configurarBancada(bancadaId: string, subtipo: SubtipoBancada, categoria?: CategoriaSubtipo) {
+    setBancadas(prev => prev.map(b => b.id === bancadaId ? { ...b, subtipo, categoria: categoria || null } : b));
+    setBancadaConfig(null);
+  }
+
+  async function limparBancada(bancadaId: string) {
+    const b = getBancada(bancadaId);
+    if (!b) return;
     
-    const { data, error } = await supabase
-      .from('layout_bancadas')
-      .insert({
-        zona, linha, lado, posicao: novaPosicao,
-        tipo_principal: tipoPrincipal,
-        subtipo: subtipo || null,
-      })
-      .select()
-      .single();
-    
-    if (error) {
-      alert('Erro: ' + error.message);
+    // Se for slot fixo do centro, não pode limpar tipo
+    if (b.fixo_categoria) {
+      // Só limpa os colabs
+      const alocsRemove = alocacoesDe(bancadaId);
+      for (const a of alocsRemove) {
+        await supabase.from('layout_alocacao').delete().eq('id', a.id);
+      }
+      setAlocacoes(prev => prev.filter(a => a.bancada_id !== bancadaId));
       return;
     }
     
-    setBancadas(prev => [...prev, data as Bancada]);
-    setCriandoBancada(null);
-    setTipoSelecionado(null);
-    setSubtipoSelecionado('');
-  }
-  
-  async function excluirBancada(bancadaId: number) {
-    if (!confirm('Excluir essa bancada?')) return;
-    
-    await supabase.from('layout_alocacao').delete().eq('bancada_id', bancadaId);
-    await supabase.from('layout_bancadas').delete().eq('id', bancadaId);
-    
-    setBancadas(prev => prev.filter(b => b.id !== bancadaId));
+    // Senão limpa tudo
+    setBancadas(prev => prev.map(b => b.id === bancadaId ? { ...b, subtipo: null, categoria: null } : b));
+    const alocsRemove = alocacoesDe(bancadaId);
+    for (const a of alocsRemove) {
+      await supabase.from('layout_alocacao').delete().eq('id', a.id);
+    }
     setAlocacoes(prev => prev.filter(a => a.bancada_id !== bancadaId));
   }
-  
-  async function alocarColab(bancadaId: number, idGroot: string) {
-    // Remove alocação anterior do colab (se houver)
-    await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot).eq('data_referencia', new Date().toISOString().split('T')[0]);
-    
-    const { data, error } = await supabase
-      .from('layout_alocacao')
-      .insert({
-        bancada_id: bancadaId,
-        id_groot: idGroot,
-        tipo_alocacao: 'fixo',
-      })
-      .select()
-      .single();
-    
-    if (error) {
-      alert('Erro: ' + error.message);
+
+  function handleColabDragStart(idGroot: string) {
+    setColabArrastando(idGroot);
+  }
+
+  async function handleDropNaBancada(bancadaId: string) {
+    if (!colabArrastando) return;
+    const b = getBancada(bancadaId);
+    if (!b || !b.subtipo) {
+      setColabArrastando(null);
+      setHoverBancada(null);
       return;
     }
     
-    setAlocacoes(prev => [...prev.filter(a => a.id_groot !== idGroot), data as Alocacao]);
+    await supabase.from('layout_alocacao').delete().eq('id_groot', colabArrastando).eq('data_referencia', new Date().toISOString().split('T')[0]);
+    
+    const { data, error } = await supabase.from('layout_alocacao').insert({
+      bancada_id: 0,
+      id_groot: colabArrastando,
+      tipo_alocacao: 'fixo',
+    }).select().single();
+    
+    if (!error && data) {
+      setAlocacoes(prev => [...prev.filter(a => a.id_groot !== colabArrastando), { ...data, bancada_id: bancadaId } as any]);
+    }
+    
+    setColabArrastando(null);
+    setHoverBancada(null);
   }
-  
+
   async function removerColab(alocacaoId: number) {
     await supabase.from('layout_alocacao').delete().eq('id', alocacaoId);
     setAlocacoes(prev => prev.filter(a => a.id !== alocacaoId));
   }
-  
-  async function trocarTipoAlocacao(alocacaoId: number, novoTipo: 'fixo' | 'temporario') {
-    await supabase.from('layout_alocacao').update({ tipo_alocacao: novoTipo }).eq('id', alocacaoId);
-    setAlocacoes(prev => prev.map(a => a.id === alocacaoId ? { ...a, tipo_alocacao: novoTipo } : a));
-  }
-  
-  async function trocarSetor(novoSetor: string) {
-    await supabase.from('config').upsert({ chave: 'setor_principal', valor: novoSetor });
-    setSetorPrincipal(novoSetor.toLowerCase());
-  }
-  
-  // Upload CSV
+
   async function handleUploadCSV(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    
     const text = await file.text();
     const linhas = text.split('\n').filter(l => l.trim());
     if (linhas.length < 2) return alert('CSV vazio');
-    
     const header = linhas[0].toLowerCase().split(/[,;]/);
     const idIdx = header.findIndex(h => h.includes('id_groot') || h.includes('id'));
-    const nomeIdx = header.findIndex(h => h.includes('nome'));
     const ritmoIdx = header.findIndex(h => h.includes('ritmo') || h.includes('pct') || h.includes('%'));
-    
-    if (idIdx < 0 || ritmoIdx < 0) return alert('CSV precisa ter colunas: id_groot e ritmo (ou ritmo_pct)');
-    
-    const novosRitmos: any[] = [];
+    if (idIdx < 0 || ritmoIdx < 0) return alert('CSV precisa ter: id_groot e ritmo_pct');
+    const novos: any[] = [];
     for (let i = 1; i < linhas.length; i++) {
       const cols = linhas[i].split(/[,;]/);
       const idGroot = String(cols[idIdx] || '').trim().replace(/['"]/g, '');
-      const nome = nomeIdx >= 0 ? String(cols[nomeIdx] || '').trim() : '';
       const ritmo = Math.round(Number(String(cols[ritmoIdx] || '').replace(',', '.').replace('%', '').trim()) || 0);
-      
-      if (idGroot && ritmo > 0) {
-        novosRitmos.push({ id_groot: idGroot, nome, ritmo_pct: ritmo });
-      }
+      if (idGroot && ritmo > 0) novos.push({ id_groot: idGroot, ritmo_pct: ritmo });
     }
-    
-    if (novosRitmos.length === 0) return alert('Nenhum dado válido no CSV');
-    
-    // Upsert
-    const { error } = await supabase.from('ritmo_atual').upsert(novosRitmos, {
-      onConflict: 'id_groot,data_referencia',
-    });
-    
-    if (error) {
-      alert('Erro: ' + error.message);
-      return;
-    }
-    
-    alert(`✅ ${novosRitmos.length} ritmos atualizados!`);
-    await carregarDados();
+    if (novos.length === 0) return alert('Nenhum dado válido');
+    const { error } = await supabase.from('ritmo_atual').upsert(novos, { onConflict: 'id_groot,data_referencia' });
+    if (error) return alert('Erro: ' + error.message);
+    alert(`✅ ${novos.length} ritmos atualizados!`);
+    await carregar();
   }
-  
-  // Drag handlers
-  function handleDragStart(idGroot: string) {
-    setColabArrastando(idGroot);
-  }
-  
-  async function handleDropNaBancada(bancadaId: number) {
-    if (!colabArrastando) return;
-    await alocarColab(bancadaId, colabArrastando);
-    setColabArrastando(null);
-  }
-  
-  function handleDragOver(e: React.DragEvent) {
-    e.preventDefault();
-  }
-  
-  // ============================================
-  // RENDER
-  // ============================================
-  
+
   if (loading) {
-    return <div className="text-center py-12 text-gray-400">Carregando...</div>;
+    return <div className="text-center py-12 text-gray-400">⏳ Carregando...</div>;
   }
-  
-  const zonasVisiveis = ZONAS_ORDEM.filter(z => !ehDownstream(z, setorPrincipal));
-  
+
+  // Filtra bancadas por zona
+  const bancadasL1 = bancadas.filter(b => b.linha === 1 && !b.fixo_categoria).slice(0, 5);
+  const bancadasL2 = bancadas.filter(b => b.linha === 2 && !b.fixo_categoria).slice(0, 5);
+  const bancadasCentro = bancadas.filter(b => b.fixo_categoria);
+
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-black">
-            🏭 Mapeamento <span className="text-[#FFD700]">Linha</span>
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Centro de comando operacional · {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
-          </p>
+    <div className="flex flex-col h-[calc(100vh-100px)] gap-2">
+      {/* TOOLBAR */}
+      <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <h1 className="text-base font-black text-white">🏭 Mapeamento Linha</h1>
+          <span className="text-xs text-gray-500">· P2M</span>
         </div>
-        
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Setor */}
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 flex items-center gap-2">
-            <span className="text-xs text-gray-400">Setor:</span>
-            <select 
-              value={setorPrincipal}
-              onChange={(e) => trocarSetor(e.target.value)}
-              className="bg-transparent text-white font-bold text-sm outline-none cursor-pointer"
-            >
-              <option value="checkin">📦 Checkin</option>
-              <option value="p2m">🚚 P2M</option>
-              <option value="sorting">📋 Sorting</option>
-            </select>
-          </div>
-          
-          {/* Upload CSV */}
-          <label className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-lg px-3 py-2 text-sm font-bold cursor-pointer transition-all">
+        <div className="flex items-center gap-2">
+          <label className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded text-xs px-3 py-1.5 font-bold cursor-pointer">
             ↑ Upload Boletim
             <input type="file" accept=".csv,.txt" onChange={handleUploadCSV} className="hidden" />
           </label>
         </div>
       </div>
-      
-      {/* LAYOUT 2 COLUNAS */}
-      <div className="grid grid-cols-12 gap-4">
+
+      {/* ÁREA PRINCIPAL */}
+      <div className="flex gap-2 flex-1 min-h-0">
         
-        {/* COLUNA ESQUERDA: COLABS LIVRES */}
-        <div className="col-span-12 md:col-span-3">
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl overflow-hidden">
-            <div className="bg-[#0a0a0a] px-4 py-3 border-b border-[#2a2a2a]">
-              <h3 className="font-black text-[#FFD700] text-sm flex items-center justify-between">
-                <span>👥 Colabs Livres</span>
-                <span className="text-xs bg-[#2a2a2a] text-gray-400 px-2 py-0.5 rounded-full">{colabsLivres.length}</span>
-              </h3>
-            </div>
-            <div className="p-2 space-y-2 max-h-[600px] overflow-y-auto">
-              {colabsLivres.length === 0 ? (
-                <p className="text-center text-gray-500 text-xs py-4">Todos alocados 🎉</p>
-              ) : (
-                colabsLivres.map((c) => {
-                  const r = ritmoDoColab(c.id_groot);
-                  const cores = r !== null ? corRitmo(r) : null;
-                  return (
-                    <div
-                      key={c.id_groot}
-                      draggable
-                      onDragStart={() => handleDragStart(c.id_groot)}
-                      className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-2.5 cursor-move hover:border-[#FFD700]/40 transition-all"
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className={`w-8 h-8 rounded-full ${cores?.bg || 'bg-gray-500/20'} flex items-center justify-center font-bold text-xs ${cores?.cor || 'text-gray-400'}`}>
-                          {iniciais(c.nome)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-white truncate">{c.nome.split(' ').slice(0, 2).join(' ')}</p>
-                          <p className="text-[10px] text-gray-500">
-                            {c.processo} {r !== null ? `· ${r}%${cores?.emoji}` : '· ⚪ sem CSV'}
-                          </p>
-                        </div>
+        {/* SIDEBAR COLABS LIVRES */}
+        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg overflow-hidden flex flex-col" style={{ width: '160px' }}>
+          <div className="bg-[#0a0a0a] px-3 py-2 border-b border-[#2a2a2a] flex items-center justify-between">
+            <h3 className="text-xs font-black text-[#FFD700]">👥 Livres</h3>
+            <span className="text-xs bg-[#2a2a2a] text-gray-400 px-1.5 py-0.5 rounded-full">{colabsLivres.length}</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {colabsLivres.length === 0 ? (
+              <p className="text-center text-gray-500 text-[10px] py-3">Todos alocados</p>
+            ) : (
+              colabsLivres.map((c) => {
+                const r = ritmoDoColab(c.id_groot);
+                const cores = r !== null ? corRitmo(r) : null;
+                return (
+                  <div
+                    key={c.id_groot}
+                    draggable
+                    onDragStart={() => handleColabDragStart(c.id_groot)}
+                    className={`bg-[#0a0a0a] border ${cores?.borda || 'border-[#2a2a2a]'} rounded p-1.5 cursor-move hover:scale-105 transition-all`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-6 h-6 rounded ${cores?.bg || 'bg-gray-500/20'} flex items-center justify-center font-bold text-[9px] ${cores?.cor || 'text-gray-400'}`}>
+                        {iniciais(c.nome)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-bold text-white truncate">{c.nome.split(' ')[0]}</p>
+                        <p className="text-[9px] text-gray-500">{r !== null ? `${r}%` : '⚪'}</p>
                       </div>
                     </div>
-                  );
-                })
-              )}
-            </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
-        
-        {/* COLUNA DIREITA: LINHA */}
-        <div className="col-span-12 md:col-span-9 space-y-4">
+
+        {/* CANVAS DA LINHA */}
+        <div className="flex-1 bg-[#0d0d0d] border border-[#2a2a2a] rounded-lg overflow-auto p-6">
           
-          {zonasVisiveis.map((zona) => {
-            const editavel = ehSetorPrincipal(zona, setorPrincipal);
-            const labelZona = zona === 'p2m' ? '🚚 P2M' : zona === 'checkin' ? '📦 CHECKIN' : '📋 SORTING';
-            const corBorda = editavel ? 'border-[#FFD700]' : 'border-[#2a2a2a]';
-            const bgZona = editavel ? 'bg-gradient-to-br from-[#FFD700]/5 to-transparent' : 'bg-[#1a1a1a]/50';
+          {/* GRID PRINCIPAL: 3 COLUNAS */}
+          <div className="grid gap-4 h-full" style={{ gridTemplateColumns: '1fr auto 1fr', minHeight: '600px' }}>
             
-            return (
-              <div key={zona} className={`${bgZona} border-2 ${corBorda} rounded-2xl overflow-hidden`}>
-                <div className={`${editavel ? 'bg-[#FFD700]/10' : 'bg-[#0a0a0a]'} px-4 py-3 border-b ${corBorda} flex items-center justify-between`}>
-                  <h3 className={`font-black ${editavel ? 'text-[#FFD700]' : 'text-gray-400'} text-sm`}>
-                    {labelZona}
-                    {editavel ? <span className="ml-2 text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">EDITÁVEL</span>
-                              : <span className="ml-2 text-xs bg-gray-500/20 text-gray-500 px-2 py-0.5 rounded-full">SÓ LEITURA</span>}
-                  </h3>
-                </div>
+            {/* ============================ */}
+            {/* COLUNA ESQUERDA - LINHA 1 */}
+            {/* ============================ */}
+            <div className="flex flex-col items-center gap-3">
+              {/* Header L1 */}
+              <div className="text-center">
+                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">LINHA 1</p>
+                <div className="w-1 h-4 bg-gray-700 mx-auto mt-1"></div>
+              </div>
+              
+              {/* Esteira L1 (faixa vertical) */}
+              <div className="relative w-full max-w-[280px] flex flex-col items-center gap-2">
+                {/* Esteira de fundo */}
+                <div 
+                  className="absolute left-1/2 -translate-x-1/2 w-12 h-full -z-10"
+                  style={{
+                    background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 6px, #1a1a1a 6px, #1a1a1a 12px)',
+                    border: '1px solid #444',
+                  }}
+                />
                 
-                {/* 2 LINHAS */}
-                <div className="p-4 grid grid-cols-2 gap-6">
-                  {[1, 2].map((linha) => (
-                    <div key={linha} className="space-y-2">
-                      <p className="text-center text-xs font-bold text-gray-500 uppercase">Linha {linha}</p>
-                      
-                      {/* Esteira visual + bancadas */}
-                      <div className="flex gap-2 items-stretch">
-                        
-                        {/* Lado esquerdo */}
-                        <div className="flex-1 space-y-2">
-                          {bancadasDe(zona, linha as 1 | 2, 'esquerdo').map(b => (
-                            <RenderBancada 
-                              key={b.id}
-                              bancada={b}
-                              alocacoes={alocacoesDe(b.id)}
-                              colaboradores={colaboradores}
-                              ritmos={ritmos}
-                              editavel={editavel}
-                              onExcluir={() => excluirBancada(b.id)}
-                              onRemoverColab={removerColab}
-                              onTrocarTipo={trocarTipoAlocacao}
-                              onDragOver={handleDragOver}
-                              onDrop={() => handleDropNaBancada(b.id)}
-                            />
-                          ))}
-                          {editavel && (
-                            <button
-                              onClick={() => setCriandoBancada({ linha: linha as 1 | 2, lado: 'esquerdo' })}
-                              className="w-full bg-[#0a0a0a] border-2 border-dashed border-[#2a2a2a] hover:border-[#FFD700]/40 rounded-lg py-3 text-xs text-gray-500 hover:text-[#FFD700] transition-all"
-                            >
-                              + Nova Bancada
-                            </button>
-                          )}
-                        </div>
-                        
-                        {/* Esteira preta */}
-                        <div className="w-3 bg-gradient-to-b from-gray-700 to-gray-900 rounded-full self-stretch"></div>
-                        
-                        {/* Lado direito */}
-                        <div className="flex-1 space-y-2">
-                          {bancadasDe(zona, linha as 1 | 2, 'direito').map(b => (
-                            <RenderBancada 
-                              key={b.id}
-                              bancada={b}
-                              alocacoes={alocacoesDe(b.id)}
-                              colaboradores={colaboradores}
-                              ritmos={ritmos}
-                              editavel={editavel}
-                              onExcluir={() => excluirBancada(b.id)}
-                              onRemoverColab={removerColab}
-                              onTrocarTipo={trocarTipoAlocacao}
-                              onDragOver={handleDragOver}
-                              onDrop={() => handleDropNaBancada(b.id)}
-                            />
-                          ))}
-                          {editavel && (
-                            <button
-                              onClick={() => setCriandoBancada({ linha: linha as 1 | 2, lado: 'direito' })}
-                              className="w-full bg-[#0a0a0a] border-2 border-dashed border-[#2a2a2a] hover:border-[#FFD700]/40 rounded-lg py-3 text-xs text-gray-500 hover:text-[#FFD700] transition-all"
-                            >
-                              + Nova Bancada
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                {/* Bancadas L1 */}
+                {bancadasL1.map((b) => (
+                  <BancadaSlot
+                    key={b.id}
+                    bancada={b}
+                    alocacoes={alocacoesDe(b.id)}
+                    colaboradores={colaboradores}
+                    ritmos={ritmos}
+                    hover={hoverBancada === b.id}
+                    onConfigurar={() => setBancadaConfig(b.id)}
+                    onLimpar={() => limparBancada(b.id)}
+                    onDragOver={(e) => { e.preventDefault(); setHoverBancada(b.id); }}
+                    onDragLeave={() => setHoverBancada(null)}
+                    onDrop={() => handleDropNaBancada(b.id)}
+                    onRemoverColab={removerColab}
+                  />
+                ))}
+              </div>
+              
+              {/* Seta saída */}
+              <div className="text-blue-400 text-2xl">↓</div>
+            </div>
+
+            {/* ============================ */}
+            {/* COLUNA CENTRO - 4 SLOTS FIXOS */}
+            {/* ============================ */}
+            <div className="flex flex-col justify-start pt-12">
+              <div className="bg-[#1a1a1a]/50 border-2 border-dashed border-[#FFD700]/30 rounded-lg p-3" style={{ width: '280px' }}>
+                <p className="text-[10px] text-[#FFD700] font-black uppercase tracking-widest text-center mb-3">
+                  ZONA CENTRAL
+                </p>
+                
+                {/* Grid 2x2 */}
+                <div className="grid grid-cols-2 gap-2">
+                  {bancadasCentro.map((b) => (
+                    <BancadaSlot
+                      key={b.id}
+                      bancada={b}
+                      alocacoes={alocacoesDe(b.id)}
+                      colaboradores={colaboradores}
+                      ritmos={ritmos}
+                      hover={hoverBancada === b.id}
+                      onConfigurar={() => b.subtipo === 'CATEGORIA' ? setBancadaConfig(b.id) : null}
+                      onLimpar={() => limparBancada(b.id)}
+                      onDragOver={(e) => { e.preventDefault(); setHoverBancada(b.id); }}
+                      onDragLeave={() => setHoverBancada(null)}
+                      onDrop={() => handleDropNaBancada(b.id)}
+                      onRemoverColab={removerColab}
+                      compacto
+                    />
                   ))}
                 </div>
               </div>
-            );
-          })}
-          
-        </div>
-      </div>
-      
-      {/* MODAL CRIAR BANCADA */}
-      {criandoBancada && (
-        <div className="fixed inset-0 z-[9000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setCriandoBancada(null)}>
-          <div onClick={(e) => e.stopPropagation()} className="bg-[#1a1a1a] border-2 border-[#FFD700]/30 rounded-2xl max-w-md w-full p-6">
-            <h3 className="text-xl font-black text-white mb-4">Nova Bancada</h3>
-            <p className="text-xs text-gray-400 mb-4">Linha {criandoBancada.linha} · Lado {criandoBancada.lado}</p>
+            </div>
+
+            {/* ============================ */}
+            {/* COLUNA DIREITA - LINHA 2 */}
+            {/* ============================ */}
+            <div className="flex flex-col items-center gap-3">
+              <div className="text-center">
+                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">LINHA 2</p>
+                <div className="w-1 h-4 bg-gray-700 mx-auto mt-1"></div>
+              </div>
+              
+              <div className="relative w-full max-w-[280px] flex flex-col items-center gap-2">
+                <div 
+                  className="absolute left-1/2 -translate-x-1/2 w-12 h-full -z-10"
+                  style={{
+                    background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 6px, #1a1a1a 6px, #1a1a1a 12px)',
+                    border: '1px solid #444',
+                  }}
+                />
+                
+                {bancadasL2.map((b) => (
+                  <BancadaSlot
+                    key={b.id}
+                    bancada={b}
+                    alocacoes={alocacoesDe(b.id)}
+                    colaboradores={colaboradores}
+                    ritmos={ritmos}
+                    hover={hoverBancada === b.id}
+                    onConfigurar={() => setBancadaConfig(b.id)}
+                    onLimpar={() => limparBancada(b.id)}
+                    onDragOver={(e) => { e.preventDefault(); setHoverBancada(b.id); }}
+                    onDragLeave={() => setHoverBancada(null)}
+                    onDrop={() => handleDropNaBancada(b.id)}
+                    onRemoverColab={removerColab}
+                  />
+                ))}
+              </div>
+              
+              <div className="text-blue-400 text-2xl">↓</div>
+            </div>
             
-            {/* Tipo principal */}
-            {!tipoSelecionado && (
-              <>
-                <p className="text-sm font-bold text-gray-300 mb-3">Tipo:</p>
-                <div className="space-y-2">
-                  <button
-                    onClick={() => {
-                      criarBancada(setorPrincipal, criandoBancada.linha, criandoBancada.lado, 'GM');
-                    }}
-                    className="w-full bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded-lg p-3 text-left transition-all"
-                  >
-                    <p className="text-white font-bold">⭐ GM</p>
-                    <p className="text-xs text-gray-400">Alocação fixa, GM sempre fixo</p>
-                  </button>
-                  <button
-                    onClick={() => setTipoSelecionado('Categoria')}
-                    className="w-full bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-lg p-3 text-left transition-all"
-                  >
-                    <p className="text-white font-bold">📦 Categoria</p>
-                    <p className="text-xs text-gray-400">Escolher entre 7 sub-tipos</p>
-                  </button>
-                </div>
-              </>
-            )}
-            
-            {/* Sub-tipos de Categoria */}
-            {tipoSelecionado === 'Categoria' && (
-              <>
-                <p className="text-sm font-bold text-gray-300 mb-3">Sub-tipo:</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {SUBTIPOS_CATEGORIA.map(st => (
-                    <button
-                      key={st}
-                      onClick={() => criarBancada(setorPrincipal, criandoBancada.linha, criandoBancada.lado, 'Categoria', st)}
-                      className="bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-lg p-3 text-white font-bold text-sm transition-all"
-                    >
-                      {st}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-            
-            <button
-              onClick={() => { setCriandoBancada(null); setTipoSelecionado(null); }}
-              className="w-full mt-4 bg-[#2a2a2a] hover:bg-[#3a3a3a] text-white font-bold py-2 rounded-lg transition-all"
-            >
-              Cancelar
-            </button>
           </div>
         </div>
+      </div>
+
+      {/* MODAL CONFIGURAR BANCADA */}
+      {bancadaConfig && (
+        <ModalConfig
+          bancada={getBancada(bancadaConfig)!}
+          onClose={() => setBancadaConfig(null)}
+          onSalvar={(subtipo, categoria) => configurarBancada(bancadaConfig, subtipo, categoria)}
+        />
       )}
     </div>
   );
 }
 
 // ============================================
-// BANCADA COMPONENT
+// BANCADA SLOT
 // ============================================
-function RenderBancada({
-  bancada, alocacoes, colaboradores, ritmos,
-  editavel, onExcluir, onRemoverColab, onTrocarTipo,
-  onDragOver, onDrop,
-}: any) {
-  const titulo = bancada.tipo_principal === 'GM' ? '⭐ GM' : `📦 ${bancada.subtipo}`;
+function BancadaSlot({ bancada, alocacoes, colaboradores, ritmos, hover, onConfigurar, onLimpar, onDragOver, onDragLeave, onDrop, onRemoverColab, compacto }: any) {
+  const isVazia = !bancada.subtipo;
   
-  function ritmoDoColab(idGroot: string): number | null {
+  const corBorda = bancada.subtipo === 'GM' ? '#FFD700' :
+                   bancada.subtipo === 'PESCA' ? '#3b82f6' :
+                   bancada.subtipo === 'CATEGORIA' ? '#a855f7' : '#333';
+  
+  const titulo = bancada.subtipo === 'CATEGORIA' && bancada.categoria ? `📦 ${bancada.categoria}` :
+                 bancada.subtipo === 'CATEGORIA' ? '📦 Categoria' :
+                 bancada.subtipo === 'GM' ? '⭐ GM' :
+                 bancada.subtipo === 'PESCA' ? '🐟 PESCA' :
+                 '+ Configurar';
+
+  function ritmoColab(idGroot: string) {
     const r = ritmos.find((r: any) => r.id_groot === idGroot);
     return r ? r.ritmo_pct : null;
   }
-  
+
+  const widthClass = compacto ? 'w-full' : 'w-[140px]';
+  const heightClass = compacto ? 'min-h-[70px]' : 'min-h-[80px]';
+
   return (
     <div
-      onDragOver={editavel ? onDragOver : undefined}
-      onDrop={editavel ? onDrop : undefined}
-      className={`bg-[#0a0a0a] border ${editavel ? 'border-[#2a2a2a] hover:border-[#FFD700]/40' : 'border-[#2a2a2a]'} rounded-lg p-2 transition-all`}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`${widthClass} ${heightClass} relative rounded transition-all ${
+        hover && !isVazia ? 'scale-105 ring-2 ring-green-400' : ''
+      }`}
+      style={{
+        background: isVazia ? 'transparent' : '#1a1a1a',
+        border: isVazia ? '2px dashed #333' : `2px solid ${corBorda}`,
+        borderLeftWidth: isVazia ? '2px' : '4px',
+      }}
     >
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-black text-[#FFD700]">{titulo}</p>
-        {editavel && (
-          <button onClick={onExcluir} className="text-red-400 hover:text-red-300 text-lg leading-none w-5 h-5 flex items-center justify-center">
-            ×
-          </button>
-        )}
-      </div>
+      {/* Botão configurar quando vazia */}
+      {isVazia && (
+        <button
+          onClick={onConfigurar}
+          className="w-full h-full flex items-center justify-center text-gray-500 hover:text-yellow-400 text-xl font-bold transition-colors"
+        >
+          +
+        </button>
+      )}
       
-      <div className="space-y-1">
-        {alocacoes.length === 0 ? (
-          <div className="text-center text-[10px] text-gray-600 py-3 border border-dashed border-[#2a2a2a] rounded">
-            {editavel ? 'Arraste um colab aqui' : 'Vazio'}
+      {/* Bancada configurada */}
+      {!isVazia && (
+        <>
+          {/* Header */}
+          <div className="flex items-center justify-between px-2 pt-1.5">
+            <p className="text-[10px] font-black truncate" style={{ color: corBorda }}>{titulo}</p>
+            <div className="flex gap-1">
+              {bancada.subtipo === 'CATEGORIA' && onConfigurar && (
+                <button onClick={onConfigurar} className="text-gray-500 hover:text-yellow-400 text-[10px]">✏️</button>
+              )}
+              {!bancada.fixo_categoria && (
+                <button onClick={onLimpar} className="text-red-400 hover:text-red-300 text-xs leading-none">×</button>
+              )}
+              {bancada.fixo_categoria && alocacoes.length > 0 && (
+                <button onClick={onLimpar} className="text-gray-500 hover:text-red-400 text-[10px]" title="Limpar pessoas">🗑</button>
+              )}
+            </div>
           </div>
-        ) : (
-          alocacoes.map((a: Alocacao) => {
-            const colab = colaboradores.find((c: Colaborador) => c.id_groot === a.id_groot);
-            if (!colab) return null;
-            const r = ritmoDoColab(a.id_groot);
-            const cores = r !== null ? corRitmo(r) : null;
-            
-            return (
-              <div key={a.id} className={`bg-[#1a1a1a] border ${cores?.bg.replace('/20', '/40') || 'border-[#2a2a2a]'} rounded p-1.5`}>
-                <div className="flex items-center gap-2">
-                  <div className={`w-6 h-6 rounded-full ${cores?.bg || 'bg-gray-500/20'} flex items-center justify-center font-bold text-[10px] ${cores?.cor || 'text-gray-400'}`}>
-                    {iniciais(colab.nome)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-bold text-white truncate">{colab.nome.split(' ')[0]}</p>
-                    <p className="text-[9px] text-gray-500">
-                      {r !== null ? `${r}%${cores?.emoji}` : '⚪'} · {a.tipo_alocacao === 'fixo' ? '📍fixo' : '🔄temp'}
-                    </p>
-                  </div>
-                  {editavel && (
-                    <div className="flex flex-col gap-0.5">
-                      <button
-                        onClick={() => onTrocarTipo(a.id, a.tipo_alocacao === 'fixo' ? 'temporario' : 'fixo')}
-                        className="text-[8px] text-blue-400 hover:text-blue-300"
-                        title="Trocar fixo/temporário"
-                      >
-                        ⇄
-                      </button>
-                      <button
-                        onClick={() => onRemoverColab(a.id)}
-                        className="text-[8px] text-red-400 hover:text-red-300"
-                        title="Remover"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  )}
-                </div>
+          
+          {/* Colabs */}
+          <div className="px-1.5 pb-1.5 pt-1 space-y-1">
+            {alocacoes.length === 0 && (
+              <div className="text-center text-[9px] text-gray-600 italic py-1">
+                Arraste aqui
               </div>
-            );
-          })
+            )}
+            {alocacoes.slice(0, 2).map((a: any) => {
+              const colab = colaboradores.find((c: any) => c.id_groot === a.id_groot);
+              if (!colab) return null;
+              const r = ritmoColab(a.id_groot);
+              const cores = r !== null ? corRitmo(r) : null;
+              return (
+                <div key={a.id} className={`flex items-center gap-1 bg-[#0a0a0a] rounded px-1.5 py-1 border ${cores?.borda || 'border-[#2a2a2a]'}`}>
+                  <span className={`text-[9px] font-bold w-4 ${cores?.cor || 'text-gray-400'}`}>{iniciais(colab.nome)}</span>
+                  <span className="text-[9px] text-gray-300 truncate flex-1">{colab.nome.split(' ')[0]}</span>
+                  <span className="text-[9px] font-mono">{r !== null ? `${r}%` : '⚪'}</span>
+                  <button onClick={(e) => { e.stopPropagation(); onRemoverColab(a.id); }} className="text-red-400 text-[10px] leading-none">×</button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// MODAL CONFIG
+// ============================================
+function ModalConfig({ bancada, onClose, onSalvar }: any) {
+  // Se já é fixo (centro), só permite mudar categoria
+  const apenasCategoria = bancada.fixo_categoria && bancada.subtipo === 'CATEGORIA';
+  
+  const [subtipo, setSubtipo] = useState<SubtipoBancada>(bancada.subtipo || null);
+  const [categoria, setCategoria] = useState<CategoriaSubtipo>(bancada.categoria || null);
+
+  function salvar() {
+    if (!subtipo) return alert('Escolha um tipo');
+    if (subtipo === 'CATEGORIA' && !categoria) return alert('Escolha a categoria');
+    onSalvar(subtipo, subtipo === 'CATEGORIA' ? categoria : null);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9000] flex items-center justify-center p-4 bg-black/80" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-[#1a1a1a] border-2 border-[#FFD700]/30 rounded-2xl max-w-md w-full p-5">
+        <h3 className="text-lg font-black text-white mb-1">Configurar Bancada</h3>
+        <p className="text-xs text-gray-400 mb-4">Linha {bancada.linha}</p>
+        
+        {!apenasCategoria && (
+          <>
+            <p className="text-xs text-gray-400 mb-2">Tipo:</p>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <button onClick={() => setSubtipo('GM')} className={`p-3 rounded border-2 text-xs font-bold transition-all ${subtipo === 'GM' ? 'border-yellow-400 bg-yellow-400/10 text-yellow-300' : 'border-[#2a2a2a] text-gray-400'}`}>⭐<br/>GM</button>
+              <button onClick={() => setSubtipo('PESCA')} className={`p-3 rounded border-2 text-xs font-bold transition-all ${subtipo === 'PESCA' ? 'border-blue-400 bg-blue-400/10 text-blue-300' : 'border-[#2a2a2a] text-gray-400'}`}>🐟<br/>PESCA</button>
+              <button onClick={() => setSubtipo('CATEGORIA')} className={`p-3 rounded border-2 text-xs font-bold transition-all ${subtipo === 'CATEGORIA' ? 'border-purple-400 bg-purple-400/10 text-purple-300' : 'border-[#2a2a2a] text-gray-400'}`}>📦<br/>CATEGORIA</button>
+            </div>
+          </>
         )}
+        
+        {subtipo === 'CATEGORIA' && (
+          <>
+            <p className="text-xs text-gray-400 mb-2">Sub-tipo:</p>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {CATEGORIAS.map(cat => (
+                <button key={cat} onClick={() => setCategoria(cat)} className={`p-2 rounded border-2 text-xs font-bold transition-all ${categoria === cat ? 'border-purple-400 bg-purple-400/10 text-purple-300' : 'border-[#2a2a2a] text-gray-400'}`}>{cat}</button>
+              ))}
+            </div>
+          </>
+        )}
+        
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 bg-[#2a2a2a] text-white py-2 rounded font-bold text-sm">Cancelar</button>
+          <button onClick={salvar} className="flex-1 bg-[#FFD700] text-black py-2 rounded font-bold text-sm">Salvar</button>
+        </div>
       </div>
     </div>
   );
