@@ -499,29 +499,47 @@ export default function LinhaPage() {
     );
   }
 
-  // Card de colab dentro de uma bancada
+  // Card de colab dentro de uma bancada (minimalista: só mostra a líquida)
+  // O nome aparece via tooltip nativo no hover.
   function CardColabBancada({ alocId, idGroot }: { alocId: number; idGroot: string }) {
     const c = getColab(idGroot);
     if (!c) return null;
     const ritmo = ritmos[idGroot];
     const cor = corRitmo(ritmo?.ritmo_pct);
     return (
-      <div className="flex items-center justify-between gap-1 px-1.5 py-0.5 rounded bg-[#0f0f0f]">
-        <div className="flex items-center gap-1 min-w-0">
-          <span className={`text-[9px] font-bold ${cor.texto}`}>{iniciais(c.nome)}</span>
-          <span className="text-[9px] text-white truncate">{primeiroNome(c.nome)}</span>
-        </div>
-        <div className="flex items-center gap-0.5">
-          {ritmo && <span className={`text-[9px] font-bold ${cor.texto}`}>{ritmo.ritmo_pct}%</span>}
-          <span className="text-[8px]">{cor.emoji}</span>
-          <button
-            onClick={() => removerColab(alocId)}
-            className="text-gray-500 hover:text-red-400 text-[10px] leading-none ml-0.5"
-            title="Remover"
-          >
-            ×
-          </button>
-        </div>
+      <div
+        className={`
+          relative group
+          flex-1 h-full
+          rounded
+          border ${cor.borda} ${cor.bg}
+          flex items-center justify-center
+          cursor-default
+          transition
+        `}
+        title={`${c.nome}${ritmo ? ` · ${ritmo.ritmo_pct}%` : ''}`}
+      >
+        {ritmo ? (
+          <span className={`text-base font-black ${cor.texto} leading-none tracking-tight`}>
+            {ritmo.ritmo_pct}
+            <span className="text-[10px] font-bold ml-0.5 opacity-70">%</span>
+          </span>
+        ) : (
+          <span className="text-gray-600 text-sm">—</span>
+        )}
+        <button
+          onClick={() => removerColab(alocId)}
+          className="
+            absolute top-0 right-0.5
+            opacity-0 group-hover:opacity-100
+            transition
+            text-gray-500 hover:text-red-400
+            text-[10px] leading-none
+          "
+          title="Remover"
+        >
+          ×
+        </button>
       </div>
     );
   }
@@ -580,28 +598,31 @@ export default function LinhaPage() {
           }
         }}
         className={`
-          w-[140px] min-h-[78px]
-          bg-[#1a1a1a]
-          border-2 rounded-md
-          border-l-[6px]
+          w-[140px] h-[78px]
+          bg-[#0f0f0f]
+          border rounded
+          border-l-[3px]
+          flex flex-col
           transition
-          ${isHover ? 'ring-2 ring-green-500/60 scale-[1.03]' : ''}
+          ${isHover ? 'ring-1 ring-green-500/60' : ''}
         `}
-        style={{ borderColor: cor.hex, borderLeftColor: cor.hex }}
+        style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-1.5 py-0.5 border-b border-[#2a2a2a]">
-          <div className={`flex items-center gap-1 ${cor.text}`}>
-            <span className="text-[10px]">{cor.emoji}</span>
-            <span className="text-[9px] font-bold uppercase tracking-wide">
+        {/* Header micro */}
+        <div className="flex items-center justify-between px-1.5 pt-0.5 pb-0">
+          <div className="flex items-center gap-1 min-w-0">
+            <span className={`text-[9px] font-bold ${cor.text} uppercase tracking-wider`}>
               {b.tipo_principal}
             </span>
+            {b.subtipo && (
+              <span className="text-[8px] text-purple-300/70 truncate">· {b.subtipo}</span>
+            )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 flex-shrink-0">
             {b.tipo_principal === 'CATEGORIA' && (
               <button
                 onClick={() => abrirModalEditarSubtipo(b)}
-                className="text-gray-500 hover:text-white text-[10px] leading-none"
+                className="text-gray-600 hover:text-white text-[9px] leading-none"
                 title="Editar sub-tipo"
               >
                 ✏️
@@ -610,7 +631,7 @@ export default function LinhaPage() {
             {!b.fixo_categoria && (
               <button
                 onClick={() => limparBancada(b)}
-                className="text-gray-500 hover:text-red-400 text-[11px] leading-none"
+                className="text-gray-600 hover:text-red-400 text-[10px] leading-none"
                 title="Limpar bancada"
               >
                 ×
@@ -619,23 +640,13 @@ export default function LinhaPage() {
           </div>
         </div>
 
-        {/* Sub-tipo (se categoria) */}
-        {b.subtipo && (
-          <div className="px-1.5 pt-0.5">
-            <span className="text-[8px] text-purple-300 uppercase tracking-wide">
-              {b.subtipo}
-            </span>
-          </div>
-        )}
-
-        {/* Colabs alocados */}
-        <div className="px-1 py-1 space-y-0.5">
+        {/* Cards de colabs (lado a lado, ocupam o resto da bancada) */}
+        <div className="flex-1 flex gap-1 px-1 pb-1 pt-0.5">
           {alocs.length === 0 ? (
-            <div className="text-[8px] text-gray-600 italic text-center py-1">Arraste aqui</div>
+            // vazio: drop zone discreto, sem texto
+            <div className="flex-1" />
           ) : (
-            alocs.map((a) => (
-              <CardColabBancada key={a.id} alocId={a.id} idGroot={a.id_groot} />
-            ))
+            alocs.map((a) => <CardColabBancada key={a.id} alocId={a.id} idGroot={a.id_groot} />)
           )}
         </div>
       </div>
