@@ -14,6 +14,7 @@ interface Colaborador {
 interface Ritmo {
   id_groot: string;
   ritmo_pct: number;
+  liquida?: number;
   unidades?: number;
   horas?: number;
 }
@@ -35,6 +36,10 @@ interface Alocacao {
   tipo_alocacao: string;
   data_referencia: string;
 }
+interface MetasConfig {
+  p2m_base: number;
+  p2m_alinhado_max: number;
+}
 
 // ============================================================
 // CONSTANTES
@@ -55,41 +60,54 @@ const SUBTIPOS_CATEGORIA = [
   'Saúde',
   'Alimento',
 ];
-const MAX_COLABS_POR_BANCADA = 2;
+
+// Limites por tipo de bancada
+function maxColabsPorTipo(tipo: string): number {
+  if (tipo === 'CATEGORIA') return 999; // ilimitado
+  return 2; // GM e PESCA: max 2
+}
 
 // ============================================================
-// HELPERS
+// HELPERS DE COR POR META (igual Copiloto)
 // ============================================================
-function corRitmo(pct: number | null | undefined) {
-  if (pct == null) {
+function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
+  if (liquida == null || liquida === 0) {
     return {
+      status: 'sem_dado' as const,
       texto: 'text-gray-400',
       borda: 'border-[#2a2a2a]',
       bg: 'bg-[#1a1a1a]',
       emoji: '⚪',
+      label: 'Sem dado',
     };
   }
-  if (pct >= 70) {
+  if (liquida < metas.p2m_base) {
     return {
-      texto: 'text-green-400',
-      borda: 'border-green-500/50',
-      bg: 'bg-green-500/10',
-      emoji: '🟢',
+      status: 'ofensor' as const,
+      texto: 'text-red-400',
+      borda: 'border-red-500/50',
+      bg: 'bg-red-500/10',
+      emoji: '🔴',
+      label: 'Ofensor',
     };
   }
-  if (pct >= 45) {
+  if (liquida <= metas.p2m_alinhado_max) {
     return {
-      texto: 'text-yellow-400',
-      borda: 'border-yellow-500/50',
-      bg: 'bg-yellow-500/10',
-      emoji: '🟡',
+      status: 'alinhado' as const,
+      texto: 'text-blue-400',
+      borda: 'border-blue-500/50',
+      bg: 'bg-blue-500/10',
+      emoji: '🔵',
+      label: 'Alinhado',
     };
   }
   return {
-    texto: 'text-red-400',
-    borda: 'border-red-500/50',
-    bg: 'bg-red-500/10',
-    emoji: '🔴',
+    status: 'supera' as const,
+    texto: 'text-green-400',
+    borda: 'border-green-500/50',
+    bg: 'bg-green-500/10',
+    emoji: '🟢',
+    label: 'Supera',
   };
 }
 
@@ -124,6 +142,7 @@ export default function LinhaPage() {
   const [ritmos, setRitmos] = useState<Record<string, Ritmo>>({});
   const [bancadas, setBancadas] = useState<Bancada[]>([]);
   const [alocacoes, setAlocacoes] = useState<Alocacao[]>([]);
+  const [metas, setMetas] = useState<MetasConfig>({ p2m_base: 329, p2m_alinhado_max: 350 });
   const [loading, setLoading] = useState(true);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [hoverBancada, setHoverBancada] = useState<number | null>(null);
@@ -136,18 +155,34 @@ export default function LinhaPage() {
   const [modalSubtipo, setModalSubtipo] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ============================================================
-  // CARREGAR DADOS
-  // ============================================================
   useEffect(() => {
     carregarTudo();
   }, []);
 
   async function carregarTudo() {
     setLoading(true);
+    await carregarMetas();
     await garantirSlotsFixos();
     await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes()]);
     setLoading(false);
+  }
+
+  async function carregarMetas() {
+    const { data } = await supabase
+      .from('config')
+      .select('chave, valor')
+      .in('chave', ['meta_p2m_base', 'meta_p2m_alinhado_max']);
+    
+    const map: Record<string, number> = {};
+    (data || []).forEach((c: any) => {
+      map[c.chave] = Number(c.valor) || 0;
+    });
+    
+    setMetas({
+      p2m_base: map.meta_p2m_base || 329,
+      p2m_alinhado_max: map.meta_p2m_alinhado_max || 350,
+    });
+    console.log('📊 Metas carregadas:', map);
   }
 
   async function carregarColabs() {
@@ -167,8 +202,13 @@ export default function LinhaPage() {
       .select('id_groot, ritmo_pct, unidades, horas')
       .eq('data_referencia', hoje);
     const map: Record<string, Ritmo> = {};
-    (data || []).forEach((r) => {
-      map[r.id_groot] = r;
+    (data || []).forEach((r: any) => {
+      // Calcula líquida: se tem unidades+horas usa eles, senão usa ritmo_pct como líquida
+      let liquida = r.ritmo_pct;
+      if (r.unidades && r.horas && r.horas > 0) {
+        liquida = Math.round(r.unidades / r.horas);
+      }
+      map[r.id_groot] = { ...r, liquida };
     });
     setRitmos(map);
   }
@@ -203,7 +243,7 @@ export default function LinhaPage() {
       .eq('fixo_categoria', true)
       .eq('data_referencia', hoje);
 
-    const jaTem = new Set((existentes || []).map((b) => `${b.linha}-${b.posicao}`));
+    const jaTem = new Set((existentes || []).map((b: any) => b.linha + '-' + b.posicao));
 
     const slotsFixos = [
       { linha: 1, posicao: 1, tipo_principal: 'PESCA' },
@@ -212,7 +252,7 @@ export default function LinhaPage() {
       { linha: 2, posicao: 2, tipo_principal: 'CATEGORIA' },
     ];
 
-    const aCriar = slotsFixos.filter((s) => !jaTem.has(`${s.linha}-${s.posicao}`));
+    const aCriar = slotsFixos.filter((s) => !jaTem.has(s.linha + '-' + s.posicao));
     if (aCriar.length === 0) return;
 
     await supabase.from('layout_bancadas').insert(
@@ -230,7 +270,7 @@ export default function LinhaPage() {
   }
 
   // ============================================================
-  // UPLOAD CSV BOLETIM (VERSÃO MELHORADA)
+  // UPLOAD CSV BOLETIM
   // ============================================================
   async function handleUploadCSV(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -251,72 +291,40 @@ export default function LinhaPage() {
         .map((h) => h.trim().toLowerCase().replace(/"/g, '').replace(/^\uFEFF/, ''));
 
       console.log('📋 Header detectado:', header);
-      console.log('📋 Separador:', sep === ';' ? 'ponto-e-vírgula' : 'vírgula');
 
-      // 🎯 DETECÇÃO EXPANDIDA
       const idxGroot = header.findIndex((h) => 
-        h.includes('groot') || 
-        h === 'id' || 
-        h === 'id_groot' || 
-        h === 'usuario' ||
-        h === 'usuário' ||
-        h === 'matricula' ||
-        h === 'matrícula' ||
-        h.includes('id_colab') ||
-        h.includes('colaborador_id')
+        h.includes('groot') || h === 'id' || h === 'id_groot' || 
+        h === 'usuario' || h === 'usuário' ||
+        h === 'matricula' || h === 'matrícula' ||
+        h.includes('id_colab') || h.includes('colaborador_id')
       );
 
       const idxNome = header.findIndex((h) => 
-        h === 'nome' || 
-        h.includes('nome') || 
-        h === 'colaborador' || 
-        h.includes('colab')
+        h === 'nome' || h.includes('nome') || h === 'colaborador' || h.includes('colab')
       );
 
       const idxRitmo = header.findIndex((h) => 
-        h.includes('ritmo') || 
-        h.includes('pct') || 
-        h === '%' ||
-        h.includes('liquid') ||
-        h.includes('líquid') ||
-        h.includes('produtividade') ||
-        h === 'prod' ||
-        h === 'prod_liquida' ||
-        h === 'prod liquida'
+        h.includes('ritmo') || h.includes('pct') || h === '%' ||
+        h.includes('liquid') || h.includes('líquid') ||
+        h.includes('produtividade') || h === 'prod' ||
+        h === 'prod_liquida' || h === 'prod liquida'
       );
 
       const idxUnid = header.findIndex((h) => 
-        h.includes('unid') || 
-        h.includes('qtd') ||
-        h.includes('quantidade') ||
-        h === 'pcs' ||
-        h.includes('peca') ||
-        h.includes('peça')
+        h.includes('unid') || h.includes('qtd') || h.includes('quantidade') ||
+        h === 'pcs' || h.includes('peca') || h.includes('peça')
       );
 
       const idxHoras = header.findIndex((h) => 
-        h.includes('hora') || 
-        h === 'h' ||
-        h === 'tempo'
+        h.includes('hora') || h === 'h' || h === 'tempo'
       );
 
-      console.log('📋 Índices encontrados:', {
-        groot: idxGroot,
-        nome: idxNome,
-        ritmo: idxRitmo,
-        unidades: idxUnid,
-        horas: idxHoras,
-      });
+      console.log('📋 Índices:', { groot: idxGroot, nome: idxNome, ritmo: idxRitmo, unidades: idxUnid, horas: idxHoras });
 
       if (idxGroot === -1 || idxRitmo === -1) {
-        const colunasEncontradas = header.join(' | ');
         alert(
-          `❌ CSV inválido!\n\n` +
-          `Colunas encontradas:\n${colunasEncontradas}\n\n` +
-          `Preciso de UMA coluna com:\n` +
-          `• ID (id_groot, matricula, usuario...)\n` +
-          `• PRODUTIVIDADE (ritmo, liquida, produtividade, pct...)\n\n` +
-          `Veja o console (F12) pra detalhes.`
+          '❌ CSV inválido!\n\nColunas encontradas:\n' + header.join(' | ') +
+          '\n\nPreciso de:\n• ID (id_groot, matricula, usuario...)\n• PRODUTIVIDADE (ritmo, liquida, produtividade...)'
         );
         return;
       }
@@ -328,20 +336,11 @@ export default function LinhaPage() {
       for (let i = 1; i < linhas.length; i++) {
         const cols = linhas[i].split(sep).map((c) => c.trim().replace(/"/g, ''));
         const id_groot = cols[idxGroot];
-        if (!id_groot) {
-          pulou++;
-          continue;
-        }
+        if (!id_groot) { pulou++; continue; }
 
-        const ritmoRaw = (cols[idxRitmo] || '')
-          .replace('%', '')
-          .replace(',', '.')
-          .trim();
+        const ritmoRaw = (cols[idxRitmo] || '').replace('%', '').replace(',', '.').trim();
         const ritmo_pct = Math.round(parseFloat(ritmoRaw));
-        if (isNaN(ritmo_pct) || ritmo_pct < 0) {
-          pulou++;
-          continue;
-        }
+        if (isNaN(ritmo_pct) || ritmo_pct < 0) { pulou++; continue; }
 
         const reg: any = {
           id_groot,
@@ -363,10 +362,10 @@ export default function LinhaPage() {
         registros.push(reg);
       }
 
-      console.log(`📋 ${registros.length} registros válidos, ${pulou} pulados`);
+      console.log('📋 ' + registros.length + ' válidos, ' + pulou + ' pulados');
 
       if (registros.length === 0) {
-        alert('❌ Nenhum registro válido encontrado.\nVê o console (F12) pra debug.');
+        alert('❌ Nenhum registro válido. Vê o console (F12).');
         return;
       }
 
@@ -375,32 +374,25 @@ export default function LinhaPage() {
         .upsert(registros, { onConflict: 'id_groot,data_referencia' });
 
       if (error) {
-        console.error('Erro upsert:', error);
         alert('Erro ao salvar: ' + error.message);
         return;
       }
 
-      const msgErros = pulou > 0 ? `\n⚠️ ${pulou} linhas pulada(s)` : '';
-      alert(`✅ ${registros.length} colaborador(es) atualizado(s).${msgErros}`);
+      const msgErros = pulou > 0 ? '\n⚠️ ' + pulou + ' linha(s) pulada(s)' : '';
+      alert('✅ ' + registros.length + ' colaborador(es) atualizado(s).' + msgErros);
       await carregarRitmos();
     } catch (err: any) {
       console.error('Erro CSV:', err);
-      alert('Erro ao processar CSV: ' + err.message);
+      alert('Erro: ' + err.message);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
-  // ============================================================
-  // CRIAR BANCADA LATERAL (sempre GM, sem modal)
-  // ============================================================
   async function criarBancadaGM(linha: number, lado: string, posicao: number) {
     const hoje = new Date().toISOString().split('T')[0];
     const { error } = await supabase.from('layout_bancadas').insert({
-      zona: ZONA,
-      linha,
-      lado,
-      posicao,
+      zona: ZONA, linha, lado, posicao,
       tipo_principal: 'GM',
       subtipo: null,
       fixo_categoria: false,
@@ -413,9 +405,6 @@ export default function LinhaPage() {
     await carregarBancadas();
   }
 
-  // ============================================================
-  // MODAL EDITAR SUBTIPO DA CATEGORIA
-  // ============================================================
   function abrirModalEditarSubtipo(b: Bancada) {
     setModal({ linha: b.linha, lado: b.lado, posicao: b.posicao, bancadaExistente: b });
     setModalSubtipo(b.subtipo || '');
@@ -429,7 +418,7 @@ export default function LinhaPage() {
   async function salvarModal() {
     if (!modal || !modal.bancadaExistente) return;
     if (!modalSubtipo) {
-      alert('Escolha um sub-tipo de categoria.');
+      alert('Escolha um sub-tipo.');
       return;
     }
     const { error } = await supabase
@@ -444,17 +433,12 @@ export default function LinhaPage() {
     fecharModal();
   }
 
-  // ============================================================
-  // LIMPAR BANCADA
-  // ============================================================
   async function limparBancada(b: Bancada) {
     if (b.fixo_categoria) {
-      alert('Esta bancada é fixa e não pode ser removida.');
+      alert('Esta bancada é fixa.');
       return;
     }
-    if (!confirm('Limpar esta bancada? Todos os colaboradores alocados voltarão à lista de livres.')) {
-      return;
-    }
+    if (!confirm('Limpar esta bancada?')) return;
     const { error } = await supabase.from('layout_bancadas').delete().eq('id', b.id);
     if (error) {
       alert('Erro: ' + error.message);
@@ -463,23 +447,24 @@ export default function LinhaPage() {
     await Promise.all([carregarBancadas(), carregarAlocacoes()]);
   }
 
-  // ============================================================
-  // ALOCAÇÃO DE COLABS (drag-and-drop)
-  // ============================================================
-  async function alocarColab(idGroot: string, bancadaId: number) {
+  async function alocarColab(idGroot: string, bancada: Bancada) {
     const hoje = new Date().toISOString().split('T')[0];
-    const atuais = alocacoes.filter((a) => a.bancada_id === bancadaId);
-    if (atuais.length >= MAX_COLABS_POR_BANCADA) {
-      alert(`Bancada cheia (max ${MAX_COLABS_POR_BANCADA} colabs).`);
+    const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
+    const maxColabs = maxColabsPorTipo(bancada.tipo_principal);
+    
+    if (atuais.length >= maxColabs) {
+      alert('Bancada cheia (max ' + maxColabs + ' colabs).');
       return;
     }
+    
     await supabase
       .from('layout_alocacao')
       .delete()
       .eq('id_groot', idGroot)
       .eq('data_referencia', hoje);
+    
     const { error } = await supabase.from('layout_alocacao').insert({
-      bancada_id: bancadaId,
+      bancada_id: bancada.id,
       id_groot: idGroot,
       tipo_alocacao: 'fixo',
       data_referencia: hoje,
@@ -500,13 +485,9 @@ export default function LinhaPage() {
     await carregarAlocacoes();
   }
 
-  // ============================================================
-  // HELPERS DE LOOKUP
-  // ============================================================
   function getBancada(linha: number, lado: string, posicao: number) {
     return bancadas.find(
-      (b) =>
-        b.zona === ZONA && b.linha === linha && b.lado === lado && b.posicao === posicao
+      (b) => b.zona === ZONA && b.linha === linha && b.lado === lado && b.posicao === posicao
     );
   }
 
@@ -524,34 +505,50 @@ export default function LinhaPage() {
   }
 
   // ============================================================
-  // RENDERS
+  // CARD COLAB NA SIDEBAR
   // ============================================================
   function CardColabSidebar({ c }: { c: Colaborador }) {
     const ritmo = ritmos[c.id_groot];
-    const cor = corRitmo(ritmo?.ritmo_pct);
+    const cor = corPorMeta(ritmo?.liquida, metas);
+    const isDragging = draggingId === c.id_groot;
+    
     return (
       <div
         draggable
-        onDragStart={() => setDraggingId(c.id_groot)}
-        onDragEnd={() => setDraggingId(null)}
-        className={`
-          ${cor.bg} ${cor.borda}
-          border rounded-md px-2 py-1.5 mb-1.5
-          cursor-move transition
-          hover:bg-[#222] hover:scale-[1.02]
-          ${draggingId === c.id_groot ? 'opacity-40' : ''}
-        `}
+        onDragStart={(e) => {
+          setDraggingId(c.id_groot);
+          e.dataTransfer.effectAllowed = 'move';
+          // efeito visual no card sendo arrastado
+          if (e.target instanceof HTMLElement) {
+            e.target.style.opacity = '0.4';
+          }
+        }}
+        onDragEnd={(e) => {
+          setDraggingId(null);
+          setHoverBancada(null);
+          if (e.target instanceof HTMLElement) {
+            e.target.style.opacity = '1';
+          }
+        }}
+        className={
+          cor.bg + ' ' + cor.borda +
+          ' border-2 rounded-md px-2 py-1.5 mb-1.5' +
+          ' cursor-grab active:cursor-grabbing' +
+          ' transition-all duration-150' +
+          ' hover:bg-[#222] hover:scale-[1.03] hover:shadow-lg' +
+          (isDragging ? ' opacity-30 scale-95' : '')
+        }
       >
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className={`text-[10px] font-bold ${cor.texto} flex-shrink-0`}>
+            <span className={'text-[10px] font-bold ' + cor.texto + ' flex-shrink-0'}>
               {iniciais(c.nome)}
             </span>
             <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
-            {ritmo && (
-              <span className={`text-[9px] font-bold ${cor.texto}`}>{ritmo.ritmo_pct}%</span>
+            {ritmo?.liquida != null && ritmo.liquida > 0 && (
+              <span className={'text-[9px] font-bold ' + cor.texto}>{ritmo.liquida}</span>
             )}
             <span className="text-[9px]">{cor.emoji}</span>
           </div>
@@ -560,41 +557,67 @@ export default function LinhaPage() {
     );
   }
 
-  function CardColabBancada({ alocId, idGroot }: { alocId: number; idGroot: string }) {
+  // ============================================================
+  // CARD COLAB DENTRO DA BANCADA
+  // ============================================================
+  function CardColabBancada({ alocId, idGroot, expandido }: { alocId: number; idGroot: string; expandido?: boolean }) {
     const c = getColab(idGroot);
     if (!c) return null;
     const ritmo = ritmos[idGroot];
-    const cor = corRitmo(ritmo?.ritmo_pct);
+    const cor = corPorMeta(ritmo?.liquida, metas);
+    const liquida = ritmo?.liquida;
+    
+    if (expandido) {
+      // formato lista (pra CATEGORIA)
+      return (
+        <div
+          className={
+            'relative group ' + cor.borda + ' ' + cor.bg +
+            ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all'
+          }
+          title={c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '')}
+        >
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
+            <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {liquida != null && liquida > 0 ? (
+              <span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>
+            ) : (
+              <span className="text-gray-600 text-[10px]">—</span>
+            )}
+            <button
+              onClick={() => removerColab(alocId)}
+              className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
+              title="Remover"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
+    // formato compacto (pra GM/PESCA)
     return (
       <div
-        className={`
-          relative group
-          flex-1 h-full
-          rounded
-          border ${cor.borda} ${cor.bg}
-          flex items-center justify-center
-          cursor-default
-          transition
-        `}
-        title={`${c.nome}${ritmo ? ` · ${ritmo.ritmo_pct}%` : ''}`}
+        className={
+          'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg +
+          ' flex items-center justify-center cursor-default transition-all'
+        }
+        title={c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '')}
       >
-        {ritmo ? (
-          <span className={`text-base font-black ${cor.texto} leading-none tracking-tight`}>
-            {ritmo.ritmo_pct}
-            <span className="text-[10px] font-bold ml-0.5 opacity-70">%</span>
+        {liquida != null && liquida > 0 ? (
+          <span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>
+            {liquida}
           </span>
         ) : (
           <span className="text-gray-600 text-sm">—</span>
         )}
         <button
           onClick={() => removerColab(alocId)}
-          className="
-            absolute top-0 right-0.5
-            opacity-0 group-hover:opacity-100
-            transition
-            text-gray-500 hover:text-red-400
-            text-[10px] leading-none
-          "
+          className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
           title="Remover"
         >
           ×
@@ -603,30 +626,17 @@ export default function LinhaPage() {
     );
   }
 
-  function SlotBancada({
-    linha,
-    lado,
-    posicao,
-  }: {
-    linha: number;
-    lado: string;
-    posicao: number;
-  }) {
+  // ============================================================
+  // SLOT BANCADA
+  // ============================================================
+  function SlotBancada({ linha, lado, posicao }: { linha: number; lado: string; posicao: number }) {
     const b = getBancada(linha, lado, posicao);
 
     if (!b) {
       return (
         <div
           onClick={() => criarBancadaGM(linha, lado, posicao)}
-          className="
-            w-[140px] h-[78px]
-            border-2 border-dashed border-[#2a2a2a]
-            rounded-md
-            flex items-center justify-center
-            cursor-pointer
-            hover:border-yellow-500/40 hover:bg-yellow-500/5
-            transition
-          "
+          className="w-[140px] h-[78px] border-2 border-dashed border-[#2a2a2a] rounded-md flex items-center justify-center cursor-pointer hover:border-yellow-500/40 hover:bg-yellow-500/5 transition"
           title="Criar bancada GM"
         >
           <span className="text-2xl text-[#3a3a3a]">+</span>
@@ -637,11 +647,19 @@ export default function LinhaPage() {
     const cor = corTipo(b.tipo_principal);
     const alocs = getAlocacoesBancada(b.id);
     const isHover = hoverBancada === b.id;
-
+    const isCategoria = b.tipo_principal === 'CATEGORIA';
+    
+    // CATEGORIA: altura variável, lista vertical
+    // GM/PESCA: altura fixa 78px, lado a lado
+    const alturaClass = isCategoria 
+      ? (alocs.length > 0 ? 'min-h-[78px]' : 'h-[78px]') 
+      : 'h-[78px]';
+    
     return (
       <div
         onDragOver={(e) => {
           e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
           setHoverBancada(b.id);
         }}
         onDragLeave={() => setHoverBancada(null)}
@@ -649,28 +667,27 @@ export default function LinhaPage() {
           e.preventDefault();
           setHoverBancada(null);
           if (draggingId) {
-            alocarColab(draggingId, b.id);
+            alocarColab(draggingId, b);
             setDraggingId(null);
           }
         }}
-        className={`
-          w-[140px] h-[78px]
-          bg-[#0f0f0f]
-          border rounded
-          border-l-[3px]
-          flex flex-col
-          transition
-          ${isHover ? 'ring-1 ring-green-500/60' : ''}
-        `}
+        className={
+          'w-[140px] ' + alturaClass +
+          ' bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200' +
+          (isHover ? ' ring-2 ring-green-500/80 scale-[1.03] shadow-xl shadow-green-500/20' : '')
+        }
         style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}
       >
         <div className="flex items-center justify-between px-1.5 pt-0.5 pb-0">
           <div className="flex items-center gap-1 min-w-0">
-            <span className={`text-[9px] font-bold ${cor.text} uppercase tracking-wider`}>
+            <span className={'text-[9px] font-bold ' + cor.text + ' uppercase tracking-wider'}>
               {b.tipo_principal}
             </span>
             {b.subtipo && (
               <span className="text-[8px] text-purple-300/70 truncate">· {b.subtipo}</span>
+            )}
+            {isCategoria && alocs.length > 0 && (
+              <span className="text-[8px] text-gray-500 ml-0.5">({alocs.length})</span>
             )}
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -687,20 +704,35 @@ export default function LinhaPage() {
               <button
                 onClick={() => limparBancada(b)}
                 className="text-gray-600 hover:text-red-400 text-[10px] leading-none"
-                title="Limpar bancada"
+                title="Limpar"
               >
                 ×
               </button>
             )}
           </div>
         </div>
-        <div className="flex-1 flex gap-1 px-1 pb-1 pt-0.5">
-          {alocs.length === 0 ? (
-            <div className="flex-1" />
-          ) : (
-            alocs.map((a) => <CardColabBancada key={a.id} alocId={a.id} idGroot={a.id_groot} />)
-          )}
-        </div>
+        
+        {isCategoria ? (
+          // CATEGORIA: lista vertical, sem limite
+          <div className="flex-1 flex flex-col gap-0.5 px-1 pb-1 pt-0.5">
+            {alocs.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-[9px] text-gray-700 italic">
+                Arrasta colabs
+              </div>
+            ) : (
+              alocs.map((a) => <CardColabBancada key={a.id} alocId={a.id} idGroot={a.id_groot} expandido />)
+            )}
+          </div>
+        ) : (
+          // GM/PESCA: lado a lado, max 2
+          <div className="flex-1 flex gap-1 px-1 pb-1 pt-0.5">
+            {alocs.length === 0 ? (
+              <div className="flex-1" />
+            ) : (
+              alocs.map((a) => <CardColabBancada key={a.id} alocId={a.id} idGroot={a.id_groot} />)
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -710,35 +742,22 @@ export default function LinhaPage() {
       <div
         className="w-[44px] mx-1 rounded-sm border border-[#444]"
         style={{
-          minHeight: `${ALTURA_COLUNA}px`,
-          background:
-            'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)',
+          minHeight: ALTURA_COLUNA + 'px',
+          background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)',
         }}
         aria-hidden="true"
       />
     );
   }
 
-  function ColunaBancadas({
-    linha,
-    lado,
-    qtd,
-    alinharFundo = false,
-  }: {
-    linha: number;
-    lado: string;
-    qtd: number;
-    alinharFundo?: boolean;
-  }) {
+  function ColunaBancadas({ linha, lado, qtd, alinharFundo = false }: { linha: number; lado: string; qtd: number; alinharFundo?: boolean }) {
     return (
       <div
-        className={`flex flex-col gap-2 ${
-          alinharFundo ? 'justify-end' : 'justify-start'
-        }`}
-        style={{ minHeight: `${ALTURA_COLUNA}px` }}
+        className={'flex flex-col gap-2 ' + (alinharFundo ? 'justify-end' : 'justify-start')}
+        style={{ minHeight: ALTURA_COLUNA + 'px' }}
       >
         {Array.from({ length: qtd }, (_, i) => (
-          <SlotBancada key={`${linha}-${lado}-${i + 1}`} linha={linha} lado={lado} posicao={i + 1} />
+          <SlotBancada key={linha + '-' + lado + '-' + (i + 1)} linha={linha} lado={lado} posicao={i + 1} />
         ))}
       </div>
     );
@@ -752,7 +771,7 @@ export default function LinhaPage() {
             Zona Central
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 items-start">
           <SlotBancada linha={1} lado="centro" posicao={1} />
           <SlotBancada linha={2} lado="centro" posicao={1} />
           <SlotBancada linha={1} lado="centro" posicao={2} />
@@ -762,9 +781,6 @@ export default function LinhaPage() {
     );
   }
 
-  // ============================================================
-  // RENDER PRINCIPAL
-  // ============================================================
   const livres = colabsLivres();
 
   return (
@@ -778,6 +794,9 @@ export default function LinhaPage() {
           <span className="text-[10px] text-gray-500">
             {new Date().toLocaleDateString('pt-BR')}
           </span>
+          <span className="text-[10px] text-gray-500">
+            · Metas: {metas.p2m_base}-{metas.p2m_alinhado_max}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -789,11 +808,7 @@ export default function LinhaPage() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="
-              bg-yellow-500/10 border border-yellow-500/50 text-yellow-400
-              text-xs px-3 py-1.5 rounded
-              hover:bg-yellow-500/20 transition
-            "
+            className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition"
           >
             ↑ Upload Boletim
           </button>
@@ -868,9 +883,7 @@ export default function LinhaPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-base font-bold text-white mb-1">Editar Categoria</h2>
-            <p className="text-xs text-gray-500 mb-4">
-              Linha {modal.linha} · Zona Central
-            </p>
+            <p className="text-xs text-gray-500 mb-4">Linha {modal.linha} · Zona Central</p>
             <div className="mb-4">
               <label className="text-xs text-gray-400 mb-1.5 block">Sub-tipo:</label>
               <div className="grid grid-cols-2 gap-2">
@@ -878,15 +891,12 @@ export default function LinhaPage() {
                   <button
                     key={s}
                     onClick={() => setModalSubtipo(s)}
-                    className={`
-                      py-1.5 px-2 rounded text-xs font-medium
-                      border transition
-                      ${
-                        modalSubtipo === s
-                          ? 'border-purple-500 bg-purple-500/20 text-purple-300'
-                          : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]'
-                      }
-                    `}
+                    className={
+                      'py-1.5 px-2 rounded text-xs font-medium border transition ' +
+                      (modalSubtipo === s
+                        ? 'border-purple-500 bg-purple-500/20 text-purple-300'
+                        : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')
+                    }
                   >
                     {s}
                   </button>
