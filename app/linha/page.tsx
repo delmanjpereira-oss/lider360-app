@@ -87,29 +87,25 @@ function primeiroNome(nome: string) {
 
 const STYLES = `
   @keyframes pulseGold {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7), 0 0 30px rgba(255, 215, 0, 0.4); transform: scale(1.08); }
-    50% { box-shadow: 0 0 0 12px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.6); transform: scale(1.12); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.9), 0 0 30px rgba(255, 215, 0, 0.6); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.8); }
   }
   @keyframes pulseGreen {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7), 0 0 20px rgba(34, 197, 94, 0.3); border-color: rgba(34, 197, 94, 0.6); transform: scale(1); }
-    50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0), 0 0 30px rgba(34, 197, 94, 0.5); border-color: rgba(34, 197, 94, 1); transform: scale(1.03); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7), 0 0 20px rgba(34, 197, 94, 0.3); border-color: rgba(34, 197, 94, 0.6) !important; }
+    50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0), 0 0 30px rgba(34, 197, 94, 0.5); border-color: rgba(34, 197, 94, 1) !important; }
   }
   @keyframes successFlash {
-    0% { transform: scale(0.85); background: rgba(34, 197, 94, 0.4); box-shadow: 0 0 20px rgba(34, 197, 94, 0.8); }
-    50% { transform: scale(1.1); background: rgba(34, 197, 94, 0.15); }
-    100% { transform: scale(1); background: transparent; }
+    0% { background: rgba(34, 197, 94, 0.4); box-shadow: 0 0 20px rgba(34, 197, 94, 0.8); }
+    50% { background: rgba(34, 197, 94, 0.15); }
+    100% { background: transparent; }
   }
   @keyframes ghostFloat {
     0%, 100% { opacity: 0.35; transform: translateY(0px); }
-    50% { opacity: 0.55; transform: translateY(-3px); }
-  }
-  @keyframes shimmer {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
+    50% { opacity: 0.55; transform: translateY(-2px); }
   }
   @keyframes synergyGlow {
-    0%, 100% { box-shadow: 0 0 8px rgba(255, 215, 0, 0.3), inset 0 0 8px rgba(255, 215, 0, 0.1); }
-    50% { box-shadow: 0 0 15px rgba(255, 215, 0, 0.5), inset 0 0 12px rgba(255, 215, 0, 0.2); }
+    0%, 100% { box-shadow: 0 0 8px rgba(255, 215, 0, 0.3); }
+    50% { box-shadow: 0 0 15px rgba(255, 215, 0, 0.5); }
   }
   @keyframes shakeError {
     0%, 100% { transform: translateX(0); }
@@ -117,12 +113,15 @@ const STYLES = `
     75% { transform: translateX(6px); }
   }
   @keyframes slideIn {
-    from { opacity: 0; transform: translateY(-10px) scale(0.9); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
   }
   .card-ativo {
-    animation: pulseGold 1.2s ease-in-out infinite;
-    cursor: grabbing !important;
+    animation: pulseGold 1.2s ease-in-out infinite !important;
+    border-color: #FFD700 !important;
+    border-width: 2px !important;
+    outline: 2px solid #FFD700 !important;
+    outline-offset: 2px !important;
     z-index: 50;
     position: relative;
   }
@@ -133,9 +132,8 @@ const STYLES = `
   .bancada-encaixe { animation: successFlash 0.5s ease-out; }
   .bancada-erro { animation: shakeError 0.3s ease-in-out; }
   .card-sinergia {
-    animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite, shimmer 3s linear infinite;
-    background: linear-gradient(110deg, rgba(255, 215, 0, 0.05) 0%, rgba(255, 215, 0, 0.15) 50%, rgba(255, 215, 0, 0.05) 100%) !important;
-    background-size: 200% 100% !important;
+    animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite;
+    background: rgba(255, 215, 0, 0.08) !important;
     border: 2px dashed #FFD700 !important;
     position: relative;
     overflow: hidden;
@@ -145,16 +143,28 @@ const STYLES = `
     position: absolute;
     top: 50%; left: 50%;
     transform: translate(-50%, -50%) rotate(-15deg);
-    font-size: 8px;
+    font-size: 7px;
     font-weight: 900;
     color: rgba(255, 215, 0, 0.5);
     letter-spacing: 1px;
     pointer-events: none;
     white-space: nowrap;
   }
-  .card-sidebar-hover { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-  .card-sidebar-hover:hover { transform: scale(1.05) translateX(2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
-  .card-arrastando { opacity: 0.35; transform: scale(0.92); }
+  .card-temporario {
+    border-style: dashed !important;
+    position: relative;
+  }
+  .card-temporario::before {
+    content: '🔄';
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    font-size: 10px;
+    z-index: 5;
+  }
+  .card-hover { transition: all 0.15s ease; }
+  .card-hover:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
+  .card-arrastando { opacity: 0.4; }
   .nome-linha-input { background: transparent; border: none; outline: 1px solid #FFD700; color: #FFD700; font-size: 10px; font-weight: bold; text-align: center; width: 100%; padding: 2px 4px; border-radius: 3px; }
   .nome-linha-display { cursor: pointer; transition: all 0.15s ease; padding: 2px 6px; border-radius: 3px; }
   .nome-linha-display:hover { background: rgba(255, 215, 0, 0.1); color: #FFD700; }
@@ -325,10 +335,7 @@ export default function LinhaPage() {
     setModalSubtipo(b.subtipo || '');
   }
 
-  function fecharModal() {
-    setModal(null);
-    setModalSubtipo('');
-  }
+  function fecharModal() { setModal(null); setModalSubtipo(''); }
 
   async function salvarModal() {
     if (!modal || !modal.bancadaExistente) return;
@@ -347,28 +354,56 @@ export default function LinhaPage() {
     await Promise.all([carregarBancadas(), carregarAlocacoes()]);
   }
 
+  // ============================================================
+  // 🆕 ALOCAR COLAB - LÓGICA CORRIGIDA
+  // ============================================================
   async function alocarColab(idGroot: string, bancada: Bancada) {
     const hoje = new Date().toISOString().split('T')[0];
+    
+    // Conta SÓ alocações reais (não sinergias) na bancada destino
     const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
     const maxColabs = maxColabsPorTipo(bancada.tipo_principal);
+    
     if (atuais.length >= maxColabs) {
       setErroBancada(bancada.id);
       setTimeout(() => setErroBancada(null), 400);
       return;
     }
+    
+    // Pega alocação atual do colab que está sendo movido
     const alocAtual = alocacoes.find((a) => a.id_groot === idGroot);
+    
+    // Determina bancada_fixa_id:
     let bancadaFixaId: number | null = null;
     if (alocAtual?.bancada_fixa_id) {
+      // Já é fixo de outra bancada - PRESERVA o vínculo
       bancadaFixaId = alocAtual.bancada_fixa_id;
     } else if (tipoEFixoAutomatico(bancada.tipo_principal)) {
+      // Primeira vez em GM ou PESCA - vira fixo dessa bancada
       bancadaFixaId = bancada.id;
     }
+    
+    // Determina tipo_alocacao:
+    let tipoAlocacao = 'fixo';
+    if (bancadaFixaId && bancadaFixaId !== bancada.id) {
+      // É fixo em outra bancada e tá indo pra esta → TEMPORÁRIO
+      tipoAlocacao = 'temporario';
+    }
+    
+    // Remove alocação anterior
     await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot).eq('data_referencia', hoje);
+    
+    // Cria nova
     const { error } = await supabase.from('layout_alocacao').insert({
-      bancada_id: bancada.id, id_groot: idGroot, tipo_alocacao: 'fixo',
-      bancada_fixa_id: bancadaFixaId, data_referencia: hoje,
+      bancada_id: bancada.id,
+      id_groot: idGroot,
+      tipo_alocacao: tipoAlocacao,
+      bancada_fixa_id: bancadaFixaId,
+      data_referencia: hoje,
     });
+    
     if (error) { alert('Erro: ' + error.message); return; }
+    
     setEncaixeBancada(bancada.id);
     setTimeout(() => setEncaixeBancada(null), 500);
     setCardAtivo(null);
@@ -376,20 +411,45 @@ export default function LinhaPage() {
     await carregarAlocacoes();
   }
 
+  // ============================================================
+  // 🆕 REMOVER COLAB - lógica corrigida
+  // Só quando volta pra SIDEBAR remove o fixo
+  // ============================================================
   async function removerColab(alocId: number) {
+    // Aqui SEMPRE remove o registro completo (volta pra sidebar)
+    // Isso significa: "saiu do mapeamento" → perdeu o fixo
     const { error } = await supabase.from('layout_alocacao').delete().eq('id', alocId);
     if (error) { alert('Erro: ' + error.message); return; }
     await carregarAlocacoes();
   }
 
+  // Voltar colab pra bancada fixa dele (click na sinergia)
+  // ATENÇÃO: agora isso só funciona pelo ÍCONE específico de "voltar"
+  // não automático quando alguém arrasta pra lá
   async function voltarParaBancadaFixa(idGroot: string, bancadaFixaId: number) {
     const bancadaFixa = bancadas.find((b) => b.id === bancadaFixaId);
     if (!bancadaFixa) return;
+    
+    // Verifica se a bancada fixa tem espaço
+    const atuais = alocacoes.filter((a) => a.bancada_id === bancadaFixaId && a.id_groot !== idGroot);
+    const maxColabs = maxColabsPorTipo(bancadaFixa.tipo_principal);
+    
+    if (atuais.length >= maxColabs) {
+      alert('Bancada fixa cheia (' + atuais.length + '/' + maxColabs + '). Remova alguém primeiro.');
+      return;
+    }
+    
     await alocarColab(idGroot, bancadaFixa);
   }
 
-  async function removerFixo(alocId: number) {
-    const { error } = await supabase.from('layout_alocacao').update({ bancada_fixa_id: null }).eq('id', alocId);
+  // Remove marca de fixo (right-click na sinergia)
+  async function removerFixo(idGroot: string) {
+    const aloc = alocacoes.find((a) => a.id_groot === idGroot);
+    if (!aloc) return;
+    const { error } = await supabase.from('layout_alocacao').update({ 
+      bancada_fixa_id: null, 
+      tipo_alocacao: 'fixo'  // se era temporário, vira fixo do lugar atual
+    }).eq('id', aloc.id);
     if (error) { alert('Erro: ' + error.message); return; }
     await carregarAlocacoes();
   }
@@ -411,6 +471,7 @@ export default function LinhaPage() {
     return colabs.filter((c) => !alocadosIds.has(c.id_groot));
   }
 
+  // Sinergias = colabs cuja bancada_fixa_id é esta MAS estão em outro lugar
   function sinergiasDe(bancadaId: number) {
     return alocacoes.filter((a) => a.bancada_fixa_id === bancadaId && a.bancada_id !== bancadaId);
   }
@@ -418,13 +479,15 @@ export default function LinhaPage() {
   function bancadaCompativel(bancada: Bancada): boolean {
     if (!cardAtivo && !draggingId) return false;
     const idCheck = cardAtivo || draggingId;
-    // Não permite alocar na bancada onde já está
     const alocAtual = alocacoes.find((a) => a.id_groot === idCheck);
     if (alocAtual?.bancada_id === bancada.id) return false;
     const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
     return atuais.length < maxColabsPorTipo(bancada.tipo_principal);
   }
 
+  // ============================================================
+  // CARD COLAB SIDEBAR
+  // ============================================================
   function CardColabSidebar({ c }: { c: Colaborador }) {
     const ritmo = ritmos[c.id_groot];
     const cor = corPorMeta(ritmo?.liquida, metas);
@@ -436,19 +499,17 @@ export default function LinhaPage() {
         onDragStart={(e) => {
           setDraggingId(c.id_groot);
           e.dataTransfer.effectAllowed = 'move';
-          const img = new Image();
-          img.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
-          e.dataTransfer.setDragImage(img, 0, 0);
+          e.dataTransfer.setData('text/plain', c.id_groot);
         }}
         onDragEnd={() => { setDraggingId(null); setHoverBancada(null); }}
         onDoubleClick={() => setCardAtivo(isAtivo ? null : c.id_groot)}
         className={
           cor.bg + ' ' + cor.borda + ' border-2 rounded-md px-2 py-1.5 mb-1.5' +
-          ' cursor-grab active:cursor-grabbing card-sidebar-hover' +
+          ' cursor-grab active:cursor-grabbing card-hover' +
           (isDragging ? ' card-arrastando' : '') +
           (isAtivo ? ' card-ativo' : '')
         }
-        title="Double-click pra ativar | Arrasta pra alocar"
+        title="Arrasta pra alocar | Double-click pra ativar e clicar na bancada"
       >
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -466,14 +527,17 @@ export default function LinhaPage() {
     );
   }
 
+  // ============================================================
+  // CARD COLAB NA BANCADA
+  // ============================================================
   function CardColabBancada({ aloc, expandido, bancadaAtual }: { aloc: Alocacao; expandido?: boolean; bancadaAtual: Bancada }) {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
     const ritmo = ritmos[aloc.id_groot];
     const cor = corPorMeta(ritmo?.liquida, metas);
     const liquida = ritmo?.liquida;
-    const eFixoAqui = aloc.bancada_fixa_id === bancadaAtual.id;
-    const eFixoEmOutro = aloc.bancada_fixa_id && aloc.bancada_fixa_id !== bancadaAtual.id;
+    const eFixoAqui = aloc.bancada_fixa_id === bancadaAtual.id && aloc.bancada_id === bancadaAtual.id;
+    const eTemporario = aloc.tipo_alocacao === 'temporario';
     const isDragging = draggingId === aloc.id_groot;
     const isAtivo = cardAtivo === aloc.id_groot;
 
@@ -483,9 +547,7 @@ export default function LinhaPage() {
         e.stopPropagation();
         setDraggingId(aloc.id_groot);
         e.dataTransfer.effectAllowed = 'move';
-        const img = new Image();
-        img.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
-        e.dataTransfer.setDragImage(img, 0, 0);
+        e.dataTransfer.setData('text/plain', aloc.id_groot);
       },
       onDragEnd: () => { setDraggingId(null); setHoverBancada(null); },
       onDoubleClick: (e: React.MouseEvent) => {
@@ -494,7 +556,7 @@ export default function LinhaPage() {
       },
     };
 
-    const titulo = c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoEmOutro ? ' · sinergia em outra' : '') + ' · double-click pra ativar';
+    const titulo = c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoAqui ? ' · fixo aqui' : '') + (eTemporario ? ' · temporário' : '');
 
     if (expandido) {
       return (
@@ -504,16 +566,16 @@ export default function LinhaPage() {
           className={
             'relative group ' + cor.borda + ' ' + cor.bg +
             ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in' +
-            ' cursor-grab active:cursor-grabbing card-sidebar-hover' +
+            ' cursor-grab active:cursor-grabbing card-hover' +
             (isDragging ? ' card-arrastando' : '') +
-            (isAtivo ? ' card-ativo' : '')
+            (isAtivo ? ' card-ativo' : '') +
+            (eTemporario ? ' card-temporario' : '')
           }
         >
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
             <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
             {eFixoAqui && <span className="text-[9px] badge-fixo" title="Fixo aqui">📍</span>}
-            {eFixoEmOutro && <span className="text-[9px] opacity-60" title="Fixo em outra">↩️</span>}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             {liquida != null && liquida > 0 ? (
@@ -524,7 +586,7 @@ export default function LinhaPage() {
             <button
               onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
               className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
-              title="Remover"
+              title="Remover (volta pra sidebar)"
             >×</button>
           </div>
         </div>
@@ -538,16 +600,14 @@ export default function LinhaPage() {
         className={
           'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg +
           ' flex flex-col items-center justify-center transition-all slide-in' +
-          ' cursor-grab active:cursor-grabbing card-sidebar-hover' +
+          ' cursor-grab active:cursor-grabbing card-hover' +
           (isDragging ? ' card-arrastando' : '') +
-          (isAtivo ? ' card-ativo' : '')
+          (isAtivo ? ' card-ativo' : '') +
+          (eTemporario ? ' card-temporario' : '')
         }
       >
         {eFixoAqui && (
           <span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo aqui">📍</span>
-        )}
-        {eFixoEmOutro && (
-          <span className="absolute top-0 left-0.5 text-[8px] opacity-60" title="Fixo em outra">↩️</span>
         )}
         {liquida != null && liquida > 0 ? (
           <span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>
@@ -558,43 +618,46 @@ export default function LinhaPage() {
         <button
           onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
           className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
-          title="Remover"
+          title="Remover (volta pra sidebar)"
         >×</button>
       </div>
     );
   }
 
+  // ============================================================
+  // CARD SINERGIA - agora NÃO é interativo pra alocação
+  // Só pra info visual + right-click pra remover fixo
+  // ============================================================
   function CardSinergia({ aloc, expandido }: { aloc: Alocacao; expandido?: boolean }) {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
+    
+    function handleContextMenu(e: React.MouseEvent) {
+      e.preventDefault();
+      if (confirm('Remover marca de fixo de ' + c!.nome + '? Ele perderá o lugar reservado aqui.')) {
+        removerFixo(aloc.id_groot);
+      }
+    }
+    
     if (expandido) {
       return (
         <div
-          className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2 cursor-pointer"
-          onClick={() => aloc.bancada_fixa_id && voltarParaBancadaFixa(aloc.id_groot, aloc.bancada_fixa_id)}
-          title={c.nome + ' (fixo aqui · click pra trazer de volta · right-click pra remover fixo)'}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            if (confirm('Remover marca de fixo de ' + c.nome + '?')) removerFixo(aloc.id);
-          }}
+          className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2"
+          title={c.nome + ' (fixo aqui · right-click pra remover fixo)'}
+          onContextMenu={handleContextMenu}
         >
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-[9px] font-bold text-yellow-400/70">{iniciais(c.nome)}</span>
             <span className="text-[10px] text-yellow-400/70 truncate">{primeiroNome(c.nome)}</span>
           </div>
-          <span className="text-[8px] text-yellow-400/50">↩️</span>
         </div>
       );
     }
     return (
       <div
-        className="card-sinergia flex-1 h-full rounded flex flex-col items-center justify-center cursor-pointer"
-        onClick={() => aloc.bancada_fixa_id && voltarParaBancadaFixa(aloc.id_groot, aloc.bancada_fixa_id)}
-        title={c.nome + ' (fixo aqui · click pra trazer de volta)'}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          if (confirm('Remover marca de fixo de ' + c.nome + '?')) removerFixo(aloc.id);
-        }}
+        className="card-sinergia flex-1 h-full rounded flex flex-col items-center justify-center"
+        title={c.nome + ' (fixo aqui · right-click pra remover fixo)'}
+        onContextMenu={handleContextMenu}
       >
         <span className="text-[10px] font-bold text-yellow-400/70 leading-none">{iniciais(c.nome)}</span>
         <span className="text-[7px] text-yellow-400/50 mt-0.5">{primeiroNome(c.nome)}</span>
@@ -632,7 +695,7 @@ export default function LinhaPage() {
       isCompativel ? 'bancada-compativel' : '',
       isEncaixe ? 'bancada-encaixe' : '',
       isErro ? 'bancada-erro' : '',
-      isHover && !isCompativel ? 'ring-2 ring-green-500/80 scale-[1.03] shadow-xl shadow-green-500/20' : '',
+      isHover && !isCompativel ? 'ring-2 ring-green-500/80 shadow-xl shadow-green-500/20' : '',
     ].join(' ');
     return (
       <div
@@ -645,7 +708,8 @@ export default function LinhaPage() {
         onDrop={(e) => {
           e.preventDefault();
           setHoverBancada(null);
-          if (draggingId) alocarColab(draggingId, b);
+          const idDropped = e.dataTransfer.getData('text/plain') || draggingId;
+          if (idDropped) alocarColab(idDropped, b);
         }}
         onClick={() => {
           if (cardAtivo && bancadaCompativel(b)) alocarColab(cardAtivo, b);
@@ -796,7 +860,7 @@ export default function LinhaPage() {
           <span className="text-[10px] text-gray-500">· Metas: {metas.p2m_base}-{metas.p2m_alinhado_max}</span>
           {cardAtivo && (
             <span className="text-[10px] text-yellow-400 font-bold animate-pulse">
-              ✨ Card ativado · click numa bancada (ESC pra cancelar)
+              ✨ Card ativado · click na bancada (ESC pra cancelar)
             </span>
           )}
         </div>
@@ -820,7 +884,7 @@ export default function LinhaPage() {
                 <span className="text-[10px] text-gray-500">{livres.length}</span>
               </div>
               <div className="text-[9px] text-gray-600 italic mb-2 px-1">
-                Double-click pra ativar
+                Arrasta ou double-click
               </div>
               <div className="max-h-[calc(100vh-160px)] overflow-y-auto pr-1">
                 {livres.length === 0 ? (
