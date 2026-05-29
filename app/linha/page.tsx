@@ -36,11 +36,12 @@ function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
   if (liquida <= metas.p2m_alinhado_max) return { status: 'alinhado' as const, texto: 'text-blue-400', borda: 'border-blue-500/50', bg: 'bg-blue-500/10', emoji: '🔵', label: 'Alinhado' };
   return { status: 'supera' as const, texto: 'text-green-400', borda: 'border-green-500/50', bg: 'bg-green-500/10', emoji: '🟢', label: 'Supera' };
 }
-function corRitmoLinha(pctMedio: number, metas: MetasConfig) {
-  if (pctMedio === 0) return { texto: 'text-gray-400', emoji: '⚪', label: 'Sem dados' };
-  const liq = (pctMedio / 100) * metas.p2m_base;
-  const c = corPorMeta(liq, metas);
-  return { texto: c.texto, emoji: c.emoji, label: c.label };
+function corRitmoLinha(pct: number, metas: MetasConfig) {
+  if (pct === 0) return { texto: 'text-gray-400', emoji: '⚪', label: 'Sem dados' };
+  if (pct < 90) return { texto: 'text-red-400', emoji: '🔴', label: 'Ofensor' };
+  if (pct < 100) return { texto: 'text-yellow-400', emoji: '🟡', label: 'Bom ritmo' };
+  if (pct <= 106) return { texto: 'text-blue-400', emoji: '🔵', label: 'Alinhado' };
+  return { texto: 'text-green-400', emoji: '🟢', label: 'Supera' };
 }
 function iniciais(nome: string) {
   const p = nome.trim().split(/\s+/);
@@ -550,22 +551,50 @@ export default function LinhaPage() {
     const bancadasLinha = bancadas.filter((b) => b.linha === linha);
     const bancadasIds = new Set(bancadasLinha.map((b) => b.id));
     const alocsLinha = alocacoes.filter((a) => bancadasIds.has(a.bancada_id));
-    const liquidas: number[] = [];
+    
+    let totalUnidades = 0;
+    let totalHoras = 0;
     let supera = 0, alinhado = 0, ofensor = 0, semDado = 0;
+    
     alocsLinha.forEach((a) => {
       const ritmo = ritmos[a.id_groot];
-      const liq = ritmo?.liquida;
+      if (!ritmo) { semDado++; return; }
+      
+      const liq = ritmo.liquida;
+      
+      // Acumula unidades e horas (pra ritmo da linha)
+      if (ritmo.unidades && ritmo.horas && ritmo.horas > 0) {
+        totalUnidades += ritmo.unidades;
+        totalHoras += ritmo.horas;
+      }
+      
+      // Distribuição usa líquida individual
       if (liq == null || liq === 0) { semDado++; return; }
-      liquidas.push(liq);
       if (liq < metas.p2m_base) ofensor++;
       else if (liq <= metas.p2m_alinhado_max) alinhado++;
       else supera++;
     });
+    
     const totalAtivos = alocsLinha.length;
-    if (liquidas.length === 0) return { pctMedio: 0, mediaLiquida: 0, totalAtivos, supera: 0, alinhado: 0, ofensor: 0, semDado };
-    const mediaLiquida = liquidas.reduce((a, b) => a + b, 0) / liquidas.length;
-    const pctMedio = Math.round((mediaLiquida / metas.p2m_base) * 100);
-    return { pctMedio, mediaLiquida: Math.round(mediaLiquida), totalAtivos, supera, alinhado, ofensor, semDado };
+    
+    if (totalHoras === 0) {
+      return { 
+        pctMedio: 0, pecasHora: 0, totalUnidades: 0, totalHoras: 0,
+        totalAtivos, supera, alinhado, ofensor, semDado 
+      };
+    }
+    
+    // 🎯 Ritmo = soma das peças / soma das horas
+    const pecasHora = totalUnidades / totalHoras;
+    const pctMedio = Math.round((pecasHora / metas.p2m_base) * 100);
+    
+    return { 
+      pctMedio, 
+      pecasHora: Math.round(pecasHora),
+      totalUnidades,
+      totalHoras: Math.round(totalHoras * 10) / 10,
+      totalAtivos, supera, alinhado, ofensor, semDado 
+    };
   }
 
   function CardColabSidebar({ c }: { c: Colaborador }) {
@@ -807,7 +836,12 @@ export default function LinhaPage() {
             <span className="text-[10px] text-gray-500 font-bold">RITMO:</span>
             <span className={'text-base font-black ' + corLinha.texto}>{ritmoLinha.pctMedio}%</span>
             <span className="text-sm">{corLinha.emoji}</span>
-            {ritmoLinha.mediaLiquida > 0 && (<span className="text-[9px] text-gray-500">· {ritmoLinha.mediaLiquida} pç/h</span>)}
+            {ritmoLinha.pecasHora > 0 && (
+              <span className="text-[9px] text-gray-500">· {ritmoLinha.pecasHora} pç/h</span>
+            )}
+            {ritmoLinha.totalUnidades > 0 && (
+              <span className="text-[9px] text-gray-600">({ritmoLinha.totalUnidades} pç / {ritmoLinha.totalHoras}h)</span>
+            )}
             <div className="flex items-center gap-1 ml-1 pl-2 border-l border-[#2a2a2a]">
               {ritmoLinha.supera > 0 && <span className="text-[10px] text-green-400">🟢 {ritmoLinha.supera}</span>}
               {ritmoLinha.alinhado > 0 && <span className="text-[10px] text-blue-400">🔵 {ritmoLinha.alinhado}</span>}
