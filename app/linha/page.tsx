@@ -2,42 +2,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 
-interface Colaborador {
-  id_groot: string;
-  nome: string;
-  processo: string;
-  status: string;
-}
-interface Ritmo {
-  id_groot: string;
-  ritmo_pct: number;
-  liquida?: number;
-  unidades?: number;
-  horas?: number;
-}
+interface Colaborador { id_groot: string; nome: string; processo: string; status: string; }
+interface Ritmo { id_groot: string; ritmo_pct: number; liquida?: number; unidades?: number; horas?: number; }
 interface Bancada {
-  id: number;
-  zona: string;
-  linha: number;
-  lado: string;
-  posicao: number;
-  tipo_principal: string;
-  subtipo: string | null;
-  fixo_categoria: boolean;
-  data_referencia: string;
+  id: number; zona: string; linha: number; lado: string; posicao: number;
+  tipo_principal: string; subtipo: string | null; fixo_categoria: boolean; data_referencia: string;
 }
 interface Alocacao {
-  id: number;
-  bancada_id: number;
-  id_groot: string;
-  tipo_alocacao: string;
-  bancada_fixa_id: number | null;
-  data_referencia: string;
+  id: number; bancada_id: number; id_groot: string; tipo_alocacao: string;
+  bancada_fixa_id: number | null; data_referencia: string;
 }
-interface MetasConfig {
-  p2m_base: number;
-  p2m_alinhado_max: number;
-}
+interface MetasConfig { p2m_base: number; p2m_alinhado_max: number; }
+interface Toast { id: number; tipo: 'success' | 'error' | 'info'; msg: string; }
+interface ConfirmModal { msg: string; onConfirm: () => void; onCancel?: () => void; }
 
 const ZONA = 'p2m';
 const LAYOUT = { L1_ESQ: 5, L1_DIR: 3, L2_ESQ: 3, L2_DIR: 5 };
@@ -48,137 +25,58 @@ function maxColabsPorTipo(tipo: string): number {
   if (tipo === 'CATEGORIA') return 999;
   return 2;
 }
-
 function tipoEFixoAutomatico(tipo: string): boolean {
   return tipo === 'GM' || tipo === 'PESCA';
 }
-
 function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
   if (liquida == null || liquida === 0) {
     return { status: 'sem_dado' as const, texto: 'text-gray-400', borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', emoji: '⚪', label: 'Sem dado' };
   }
-  if (liquida < metas.p2m_base) {
-    return { status: 'ofensor' as const, texto: 'text-red-400', borda: 'border-red-500/50', bg: 'bg-red-500/10', emoji: '🔴', label: 'Ofensor' };
-  }
-  if (liquida <= metas.p2m_alinhado_max) {
-    return { status: 'alinhado' as const, texto: 'text-blue-400', borda: 'border-blue-500/50', bg: 'bg-blue-500/10', emoji: '🔵', label: 'Alinhado' };
-  }
+  if (liquida < metas.p2m_base) return { status: 'ofensor' as const, texto: 'text-red-400', borda: 'border-red-500/50', bg: 'bg-red-500/10', emoji: '🔴', label: 'Ofensor' };
+  if (liquida <= metas.p2m_alinhado_max) return { status: 'alinhado' as const, texto: 'text-blue-400', borda: 'border-blue-500/50', bg: 'bg-blue-500/10', emoji: '🔵', label: 'Alinhado' };
   return { status: 'supera' as const, texto: 'text-green-400', borda: 'border-green-500/50', bg: 'bg-green-500/10', emoji: '🟢', label: 'Supera' };
 }
-
 function corRitmoLinha(pctMedio: number, metas: MetasConfig) {
   if (pctMedio === 0) return { texto: 'text-gray-400', emoji: '⚪', label: 'Sem dados' };
-  const liquidaEquivalente = (pctMedio / 100) * metas.p2m_base;
-  const cor = corPorMeta(liquidaEquivalente, metas);
-  return { texto: cor.texto, emoji: cor.emoji, label: cor.label };
+  const liq = (pctMedio / 100) * metas.p2m_base;
+  const c = corPorMeta(liq, metas);
+  return { texto: c.texto, emoji: c.emoji, label: c.label };
 }
-
 function iniciais(nome: string) {
-  const partes = nome.trim().split(/\s+/);
-  if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
-  return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
+  const p = nome.trim().split(/\s+/);
+  if (p.length === 1) return p[0].substring(0, 2).toUpperCase();
+  return (p[0][0] + p[p.length - 1][0]).toUpperCase();
 }
-
 function corTipo(tipo: string) {
   switch (tipo) {
-    case 'GM': return { hex: '#FFD700', text: 'text-yellow-400', emoji: '⭐' };
-    case 'PESCA': return { hex: '#3b82f6', text: 'text-blue-400', emoji: '🐟' };
-    case 'CATEGORIA': return { hex: '#a855f7', text: 'text-purple-400', emoji: '📦' };
-    default: return { hex: '#6b7280', text: 'text-gray-400', emoji: '❓' };
+    case 'GM': return { hex: '#FFD700', text: 'text-yellow-400' };
+    case 'PESCA': return { hex: '#3b82f6', text: 'text-blue-400' };
+    case 'CATEGORIA': return { hex: '#a855f7', text: 'text-purple-400' };
+    default: return { hex: '#6b7280', text: 'text-gray-400' };
   }
 }
-
-function primeiroNome(nome: string) {
-  return nome.trim().split(/\s+/)[0];
-}
+function primeiroNome(nome: string) { return nome.trim().split(/\s+/)[0]; }
 
 const STYLES = `
-  @keyframes pulseGold {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.9), 0 0 30px rgba(255, 215, 0, 0.6); }
-    50% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.8); }
-  }
-  @keyframes pulseGreen {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7), 0 0 20px rgba(34, 197, 94, 0.3); border-color: rgba(34, 197, 94, 0.6) !important; }
-    50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0), 0 0 30px rgba(34, 197, 94, 0.5); border-color: rgba(34, 197, 94, 1) !important; }
-  }
-  @keyframes successFlash {
-    0% { background: rgba(34, 197, 94, 0.4); }
-    50% { background: rgba(34, 197, 94, 0.15); }
-    100% { background: transparent; }
-  }
-  @keyframes ghostFloat {
-    0%, 100% { opacity: 0.35; transform: translateY(0px); }
-    50% { opacity: 0.55; transform: translateY(-2px); }
-  }
-  @keyframes synergyGlow {
-    0%, 100% { box-shadow: 0 0 8px rgba(255, 215, 0, 0.3); }
-    50% { box-shadow: 0 0 15px rgba(255, 215, 0, 0.5); }
-  }
-  @keyframes shakeError {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-6px); }
-    75% { transform: translateX(6px); }
-  }
-  @keyframes slideIn {
-    from { opacity: 0; transform: scale(0.9); }
-    to { opacity: 1; transform: scale(1); }
-  }
-  @keyframes pulseLine {
-    0%, 100% { opacity: 0.8; }
-    50% { opacity: 1; }
-  }
-  @keyframes rotacionando {
-    0% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); }
-    30% { opacity: 0.3; transform: scale(0.85) rotate(-3deg); filter: blur(2px); }
-    60% { opacity: 0.3; transform: scale(0.85) rotate(3deg); filter: blur(2px); }
-    100% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); }
-  }
-  .card-ativo {
-    animation: pulseGold 1.2s ease-in-out infinite !important;
-    border-color: #FFD700 !important;
-    border-width: 2px !important;
-    outline: 2px solid #FFD700 !important;
-    outline-offset: 2px !important;
-    z-index: 50;
-    position: relative;
-  }
-  .bancada-compativel {
-    animation: pulseGreen 1s ease-in-out infinite;
-    cursor: pointer !important;
-  }
+  @keyframes pulseGold { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.9), 0 0 30px rgba(255, 215, 0, 0.6); } 50% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.8); } }
+  @keyframes pulseGreen { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); border-color: rgba(34, 197, 94, 0.6) !important; } 50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); border-color: rgba(34, 197, 94, 1) !important; } }
+  @keyframes successFlash { 0% { background: rgba(34, 197, 94, 0.4); } 50% { background: rgba(34, 197, 94, 0.15); } 100% { background: transparent; } }
+  @keyframes ghostFloat { 0%, 100% { opacity: 0.35; transform: translateY(0px); } 50% { opacity: 0.55; transform: translateY(-2px); } }
+  @keyframes synergyGlow { 0%, 100% { box-shadow: 0 0 8px rgba(255, 215, 0, 0.3); } 50% { box-shadow: 0 0 15px rgba(255, 215, 0, 0.5); } }
+  @keyframes shakeError { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+  @keyframes slideIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+  @keyframes pulseLine { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+  @keyframes rotacionando { 0% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); } 30% { opacity: 0.3; transform: scale(0.85) rotate(-3deg); filter: blur(2px); } 60% { opacity: 0.3; transform: scale(0.85) rotate(3deg); filter: blur(2px); } 100% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); } }
+  @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(20px); } }
+  .card-ativo { animation: pulseGold 1.2s ease-in-out infinite !important; border-color: #FFD700 !important; border-width: 2px !important; outline: 2px solid #FFD700 !important; outline-offset: 2px !important; z-index: 50; position: relative; }
+  .bancada-compativel { animation: pulseGreen 1s ease-in-out infinite; cursor: pointer !important; }
   .bancada-encaixe { animation: successFlash 0.5s ease-out; }
   .bancada-erro { animation: shakeError 0.3s ease-in-out; }
-  .card-sinergia {
-    animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite;
-    background: rgba(255, 215, 0, 0.08) !important;
-    border: 2px dashed #FFD700 !important;
-    position: relative;
-    overflow: hidden;
-  }
-  .card-sinergia::after {
-    content: 'SINERGIA';
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%) rotate(-15deg);
-    font-size: 7px;
-    font-weight: 900;
-    color: rgba(255, 215, 0, 0.5);
-    letter-spacing: 1px;
-    pointer-events: none;
-    white-space: nowrap;
-  }
-  .card-temporario {
-    border-style: dashed !important;
-    position: relative;
-  }
-  .card-temporario::before {
-    content: '🔄';
-    position: absolute;
-    top: -2px;
-    right: -2px;
-    font-size: 10px;
-    z-index: 5;
-  }
+  .card-sinergia { animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite; background: rgba(255, 215, 0, 0.08) !important; border: 2px dashed #FFD700 !important; position: relative; overflow: hidden; }
+  .card-sinergia::after { content: 'SINERGIA'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); font-size: 7px; font-weight: 900; color: rgba(255, 215, 0, 0.5); letter-spacing: 1px; pointer-events: none; white-space: nowrap; }
+  .card-temporario { border-style: dashed !important; position: relative; }
+  .card-temporario::before { content: '🔄'; position: absolute; top: -2px; right: -2px; font-size: 10px; z-index: 5; }
   .card-hover { transition: all 0.15s ease; }
   .card-hover:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
   .card-arrastando { opacity: 0.4; }
@@ -189,6 +87,8 @@ const STYLES = `
   .slide-in { animation: slideIn 0.3s ease-out; }
   .ritmo-linha-pulse { animation: pulseLine 2s ease-in-out infinite; }
   .canvas-rotacionando * { animation: rotacionando 0.6s ease-in-out !important; }
+  .toast-in { animation: toastIn 0.3s ease-out; }
+  .toast-out { animation: toastOut 0.3s ease-out forwards; }
 `;
 
 export default function LinhaPage() {
@@ -210,13 +110,32 @@ export default function LinhaPage() {
   const [modalSubtipo, setModalSubtipo] = useState<string>('');
   const [modalRotacao, setModalRotacao] = useState(false);
   const [rotacionando, setRotacionando] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ============================================================
+  // 🎨 TOAST SYSTEM
+  // ============================================================
+  function toast(tipo: 'success' | 'error' | 'info', msg: string) {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, tipo, msg }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }
+
+  function confirmar(msg: string, onConfirm: () => void) {
+    setConfirmModal({ msg, onConfirm });
+  }
 
   useEffect(() => { carregarTudo(); }, []);
 
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') { setCardAtivo(null); setDraggingId(null); setModalRotacao(false); }
+      if (e.key === 'Escape') {
+        setCardAtivo(null); setDraggingId(null); setModalRotacao(false); setConfirmModal(null);
+      }
     }
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
@@ -299,13 +218,14 @@ export default function LinhaPage() {
     })));
   }
 
-  async function limparRitmos() {
-    if (!confirm('Limpar TODOS os ritmos do dia? Os cards vão ficar sem cor até subir CSV novo.')) return;
-    const hoje = new Date().toISOString().split('T')[0];
-    const { error } = await supabase.from('ritmo_atual').delete().eq('data_referencia', hoje);
-    if (error) { alert('Erro: ' + error.message); return; }
-    alert('✅ Ritmos limpos.');
-    await carregarRitmos();
+  function limparRitmos() {
+    confirmar('Limpar TODOS os ritmos do dia?', async () => {
+      const hoje = new Date().toISOString().split('T')[0];
+      const { error } = await supabase.from('ritmo_atual').delete().eq('data_referencia', hoje);
+      if (error) { toast('error', 'Erro: ' + error.message); return; }
+      toast('success', '✅ Ritmos limpos');
+      await carregarRitmos();
+    });
   }
 
   async function handleUploadCSV(e: React.ChangeEvent<HTMLInputElement>) {
@@ -314,7 +234,7 @@ export default function LinhaPage() {
     try {
       const texto = await file.text();
       const linhas = texto.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (linhas.length < 2) { alert('CSV vazio.'); return; }
+      if (linhas.length < 2) { toast('error', 'CSV vazio'); return; }
       const sep = linhas[0].includes(';') ? ';' : ',';
       const header = linhas[0].split(sep).map((h) => h.trim().toLowerCase().replace(/"/g, '').replace(/^\uFEFF/, ''));
       const idxGroot = header.findIndex((h) => h.includes('groot') || h === 'id' || h === 'id_groot' || h === 'usuario' || h === 'matricula' || h.includes('id_colab'));
@@ -322,7 +242,7 @@ export default function LinhaPage() {
       const idxRitmo = header.findIndex((h) => h.includes('ritmo') || h.includes('pct') || h === '%' || h.includes('liquid') || h.includes('produtividade') || h === 'prod' || h === 'prod_liquida');
       const idxUnid = header.findIndex((h) => h.includes('unid') || h.includes('qtd') || h.includes('quantidade') || h === 'pcs');
       const idxHoras = header.findIndex((h) => h.includes('hora') || h === 'h' || h === 'tempo');
-      if (idxGroot === -1 || idxRitmo === -1) { alert('CSV inválido!\nColunas: ' + header.join(' | ')); return; }
+      if (idxGroot === -1 || idxRitmo === -1) { toast('error', 'CSV inválido. Faltam colunas id_groot/ritmo'); return; }
       const hoje = new Date().toISOString().split('T')[0];
       const registros: any[] = [];
       let pulou = 0;
@@ -339,13 +259,13 @@ export default function LinhaPage() {
         if (idxHoras !== -1 && cols[idxHoras]) { const h = parseFloat(cols[idxHoras].replace(',', '.')); if (!isNaN(h)) reg.horas = h; }
         registros.push(reg);
       }
-      if (registros.length === 0) { alert('Nenhum registro válido.'); return; }
+      if (registros.length === 0) { toast('error', 'Nenhum registro válido'); return; }
       const { error } = await supabase.from('ritmo_atual').upsert(registros, { onConflict: 'id_groot,data_referencia' });
-      if (error) { alert('Erro: ' + error.message); return; }
-      alert('✅ ' + registros.length + ' atualizado(s).' + (pulou > 0 ? '\n⚠️ ' + pulou + ' pulada(s)' : ''));
+      if (error) { toast('error', 'Erro: ' + error.message); return; }
+      toast('success', '✅ ' + registros.length + ' ritmo(s) atualizado(s)');
       await carregarRitmos();
     } catch (err: any) {
-      alert('Erro: ' + err.message);
+      toast('error', 'Erro: ' + err.message);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -356,7 +276,7 @@ export default function LinhaPage() {
     const { error } = await supabase.from('layout_bancadas').insert({
       zona: ZONA, linha, lado, posicao, tipo_principal: 'GM', subtipo: null, fixo_categoria: false, data_referencia: hoje,
     });
-    if (error) { alert('Erro: ' + error.message); return; }
+    if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarBancadas();
   }
 
@@ -364,24 +284,24 @@ export default function LinhaPage() {
     setModal({ linha: b.linha, lado: b.lado, posicao: b.posicao, bancadaExistente: b });
     setModalSubtipo(b.subtipo || '');
   }
-
   function fecharModal() { setModal(null); setModalSubtipo(''); }
 
   async function salvarModal() {
     if (!modal || !modal.bancadaExistente) return;
-    if (!modalSubtipo) { alert('Escolha um sub-tipo.'); return; }
+    if (!modalSubtipo) { toast('error', 'Escolha um sub-tipo'); return; }
     const { error } = await supabase.from('layout_bancadas').update({ subtipo: modalSubtipo }).eq('id', modal.bancadaExistente.id);
-    if (error) { alert('Erro: ' + error.message); return; }
+    if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarBancadas();
     fecharModal();
   }
 
-  async function limparBancada(b: Bancada) {
-    if (b.fixo_categoria) { alert('Esta bancada é fixa.'); return; }
-    if (!confirm('Limpar esta bancada?')) return;
-    const { error } = await supabase.from('layout_bancadas').delete().eq('id', b.id);
-    if (error) { alert('Erro: ' + error.message); return; }
-    await Promise.all([carregarBancadas(), carregarAlocacoes()]);
+  function limparBancada(b: Bancada) {
+    if (b.fixo_categoria) { toast('error', 'Bancada fixa não pode ser removida'); return; }
+    confirmar('Limpar esta bancada?', async () => {
+      const { error } = await supabase.from('layout_bancadas').delete().eq('id', b.id);
+      if (error) { toast('error', 'Erro: ' + error.message); return; }
+      await Promise.all([carregarBancadas(), carregarAlocacoes()]);
+    });
   }
 
   async function alocarColab(idGroot: string, bancada: Bancada) {
@@ -391,15 +311,13 @@ export default function LinhaPage() {
     if (atuais.length >= maxColabs) {
       setErroBancada(bancada.id);
       setTimeout(() => setErroBancada(null), 400);
+      toast('error', 'Bancada cheia');
       return;
     }
     const alocAtual = alocacoes.find((a) => a.id_groot === idGroot);
     let bancadaFixaId: number | null = null;
-    if (alocAtual?.bancada_fixa_id) {
-      bancadaFixaId = alocAtual.bancada_fixa_id;
-    } else if (tipoEFixoAutomatico(bancada.tipo_principal)) {
-      bancadaFixaId = bancada.id;
-    }
+    if (alocAtual?.bancada_fixa_id) bancadaFixaId = alocAtual.bancada_fixa_id;
+    else if (tipoEFixoAutomatico(bancada.tipo_principal)) bancadaFixaId = bancada.id;
     let tipoAlocacao = 'fixo';
     if (bancadaFixaId && bancadaFixaId !== bancada.id) tipoAlocacao = 'temporario';
     await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot).eq('data_referencia', hoje);
@@ -407,7 +325,7 @@ export default function LinhaPage() {
       bancada_id: bancada.id, id_groot: idGroot,
       tipo_alocacao: tipoAlocacao, bancada_fixa_id: bancadaFixaId, data_referencia: hoje,
     });
-    if (error) { alert('Erro: ' + error.message); return; }
+    if (error) { toast('error', 'Erro: ' + error.message); return; }
     setEncaixeBancada(bancada.id);
     setTimeout(() => setEncaixeBancada(null), 500);
     setCardAtivo(null);
@@ -417,7 +335,7 @@ export default function LinhaPage() {
 
   async function removerColab(alocId: number) {
     const { error } = await supabase.from('layout_alocacao').delete().eq('id', alocId);
-    if (error) { alert('Erro: ' + error.message); return; }
+    if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarAlocacoes();
   }
 
@@ -425,82 +343,57 @@ export default function LinhaPage() {
     const aloc = alocacoes.find((a) => a.id_groot === idGroot);
     if (!aloc) return;
     const { error } = await supabase.from('layout_alocacao').update({ bancada_fixa_id: null, tipo_alocacao: 'fixo' }).eq('id', aloc.id);
-    if (error) { alert('Erro: ' + error.message); return; }
+    if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarAlocacoes();
   }
 
-  // ============================================================
-  // 🆕 ROTAÇÃO - HELPERS
-  // ============================================================
-  
   function getBancada(linha: number, lado: string, posicao: number) {
     return bancadas.find((b) => b.zona === ZONA && b.linha === linha && b.lado === lado && b.posicao === posicao);
   }
 
   function getCicloLinha(linha: number, comPesca: boolean): Bancada[] {
-    // Ordem da rotação (esq sobe → topo → cat/pesca → dir desce → volta)
     const ciclo: Bancada[] = [];
-    
-    // Esquerda do bottom (posição maior) pra cima (posição 1)
     const qtdEsq = linha === 1 ? LAYOUT.L1_ESQ : LAYOUT.L2_ESQ;
     for (let p = qtdEsq; p >= 1; p--) {
       const b = getBancada(linha, 'esquerdo', p);
       if (b && b.tipo_principal === 'GM') ciclo.push(b);
     }
-    
-    // Atravessa pela Categoria (e Pesca se aplicável)
     const cat = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'CATEGORIA');
     const pesca = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'PESCA');
-    
     if (comPesca && pesca) ciclo.push(pesca);
     if (cat) ciclo.push(cat);
-    
-    // Direita do topo (posição 1) pra baixo
     const qtdDir = linha === 1 ? LAYOUT.L1_DIR : LAYOUT.L2_DIR;
     for (let p = 1; p <= qtdDir; p++) {
       const b = getBancada(linha, 'direito', p);
       if (b && b.tipo_principal === 'GM') ciclo.push(b);
     }
-    
     return ciclo;
   }
 
   async function getHistoricoPesca(idGroot: string, linha: number): Promise<number> {
-    const { data } = await supabase
-      .from('rotacao_pesca_historico')
-      .select('id')
-      .eq('id_groot', idGroot)
-      .eq('linha', linha);
+    const { data } = await supabase.from('rotacao_pesca_historico').select('id').eq('id_groot', idGroot).eq('linha', linha);
     return (data || []).length;
   }
 
   async function registrarPesca(idGroot: string, linha: number) {
     await supabase.from('rotacao_pesca_historico').insert({
-      id_groot: idGroot, linha,
-      data_pesca: new Date().toISOString().split('T')[0],
+      id_groot: idGroot, linha, data_pesca: new Date().toISOString().split('T')[0],
     });
   }
 
+  // ============================================================
+  // 🔄 ROTAÇÃO - FIX: fixo MUDA pra nova bancada
+  // ============================================================
   async function aplicarRotacao(tipo: 1 | 2 | 3) {
     setRotacionando(true);
-    
     try {
-      if (tipo === 3) {
-        // ROTAÇÃO 3: nivelar (topo ↔ último em cada lado de cada linha)
-        await rotacaoNivelar();
-      } else {
-        // ROTAÇÃO 1 ou 2: ciclo circular
-        await rotacaoCiclo(tipo === 2);
-      }
-      
+      if (tipo === 3) await rotacaoNivelar();
+      else await rotacaoCiclo(tipo === 2);
       await carregarAlocacoes();
-      
-      // Pausa pra animação
-      await new Promise(r => setTimeout(r, 600));
-      
-      alert('✅ Rotação ' + tipo + ' aplicada!');
+      await new Promise((r) => setTimeout(r, 600));
+      toast('success', '✅ Rotação ' + tipo + ' aplicada');
     } catch (err: any) {
-      alert('Erro: ' + err.message);
+      toast('error', 'Erro: ' + err.message);
     } finally {
       setRotacionando(false);
       setModalRotacao(false);
@@ -509,43 +402,38 @@ export default function LinhaPage() {
 
   async function rotacaoCiclo(comPesca: boolean) {
     const hoje = new Date().toISOString().split('T')[0];
-    
     for (const linha of [1, 2]) {
       const ciclo = getCicloLinha(linha, comPesca);
       if (ciclo.length === 0) continue;
-      
-      // Mapeia: posicao no ciclo → alocações atuais nessa bancada
+
+      // Mapeia ocupantes atuais de cada bancada do ciclo
       const ocupantes: Array<{ bancada: Bancada; alocs: Alocacao[] }> = ciclo.map((b) => ({
         bancada: b,
         alocs: alocacoes.filter((a) => a.bancada_id === b.id),
       }));
-      
-      // Move cada ocupante pra próxima posição (circular)
-      const novasAlocacoes: Array<{ id_groot: string; bancada_id: number; bancada_fixa_id: number | null; tipo: string }> = [];
-      
+
+      // Define novas alocações
+      const novas: Array<{ id_groot: string; bancada_id: number; bancada_fixa_id: number | null; tipo: string }> = [];
+
       for (let i = 0; i < ocupantes.length; i++) {
         const proximaIdx = (i + 1) % ocupantes.length;
         const proximaBancada = ocupantes[proximaIdx].bancada;
-        
+
         for (const aloc of ocupantes[i].alocs) {
-          // Preserva fixo se for GM/PESCA, atualiza se mudou de tipo
-          let novoFixoId = aloc.bancada_fixa_id;
+          let novoFixoId: number | null = null;
           let novoTipo = 'fixo';
-          
+
           if (tipoEFixoAutomatico(proximaBancada.tipo_principal)) {
-            // Se vai pra GM/PESCA: se não tinha fixo, ganha fixo nova
-            if (!novoFixoId) novoFixoId = proximaBancada.id;
-            if (novoFixoId === proximaBancada.id) novoTipo = 'fixo';
-            else novoTipo = 'temporario';
+            // GM ou PESCA: 🆕 ATUALIZA o fixo pra nova bancada (rotação = mudança oficial de casa)
+            novoFixoId = proximaBancada.id;
+            novoTipo = 'fixo';
           } else {
-            // Vai pra Categoria: temporário se tem fixo em outro lugar
-            if (novoFixoId && novoFixoId !== proximaBancada.id) novoTipo = 'temporario';
+            // CATEGORIA: mantém vínculo de origem (era fixo em GM, agora é temporário em Cat)
+            novoFixoId = aloc.bancada_fixa_id;
+            novoTipo = novoFixoId ? 'temporario' : 'fixo';
           }
-          
-          // Se a próxima bancada é PESCA na rotação 2 e tem 2 colabs, decide quem vai
-          // (lógica de alternância é aplicada antes - aqui é simples passagem)
-          
-          novasAlocacoes.push({
+
+          novas.push({
             id_groot: aloc.id_groot,
             bancada_id: proximaBancada.id,
             bancada_fixa_id: novoFixoId,
@@ -553,55 +441,47 @@ export default function LinhaPage() {
           });
         }
       }
-      
-      // ROTAÇÃO 2: ajusta quem vai pra PESCA vs CATEGORIA (alternância)
+
+      // ROTAÇÃO 2: alterna PESCA vs CATEGORIA com histórico
       if (comPesca) {
         const idxPesca = ciclo.findIndex((b) => b.tipo_principal === 'PESCA');
         const idxCat = ciclo.findIndex((b) => b.tipo_principal === 'CATEGORIA');
-        
         if (idxPesca >= 0 && idxCat >= 0) {
-          // Quem está indo PRA pesca/categoria
-          const indoParaPesca = novasAlocacoes.filter((n) => n.bancada_id === ciclo[idxPesca].id);
-          const indoParaCat = novasAlocacoes.filter((n) => n.bancada_id === ciclo[idxCat].id);
-          
-          // Junta os 2 grupos e redistribui baseado em histórico
-          const candidatos = [...indoParaPesca, ...indoParaCat];
+          const indoPesca = novas.filter((n) => n.bancada_id === ciclo[idxPesca].id);
+          const indoCat = novas.filter((n) => n.bancada_id === ciclo[idxCat].id);
+          const candidatos = [...indoPesca, ...indoCat];
           if (candidatos.length === 2) {
-            // Dupla - decide quem vai pra pesca
             const c1 = candidatos[0];
             const c2 = candidatos[1];
             const v1 = await getHistoricoPesca(c1.id_groot, linha);
             const v2 = await getHistoricoPesca(c2.id_groot, linha);
-            
-            // Quem foi MENOS vezes vai pra pesca
-            let paraPesca: typeof c1, paraCat: typeof c2;
+            let paraPesca: typeof c1;
+            let paraCat: typeof c2;
             if (v1 < v2) { paraPesca = c1; paraCat = c2; }
             else if (v2 < v1) { paraPesca = c2; paraCat = c1; }
             else { paraPesca = Math.random() < 0.5 ? c1 : c2; paraCat = paraPesca === c1 ? c2 : c1; }
-            
             paraPesca.bancada_id = ciclo[idxPesca].id;
+            paraPesca.bancada_fixa_id = ciclo[idxPesca].id;
+            paraPesca.tipo = 'fixo';
             paraCat.bancada_id = ciclo[idxCat].id;
-            
-            // Registra no histórico
+            // Cat: mantém vínculo se tinha fixo de GM
+            paraCat.tipo = paraCat.bancada_fixa_id ? 'temporario' : 'fixo';
             await registrarPesca(paraPesca.id_groot, linha);
           }
         }
       }
-      
-      // Aplica no banco: deleta todas as alocações da linha e recria
+
+      // 🆕 OTIMIZADO: batch delete + batch insert (em vez de loop)
       const bancadasLinhaIds = ciclo.map((b) => b.id);
+      const idsRemove = alocacoes.filter((a) => bancadasLinhaIds.includes(a.bancada_id)).map((a) => a.id);
       
-      // Pega ids das alocações a serem removidas
-      const alocsParaRemover = alocacoes.filter((a) => bancadasLinhaIds.includes(a.bancada_id));
-      
-      for (const aloc of alocsParaRemover) {
-        await supabase.from('layout_alocacao').delete().eq('id', aloc.id);
+      if (idsRemove.length > 0) {
+        await supabase.from('layout_alocacao').delete().in('id', idsRemove);
       }
       
-      // Cria as novas
-      if (novasAlocacoes.length > 0) {
+      if (novas.length > 0) {
         await supabase.from('layout_alocacao').insert(
-          novasAlocacoes.map((n) => ({
+          novas.map((n) => ({
             bancada_id: n.bancada_id,
             id_groot: n.id_groot,
             tipo_alocacao: n.tipo,
@@ -614,61 +494,49 @@ export default function LinhaPage() {
   }
 
   async function rotacaoNivelar() {
-    // Troca topo (#1) com último (#max) em cada lado de cada linha (só GM)
-    const hoje = new Date().toISOString().split('T')[0];
-    
+    // Troca topo ↔ último de GM em cada lado de cada linha
     for (const linha of [1, 2]) {
       for (const lado of ['esquerdo', 'direito']) {
-        const qtd = linha === 1 
+        const qtd = linha === 1
           ? (lado === 'esquerdo' ? LAYOUT.L1_ESQ : LAYOUT.L1_DIR)
           : (lado === 'esquerdo' ? LAYOUT.L2_ESQ : LAYOUT.L2_DIR);
-        
         if (qtd < 2) continue;
-        
         const bTopo = getBancada(linha, lado, 1);
         const bUltimo = getBancada(linha, lado, qtd);
-        
         if (!bTopo || !bUltimo) continue;
         if (bTopo.tipo_principal !== 'GM' || bUltimo.tipo_principal !== 'GM') continue;
         
         const alocsTopo = alocacoes.filter((a) => a.bancada_id === bTopo.id);
         const alocsUltimo = alocacoes.filter((a) => a.bancada_id === bUltimo.id);
         
-        // Troca: alocações de topo viram último e vice-versa
+        // 🆕 Troca: nova bancada = nova casa fixa
         for (const a of alocsTopo) {
           await supabase.from('layout_alocacao').update({
             bancada_id: bUltimo.id,
-            bancada_fixa_id: a.bancada_fixa_id === bTopo.id ? bUltimo.id : a.bancada_fixa_id,
+            bancada_fixa_id: bUltimo.id, // 🆕 vira fixo do novo lugar
+            tipo_alocacao: 'fixo',
           }).eq('id', a.id);
         }
-        
         for (const a of alocsUltimo) {
           await supabase.from('layout_alocacao').update({
             bancada_id: bTopo.id,
-            bancada_fixa_id: a.bancada_fixa_id === bUltimo.id ? bTopo.id : a.bancada_fixa_id,
+            bancada_fixa_id: bTopo.id, // 🆕 vira fixo do novo lugar
+            tipo_alocacao: 'fixo',
           }).eq('id', a.id);
         }
       }
     }
   }
 
-  function getAlocacoesBancada(bancadaId: number) {
-    return alocacoes.filter((a) => a.bancada_id === bancadaId);
-  }
-
-  function getColab(idGroot: string) {
-    return colabs.find((c) => c.id_groot === idGroot);
-  }
-
+  function getAlocacoesBancada(bancadaId: number) { return alocacoes.filter((a) => a.bancada_id === bancadaId); }
+  function getColab(idGroot: string) { return colabs.find((c) => c.id_groot === idGroot); }
   function colabsLivres() {
-    const alocadosIds = new Set(alocacoes.map((a) => a.id_groot));
-    return colabs.filter((c) => !alocadosIds.has(c.id_groot));
+    const ids = new Set(alocacoes.map((a) => a.id_groot));
+    return colabs.filter((c) => !ids.has(c.id_groot));
   }
-
   function sinergiasDe(bancadaId: number) {
     return alocacoes.filter((a) => a.bancada_fixa_id === bancadaId && a.bancada_id !== bancadaId);
   }
-
   function bancadaCompativel(bancada: Bancada): boolean {
     if (!cardAtivo && !draggingId) return false;
     const idCheck = cardAtivo || draggingId;
@@ -694,18 +562,12 @@ export default function LinhaPage() {
       else supera++;
     });
     const totalAtivos = alocsLinha.length;
-    if (liquidas.length === 0) {
-      return { pctMedio: 0, mediaLiquida: 0, totalAtivos, supera: 0, alinhado: 0, ofensor: 0, semDado };
-    }
+    if (liquidas.length === 0) return { pctMedio: 0, mediaLiquida: 0, totalAtivos, supera: 0, alinhado: 0, ofensor: 0, semDado };
     const mediaLiquida = liquidas.reduce((a, b) => a + b, 0) / liquidas.length;
     const pctMedio = Math.round((mediaLiquida / metas.p2m_base) * 100);
     return { pctMedio, mediaLiquida: Math.round(mediaLiquida), totalAtivos, supera, alinhado, ofensor, semDado };
   }
 
-  // ============================================================
-  // COMPONENTES
-  // ============================================================
-  
   function CardColabSidebar({ c }: { c: Colaborador }) {
     const ritmo = ritmos[c.id_groot];
     const cor = corPorMeta(ritmo?.liquida, metas);
@@ -714,19 +576,10 @@ export default function LinhaPage() {
     return (
       <div
         draggable
-        onDragStart={(e) => {
-          setDraggingId(c.id_groot);
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', c.id_groot);
-        }}
+        onDragStart={(e) => { setDraggingId(c.id_groot); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.id_groot); }}
         onDragEnd={() => { setDraggingId(null); setHoverBancada(null); }}
         onDoubleClick={() => setCardAtivo(isAtivo ? null : c.id_groot)}
-        className={
-          cor.bg + ' ' + cor.borda + ' border-2 rounded-md px-2 py-1.5 mb-1.5' +
-          ' cursor-grab active:cursor-grabbing card-hover' +
-          (isDragging ? ' card-arrastando' : '') +
-          (isAtivo ? ' card-ativo' : '')
-        }
+        className={cor.bg + ' ' + cor.borda + ' border-2 rounded-md px-2 py-1.5 mb-1.5 cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '')}
         title="Arrasta pra alocar | Double-click pra ativar"
       >
         <div className="flex items-center justify-between gap-1">
@@ -735,9 +588,7 @@ export default function LinhaPage() {
             <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
-            {ritmo?.liquida != null && ritmo.liquida > 0 && (
-              <span className={'text-[9px] font-bold ' + cor.texto}>{ritmo.liquida}</span>
-            )}
+            {ritmo?.liquida != null && ritmo.liquida > 0 && (<span className={'text-[9px] font-bold ' + cor.texto}>{ritmo.liquida}</span>)}
             <span className="text-[9px]">{cor.emoji}</span>
           </div>
         </div>
@@ -757,72 +608,38 @@ export default function LinhaPage() {
     const isAtivo = cardAtivo === aloc.id_groot;
     const dragHandlers = {
       draggable: true,
-      onDragStart: (e: React.DragEvent) => {
-        e.stopPropagation();
-        setDraggingId(aloc.id_groot);
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', aloc.id_groot);
-      },
+      onDragStart: (e: React.DragEvent) => { e.stopPropagation(); setDraggingId(aloc.id_groot); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', aloc.id_groot); },
       onDragEnd: () => { setDraggingId(null); setHoverBancada(null); },
-      onDoubleClick: (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setCardAtivo(isAtivo ? null : aloc.id_groot);
-      },
+      onDoubleClick: (e: React.MouseEvent) => { e.stopPropagation(); setCardAtivo(isAtivo ? null : aloc.id_groot); },
     };
-    const titulo = c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoAqui ? ' · fixo aqui' : '') + (eTemporario ? ' · temporário' : '');
+    const titulo = c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoAqui ? ' · fixo' : '') + (eTemporario ? ' · temp' : '');
     if (expandido) {
       return (
-        <div
-          {...dragHandlers}
-          title={titulo}
-          className={
-            'relative group ' + cor.borda + ' ' + cor.bg +
-            ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in' +
-            ' cursor-grab active:cursor-grabbing card-hover' +
-            (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')
-          }
-        >
+        <div {...dragHandlers} title={titulo}
+          className={'relative group ' + cor.borda + ' ' + cor.bg + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
             <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
-            {eFixoAqui && <span className="text-[9px] badge-fixo" title="Fixo aqui">📍</span>}
+            {eFixoAqui && <span className="text-[9px] badge-fixo" title="Fixo">📍</span>}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
-            {liquida != null && liquida > 0 ? (
-              <span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>
-            ) : (<span className="text-gray-600 text-[10px]">—</span>)}
-            <button
-              onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
+            {liquida != null && liquida > 0 ? (<span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>) : (<span className="text-gray-600 text-[10px]">—</span>)}
+            <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
               className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
-              title="Remover"
-            >×</button>
+              title="Remover">×</button>
           </div>
         </div>
       );
     }
     return (
-      <div
-        {...dragHandlers}
-        title={titulo}
-        className={
-          'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg +
-          ' flex flex-col items-center justify-center transition-all slide-in' +
-          ' cursor-grab active:cursor-grabbing card-hover' +
-          (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')
-        }
-      >
-        {eFixoAqui && (
-          <span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo aqui">📍</span>
-        )}
-        {liquida != null && liquida > 0 ? (
-          <span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>
-        ) : (<span className="text-gray-600 text-sm">—</span>)}
+      <div {...dragHandlers} title={titulo}
+        className={'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
+        {eFixoAqui && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
+        {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="text-gray-600 text-sm">—</span>)}
         <span className="text-[7px] text-gray-500 mt-0.5">{primeiroNome(c.nome)}</span>
-        <button
-          onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
+        <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
           className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
-          title="Remover"
-        >×</button>
+          title="Remover">×</button>
       </div>
     );
   }
@@ -832,15 +649,13 @@ export default function LinhaPage() {
     if (!c) return null;
     function handleContextMenu(e: React.MouseEvent) {
       e.preventDefault();
-      if (confirm('Remover marca de fixo de ' + c!.nome + '?')) removerFixo(aloc.id_groot);
+      confirmar('Remover marca de fixo de ' + c!.nome + '?', () => removerFixo(aloc.id_groot));
     }
     if (expandido) {
       return (
-        <div
-          className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2"
+        <div className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2"
           title={c.nome + ' (fixo aqui · right-click pra remover)'}
-          onContextMenu={handleContextMenu}
-        >
+          onContextMenu={handleContextMenu}>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-[9px] font-bold text-yellow-400/70">{iniciais(c.nome)}</span>
             <span className="text-[10px] text-yellow-400/70 truncate">{primeiroNome(c.nome)}</span>
@@ -849,11 +664,9 @@ export default function LinhaPage() {
       );
     }
     return (
-      <div
-        className="card-sinergia flex-1 h-full rounded flex flex-col items-center justify-center"
+      <div className="card-sinergia flex-1 h-full rounded flex flex-col items-center justify-center"
         title={c.nome + ' (fixo aqui · right-click pra remover)'}
-        onContextMenu={handleContextMenu}
-      >
+        onContextMenu={handleContextMenu}>
         <span className="text-[10px] font-bold text-yellow-400/70 leading-none">{iniciais(c.nome)}</span>
         <span className="text-[7px] text-yellow-400/50 mt-0.5">{primeiroNome(c.nome)}</span>
       </div>
@@ -864,11 +677,9 @@ export default function LinhaPage() {
     const b = getBancada(linha, lado, posicao);
     if (!b) {
       return (
-        <div
-          onClick={() => criarBancadaGM(linha, lado, posicao)}
+        <div onClick={() => criarBancadaGM(linha, lado, posicao)}
           className="w-[140px] h-[78px] border-2 border-dashed border-[#2a2a2a] rounded-md flex items-center justify-center cursor-pointer hover:border-yellow-500/40 hover:bg-yellow-500/5 transition"
-          title="Criar bancada GM"
-        >
+          title="Criar bancada GM">
           <span className="text-2xl text-[#3a3a3a]">+</span>
         </div>
       );
@@ -881,8 +692,7 @@ export default function LinhaPage() {
     const isErro = erroBancada === b.id;
     const isCategoria = b.tipo_principal === 'CATEGORIA';
     const isCompativel = (cardAtivo || draggingId) && bancadaCompativel(b);
-    const alturaClass = isCategoria 
-      ? (alocs.length > 0 || sinergias.length > 0 ? 'min-h-[78px]' : 'h-[78px]') : 'h-[78px]';
+    const alturaClass = isCategoria ? (alocs.length > 0 || sinergias.length > 0 ? 'min-h-[78px]' : 'h-[78px]') : 'h-[78px]';
     const classes = [
       'w-[140px]', alturaClass,
       'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200',
@@ -896,37 +706,27 @@ export default function LinhaPage() {
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setHoverBancada(b.id); }}
         onDragLeave={() => setHoverBancada(null)}
         onDrop={(e) => {
-          e.preventDefault();
-          setHoverBancada(null);
+          e.preventDefault(); setHoverBancada(null);
           const idDropped = e.dataTransfer.getData('text/plain') || draggingId;
           if (idDropped) alocarColab(idDropped, b);
         }}
         onClick={() => { if (cardAtivo && bancadaCompativel(b)) alocarColab(cardAtivo, b); }}
         className={classes}
-        style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}
-      >
+        style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}>
         <div className="flex items-center justify-between px-1.5 pt-0.5 pb-0">
           <div className="flex items-center gap-1 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.text + ' uppercase tracking-wider'}>{b.tipo_principal}</span>
             {b.subtipo && <span className="text-[8px] text-purple-300/70 truncate">· {b.subtipo}</span>}
-            {isCategoria && alocs.length > 0 && (
-              <span className="text-[8px] text-gray-500 ml-0.5">({alocs.length})</span>
-            )}
+            {isCategoria && alocs.length > 0 && (<span className="text-[8px] text-gray-500 ml-0.5">({alocs.length})</span>)}
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
             {b.tipo_principal === 'CATEGORIA' && (
-              <button
-                onClick={(e) => { e.stopPropagation(); abrirModalEditarSubtipo(b); }}
-                className="text-gray-600 hover:text-white text-[9px] leading-none"
-                title="Editar sub-tipo"
-              >✏️</button>
+              <button onClick={(e) => { e.stopPropagation(); abrirModalEditarSubtipo(b); }}
+                className="text-gray-600 hover:text-white text-[9px] leading-none" title="Editar sub-tipo">✏️</button>
             )}
             {!b.fixo_categoria && (
-              <button
-                onClick={(e) => { e.stopPropagation(); limparBancada(b); }}
-                className="text-gray-600 hover:text-red-400 text-[10px] leading-none"
-                title="Limpar"
-              >×</button>
+              <button onClick={(e) => { e.stopPropagation(); limparBancada(b); }}
+                className="text-gray-600 hover:text-red-400 text-[10px] leading-none" title="Limpar">×</button>
             )}
           </div>
         </div>
@@ -956,24 +756,12 @@ export default function LinhaPage() {
   }
 
   function Esteira() {
-    return (
-      <div
-        className="w-[44px] mx-1 rounded-sm border border-[#444]"
-        style={{
-          minHeight: ALTURA_COLUNA + 'px',
-          background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)',
-        }}
-        aria-hidden="true"
-      />
-    );
+    return (<div className="w-[44px] mx-1 rounded-sm border border-[#444]" style={{ minHeight: ALTURA_COLUNA + 'px', background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)' }} aria-hidden="true" />);
   }
 
   function ColunaBancadas({ linha, lado, qtd, alinharFundo = false }: { linha: number; lado: string; qtd: number; alinharFundo?: boolean }) {
     return (
-      <div
-        className={'flex flex-col gap-2 ' + (alinharFundo ? 'justify-end' : 'justify-start')}
-        style={{ minHeight: ALTURA_COLUNA + 'px' }}
-      >
+      <div className={'flex flex-col gap-2 ' + (alinharFundo ? 'justify-end' : 'justify-start')} style={{ minHeight: ALTURA_COLUNA + 'px' }}>
         {Array.from({ length: qtd }, (_, i) => (
           <SlotBancada key={linha + '-' + lado + '-' + (i + 1)} linha={linha} lado={lado} posicao={i + 1} />
         ))}
@@ -1005,32 +793,21 @@ export default function LinhaPage() {
     return (
       <div className="flex flex-col items-center gap-1 mb-2">
         {editando ? (
-          <input
-            autoFocus type="text" maxLength={30}
-            value={nomeTemp}
+          <input autoFocus type="text" maxLength={30} value={nomeTemp}
             onChange={(e) => setNomeTemp(e.target.value)}
             onBlur={() => { if (nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim()); else setEditandoLinha(null); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim());
-              if (e.key === 'Escape') setEditandoLinha(null);
-            }}
-            className="nome-linha-input"
-          />
+            onKeyDown={(e) => { if (e.key === 'Enter' && nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim()); if (e.key === 'Escape') setEditandoLinha(null); }}
+            className="nome-linha-input" />
         ) : (
-          <span
-            className="nome-linha-display text-[11px] text-gray-400 font-bold uppercase tracking-widest"
-            onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }}
-            title="Click pra editar"
-          >{nome} 🖊️</span>
+          <span className="nome-linha-display text-[11px] text-gray-400 font-bold uppercase tracking-widest"
+            onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }} title="Click pra editar">{nome} 🖊️</span>
         )}
         {ritmoLinha.totalAtivos > 0 ? (
           <div className="bg-[#0f0f0f] border border-[#2a2a2a] rounded-md px-3 py-1.5 flex items-center gap-2 ritmo-linha-pulse">
             <span className="text-[10px] text-gray-500 font-bold">RITMO:</span>
             <span className={'text-base font-black ' + corLinha.texto}>{ritmoLinha.pctMedio}%</span>
             <span className="text-sm">{corLinha.emoji}</span>
-            {ritmoLinha.mediaLiquida > 0 && (
-              <span className="text-[9px] text-gray-500">· {ritmoLinha.mediaLiquida} pç/h</span>
-            )}
+            {ritmoLinha.mediaLiquida > 0 && (<span className="text-[9px] text-gray-500">· {ritmoLinha.mediaLiquida} pç/h</span>)}
             <div className="flex items-center gap-1 ml-1 pl-2 border-l border-[#2a2a2a]">
               {ritmoLinha.supera > 0 && <span className="text-[10px] text-green-400">🟢 {ritmoLinha.supera}</span>}
               {ritmoLinha.alinhado > 0 && <span className="text-[10px] text-blue-400">🔵 {ritmoLinha.alinhado}</span>}
@@ -1039,9 +816,7 @@ export default function LinhaPage() {
             </div>
           </div>
         ) : (
-          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md px-3 py-1 text-[9px] text-gray-600 italic">
-            Sem colabs alocados
-          </div>
+          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md px-3 py-1 text-[9px] text-gray-600 italic">Sem colabs alocados</div>
         )}
       </div>
     );
@@ -1052,6 +827,7 @@ export default function LinhaPage() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
+      
       <header className="border-b border-[#1a1a1a] px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-bold">
@@ -1060,33 +836,22 @@ export default function LinhaPage() {
           </h1>
           <span className="text-[10px] text-gray-500">{new Date().toLocaleDateString('pt-BR')}</span>
           <span className="text-[10px] text-gray-500">· Metas: {metas.p2m_base}-{metas.p2m_alinhado_max}</span>
-          {cardAtivo && (
-            <span className="text-[10px] text-yellow-400 font-bold animate-pulse">
-              ✨ Card ativado · click na bancada (ESC pra cancelar)
-            </span>
-          )}
+          {cardAtivo && (<span className="text-[10px] text-yellow-400 font-bold animate-pulse">✨ Card ativado · click na bancada (ESC)</span>)}
         </div>
         <div className="flex items-center gap-2">
           <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleUploadCSV} className="hidden" />
-          <button
-            onClick={() => setModalRotacao(true)}
-            disabled={rotacionando}
-            className="bg-purple-500/10 border border-purple-500/50 text-purple-300 text-xs px-3 py-1.5 rounded hover:bg-purple-500/20 transition disabled:opacity-50"
-          >🔄 Rotacionar</button>
-          <button
-            onClick={limparRitmos}
+          <button onClick={() => setModalRotacao(true)} disabled={rotacionando}
+            className="bg-purple-500/10 border border-purple-500/50 text-purple-300 text-xs px-3 py-1.5 rounded hover:bg-purple-500/20 transition disabled:opacity-50">🔄 Rotacionar</button>
+          <button onClick={limparRitmos}
             className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-2 py-1.5 rounded hover:bg-red-500/20 transition"
-            title="Limpar ritmos do dia"
-          >🧹 Limpar CSV</button>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition"
-          >↑ Upload Boletim</button>
+            title="Limpar ritmos do dia">🧹 Limpar CSV</button>
+          <button onClick={() => fileInputRef.current?.click()}
+            className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition">↑ Upload Boletim</button>
         </div>
       </header>
-      {loading && (
-        <div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>
-      )}
+
+      {loading && (<div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>)}
+
       {!loading && (
         <div className={'flex gap-3 p-3 ' + (rotacionando ? 'canvas-rotacionando' : '')}>
           <aside className="w-[180px] flex-shrink-0">
@@ -1128,92 +893,86 @@ export default function LinhaPage() {
           </main>
         </div>
       )}
-      
+
+      {/* 🎨 TOAST CONTAINER (canto inferior direito) */}
+      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+        {toasts.map((t) => {
+          const corClass = t.tipo === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-300' :
+                          t.tipo === 'error' ? 'bg-red-500/20 border-red-500/50 text-red-300' :
+                          'bg-blue-500/20 border-blue-500/50 text-blue-300';
+          return (
+            <div key={t.id}
+              className={'toast-in ' + corClass + ' border rounded-lg px-4 py-2 text-xs font-medium shadow-xl backdrop-blur-sm min-w-[200px] max-w-[400px]'}>
+              {t.msg}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 🎨 MODAL DE CONFIRMAÇÃO CUSTOM */}
+      {confirmModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[90] p-4"
+          onClick={() => setConfirmModal(null)}>
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-sm w-full slide-in"
+            onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm text-white mb-4">{confirmModal.msg}</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmModal(null)}
+                className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">Cancelar</button>
+              <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }}
+                className="px-4 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition">Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL ROTAÇÃO */}
       {modalRotacao && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
-          onClick={() => setModalRotacao(false)}
-        >
-          <div
-            className="bg-[#1a1a1a] border border-purple-500/30 rounded-lg p-4 max-w-sm w-full"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setModalRotacao(false)}>
+          <div className="bg-[#1a1a1a] border border-purple-500/30 rounded-lg p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-sm font-bold text-purple-300 mb-3">🔄 Rotacionar</h2>
             <div className="space-y-2">
-              <button
-                onClick={() => aplicarRotacao(1)}
-                disabled={rotacionando}
-                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50"
-              >
+              <button onClick={() => aplicarRotacao(1)} disabled={rotacionando}
+                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
                 <div className="text-xs font-bold text-white mb-0.5">Rotação 1 · Sem Pesca</div>
                 <div className="text-[10px] text-gray-500">Esq sobe → Categoria → Dir desce</div>
               </button>
-              <button
-                onClick={() => aplicarRotacao(2)}
-                disabled={rotacionando}
-                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50"
-              >
+              <button onClick={() => aplicarRotacao(2)} disabled={rotacionando}
+                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
                 <div className="text-xs font-bold text-white mb-0.5">Rotação 2 · Com Pesca</div>
                 <div className="text-[10px] text-gray-500">Dupla atravessa: Pesca + Categoria</div>
               </button>
-              <button
-                onClick={() => aplicarRotacao(3)}
-                disabled={rotacionando}
-                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50"
-              >
+              <button onClick={() => aplicarRotacao(3)} disabled={rotacionando}
+                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
                 <div className="text-xs font-bold text-white mb-0.5">Rotação 3 · Nivelar Dia</div>
                 <div className="text-[10px] text-gray-500">Topo ↔ Último (mesmo lado)</div>
               </button>
             </div>
-            <button
-              onClick={() => setModalRotacao(false)}
-              disabled={rotacionando}
-              className="w-full mt-3 text-[10px] text-gray-500 hover:text-white transition py-1 disabled:opacity-50"
-            >Cancelar</button>
-            {rotacionando && (
-              <div className="text-center text-[10px] text-purple-400 mt-2 animate-pulse">Rotacionando...</div>
-            )}
+            <button onClick={() => setModalRotacao(false)} disabled={rotacionando}
+              className="w-full mt-3 text-[10px] text-gray-500 hover:text-white transition py-1 disabled:opacity-50">Cancelar</button>
+            {rotacionando && (<div className="text-center text-[10px] text-purple-400 mt-2 animate-pulse">Rotacionando...</div>)}
           </div>
         </div>
       )}
-      
+
       {/* MODAL EDITAR CATEGORIA */}
       {modal && modal.bancadaExistente && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
-          onClick={fecharModal}
-        >
-          <div
-            className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-md w-full"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={fecharModal}>
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-base font-bold text-white mb-1">Editar Categoria</h2>
             <p className="text-xs text-gray-500 mb-4">Linha {modal.linha} · Zona Central</p>
             <div className="mb-4">
               <label className="text-xs text-gray-400 mb-1.5 block">Sub-tipo:</label>
               <div className="grid grid-cols-2 gap-2">
                 {SUBTIPOS_CATEGORIA.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setModalSubtipo(s)}
-                    className={
-                      'py-1.5 px-2 rounded text-xs font-medium border transition ' +
-                      (modalSubtipo === s
-                        ? 'border-purple-500 bg-purple-500/20 text-purple-300'
-                        : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')
-                    }
-                  >{s}</button>
+                  <button key={s} onClick={() => setModalSubtipo(s)}
+                    className={'py-1.5 px-2 rounded text-xs font-medium border transition ' + (modalSubtipo === s ? 'border-purple-500 bg-purple-500/20 text-purple-300' : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')}>{s}</button>
                 ))}
               </div>
             </div>
             <div className="flex gap-2 justify-end pt-2 border-t border-[#2a2a2a]">
-              <button onClick={fecharModal} className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">
-                Cancelar
-              </button>
-              <button onClick={salvarModal} className="px-4 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition">
-                Salvar
-              </button>
+              <button onClick={fecharModal} className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">Cancelar</button>
+              <button onClick={salvarModal} className="px-4 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition">Salvar</button>
             </div>
           </div>
         </div>
