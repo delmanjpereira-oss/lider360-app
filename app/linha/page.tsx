@@ -66,6 +66,13 @@ function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
   return { status: 'supera' as const, texto: 'text-green-400', borda: 'border-green-500/50', bg: 'bg-green-500/10', emoji: '🟢', label: 'Supera' };
 }
 
+function corRitmoLinha(pctMedio: number, metas: MetasConfig) {
+  if (pctMedio === 0) return { texto: 'text-gray-400', emoji: '⚪', label: 'Sem dados' };
+  const liquidaEquivalente = (pctMedio / 100) * metas.p2m_base;
+  const cor = corPorMeta(liquidaEquivalente, metas);
+  return { texto: cor.texto, emoji: cor.emoji, label: cor.label };
+}
+
 function iniciais(nome: string) {
   const partes = nome.trim().split(/\s+/);
   if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
@@ -95,7 +102,7 @@ const STYLES = `
     50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0), 0 0 30px rgba(34, 197, 94, 0.5); border-color: rgba(34, 197, 94, 1) !important; }
   }
   @keyframes successFlash {
-    0% { background: rgba(34, 197, 94, 0.4); box-shadow: 0 0 20px rgba(34, 197, 94, 0.8); }
+    0% { background: rgba(34, 197, 94, 0.4); }
     50% { background: rgba(34, 197, 94, 0.15); }
     100% { background: transparent; }
   }
@@ -115,6 +122,16 @@ const STYLES = `
   @keyframes slideIn {
     from { opacity: 0; transform: scale(0.9); }
     to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes pulseLine {
+    0%, 100% { opacity: 0.8; }
+    50% { opacity: 1; }
+  }
+  @keyframes rotacionando {
+    0% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); }
+    30% { opacity: 0.3; transform: scale(0.85) rotate(-3deg); filter: blur(2px); }
+    60% { opacity: 0.3; transform: scale(0.85) rotate(3deg); filter: blur(2px); }
+    100% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); }
   }
   .card-ativo {
     animation: pulseGold 1.2s ease-in-out infinite !important;
@@ -170,6 +187,8 @@ const STYLES = `
   .nome-linha-display:hover { background: rgba(255, 215, 0, 0.1); color: #FFD700; }
   .badge-fixo { animation: synergyGlow 2s ease-in-out infinite; }
   .slide-in { animation: slideIn 0.3s ease-out; }
+  .ritmo-linha-pulse { animation: pulseLine 2s ease-in-out infinite; }
+  .canvas-rotacionando * { animation: rotacionando 0.6s ease-in-out !important; }
 `;
 
 export default function LinhaPage() {
@@ -189,13 +208,15 @@ export default function LinhaPage() {
   const [erroBancada, setErroBancada] = useState<number | null>(null);
   const [modal, setModal] = useState<{ linha: number; lado: string; posicao: number; bancadaExistente?: Bancada } | null>(null);
   const [modalSubtipo, setModalSubtipo] = useState<string>('');
+  const [modalRotacao, setModalRotacao] = useState(false);
+  const [rotacionando, setRotacionando] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { carregarTudo(); }, []);
 
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') { setCardAtivo(null); setDraggingId(null); }
+      if (e.key === 'Escape') { setCardAtivo(null); setDraggingId(null); setModalRotacao(false); }
     }
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
@@ -278,6 +299,15 @@ export default function LinhaPage() {
     })));
   }
 
+  async function limparRitmos() {
+    if (!confirm('Limpar TODOS os ritmos do dia? Os cards vão ficar sem cor até subir CSV novo.')) return;
+    const hoje = new Date().toISOString().split('T')[0];
+    const { error } = await supabase.from('ritmo_atual').delete().eq('data_referencia', hoje);
+    if (error) { alert('Erro: ' + error.message); return; }
+    alert('✅ Ritmos limpos.');
+    await carregarRitmos();
+  }
+
   async function handleUploadCSV(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -354,56 +384,30 @@ export default function LinhaPage() {
     await Promise.all([carregarBancadas(), carregarAlocacoes()]);
   }
 
-  // ============================================================
-  // 🆕 ALOCAR COLAB - LÓGICA CORRIGIDA
-  // ============================================================
   async function alocarColab(idGroot: string, bancada: Bancada) {
     const hoje = new Date().toISOString().split('T')[0];
-    
-    // Conta SÓ alocações reais (não sinergias) na bancada destino
     const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
     const maxColabs = maxColabsPorTipo(bancada.tipo_principal);
-    
     if (atuais.length >= maxColabs) {
       setErroBancada(bancada.id);
       setTimeout(() => setErroBancada(null), 400);
       return;
     }
-    
-    // Pega alocação atual do colab que está sendo movido
     const alocAtual = alocacoes.find((a) => a.id_groot === idGroot);
-    
-    // Determina bancada_fixa_id:
     let bancadaFixaId: number | null = null;
     if (alocAtual?.bancada_fixa_id) {
-      // Já é fixo de outra bancada - PRESERVA o vínculo
       bancadaFixaId = alocAtual.bancada_fixa_id;
     } else if (tipoEFixoAutomatico(bancada.tipo_principal)) {
-      // Primeira vez em GM ou PESCA - vira fixo dessa bancada
       bancadaFixaId = bancada.id;
     }
-    
-    // Determina tipo_alocacao:
     let tipoAlocacao = 'fixo';
-    if (bancadaFixaId && bancadaFixaId !== bancada.id) {
-      // É fixo em outra bancada e tá indo pra esta → TEMPORÁRIO
-      tipoAlocacao = 'temporario';
-    }
-    
-    // Remove alocação anterior
+    if (bancadaFixaId && bancadaFixaId !== bancada.id) tipoAlocacao = 'temporario';
     await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot).eq('data_referencia', hoje);
-    
-    // Cria nova
     const { error } = await supabase.from('layout_alocacao').insert({
-      bancada_id: bancada.id,
-      id_groot: idGroot,
-      tipo_alocacao: tipoAlocacao,
-      bancada_fixa_id: bancadaFixaId,
-      data_referencia: hoje,
+      bancada_id: bancada.id, id_groot: idGroot,
+      tipo_alocacao: tipoAlocacao, bancada_fixa_id: bancadaFixaId, data_referencia: hoje,
     });
-    
     if (error) { alert('Erro: ' + error.message); return; }
-    
     setEncaixeBancada(bancada.id);
     setTimeout(() => setEncaixeBancada(null), 500);
     setCardAtivo(null);
@@ -411,51 +415,241 @@ export default function LinhaPage() {
     await carregarAlocacoes();
   }
 
-  // ============================================================
-  // 🆕 REMOVER COLAB - lógica corrigida
-  // Só quando volta pra SIDEBAR remove o fixo
-  // ============================================================
   async function removerColab(alocId: number) {
-    // Aqui SEMPRE remove o registro completo (volta pra sidebar)
-    // Isso significa: "saiu do mapeamento" → perdeu o fixo
     const { error } = await supabase.from('layout_alocacao').delete().eq('id', alocId);
     if (error) { alert('Erro: ' + error.message); return; }
     await carregarAlocacoes();
   }
 
-  // Voltar colab pra bancada fixa dele (click na sinergia)
-  // ATENÇÃO: agora isso só funciona pelo ÍCONE específico de "voltar"
-  // não automático quando alguém arrasta pra lá
-  async function voltarParaBancadaFixa(idGroot: string, bancadaFixaId: number) {
-    const bancadaFixa = bancadas.find((b) => b.id === bancadaFixaId);
-    if (!bancadaFixa) return;
-    
-    // Verifica se a bancada fixa tem espaço
-    const atuais = alocacoes.filter((a) => a.bancada_id === bancadaFixaId && a.id_groot !== idGroot);
-    const maxColabs = maxColabsPorTipo(bancadaFixa.tipo_principal);
-    
-    if (atuais.length >= maxColabs) {
-      alert('Bancada fixa cheia (' + atuais.length + '/' + maxColabs + '). Remova alguém primeiro.');
-      return;
-    }
-    
-    await alocarColab(idGroot, bancadaFixa);
-  }
-
-  // Remove marca de fixo (right-click na sinergia)
   async function removerFixo(idGroot: string) {
     const aloc = alocacoes.find((a) => a.id_groot === idGroot);
     if (!aloc) return;
-    const { error } = await supabase.from('layout_alocacao').update({ 
-      bancada_fixa_id: null, 
-      tipo_alocacao: 'fixo'  // se era temporário, vira fixo do lugar atual
-    }).eq('id', aloc.id);
+    const { error } = await supabase.from('layout_alocacao').update({ bancada_fixa_id: null, tipo_alocacao: 'fixo' }).eq('id', aloc.id);
     if (error) { alert('Erro: ' + error.message); return; }
     await carregarAlocacoes();
   }
 
+  // ============================================================
+  // 🆕 ROTAÇÃO - HELPERS
+  // ============================================================
+  
   function getBancada(linha: number, lado: string, posicao: number) {
     return bancadas.find((b) => b.zona === ZONA && b.linha === linha && b.lado === lado && b.posicao === posicao);
+  }
+
+  function getCicloLinha(linha: number, comPesca: boolean): Bancada[] {
+    // Ordem da rotação (esq sobe → topo → cat/pesca → dir desce → volta)
+    const ciclo: Bancada[] = [];
+    
+    // Esquerda do bottom (posição maior) pra cima (posição 1)
+    const qtdEsq = linha === 1 ? LAYOUT.L1_ESQ : LAYOUT.L2_ESQ;
+    for (let p = qtdEsq; p >= 1; p--) {
+      const b = getBancada(linha, 'esquerdo', p);
+      if (b && b.tipo_principal === 'GM') ciclo.push(b);
+    }
+    
+    // Atravessa pela Categoria (e Pesca se aplicável)
+    const cat = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'CATEGORIA');
+    const pesca = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'PESCA');
+    
+    if (comPesca && pesca) ciclo.push(pesca);
+    if (cat) ciclo.push(cat);
+    
+    // Direita do topo (posição 1) pra baixo
+    const qtdDir = linha === 1 ? LAYOUT.L1_DIR : LAYOUT.L2_DIR;
+    for (let p = 1; p <= qtdDir; p++) {
+      const b = getBancada(linha, 'direito', p);
+      if (b && b.tipo_principal === 'GM') ciclo.push(b);
+    }
+    
+    return ciclo;
+  }
+
+  async function getHistoricoPesca(idGroot: string, linha: number): Promise<number> {
+    const { data } = await supabase
+      .from('rotacao_pesca_historico')
+      .select('id')
+      .eq('id_groot', idGroot)
+      .eq('linha', linha);
+    return (data || []).length;
+  }
+
+  async function registrarPesca(idGroot: string, linha: number) {
+    await supabase.from('rotacao_pesca_historico').insert({
+      id_groot: idGroot, linha,
+      data_pesca: new Date().toISOString().split('T')[0],
+    });
+  }
+
+  async function aplicarRotacao(tipo: 1 | 2 | 3) {
+    setRotacionando(true);
+    
+    try {
+      if (tipo === 3) {
+        // ROTAÇÃO 3: nivelar (topo ↔ último em cada lado de cada linha)
+        await rotacaoNivelar();
+      } else {
+        // ROTAÇÃO 1 ou 2: ciclo circular
+        await rotacaoCiclo(tipo === 2);
+      }
+      
+      await carregarAlocacoes();
+      
+      // Pausa pra animação
+      await new Promise(r => setTimeout(r, 600));
+      
+      alert('✅ Rotação ' + tipo + ' aplicada!');
+    } catch (err: any) {
+      alert('Erro: ' + err.message);
+    } finally {
+      setRotacionando(false);
+      setModalRotacao(false);
+    }
+  }
+
+  async function rotacaoCiclo(comPesca: boolean) {
+    const hoje = new Date().toISOString().split('T')[0];
+    
+    for (const linha of [1, 2]) {
+      const ciclo = getCicloLinha(linha, comPesca);
+      if (ciclo.length === 0) continue;
+      
+      // Mapeia: posicao no ciclo → alocações atuais nessa bancada
+      const ocupantes: Array<{ bancada: Bancada; alocs: Alocacao[] }> = ciclo.map((b) => ({
+        bancada: b,
+        alocs: alocacoes.filter((a) => a.bancada_id === b.id),
+      }));
+      
+      // Move cada ocupante pra próxima posição (circular)
+      const novasAlocacoes: Array<{ id_groot: string; bancada_id: number; bancada_fixa_id: number | null; tipo: string }> = [];
+      
+      for (let i = 0; i < ocupantes.length; i++) {
+        const proximaIdx = (i + 1) % ocupantes.length;
+        const proximaBancada = ocupantes[proximaIdx].bancada;
+        
+        for (const aloc of ocupantes[i].alocs) {
+          // Preserva fixo se for GM/PESCA, atualiza se mudou de tipo
+          let novoFixoId = aloc.bancada_fixa_id;
+          let novoTipo = 'fixo';
+          
+          if (tipoEFixoAutomatico(proximaBancada.tipo_principal)) {
+            // Se vai pra GM/PESCA: se não tinha fixo, ganha fixo nova
+            if (!novoFixoId) novoFixoId = proximaBancada.id;
+            if (novoFixoId === proximaBancada.id) novoTipo = 'fixo';
+            else novoTipo = 'temporario';
+          } else {
+            // Vai pra Categoria: temporário se tem fixo em outro lugar
+            if (novoFixoId && novoFixoId !== proximaBancada.id) novoTipo = 'temporario';
+          }
+          
+          // Se a próxima bancada é PESCA na rotação 2 e tem 2 colabs, decide quem vai
+          // (lógica de alternância é aplicada antes - aqui é simples passagem)
+          
+          novasAlocacoes.push({
+            id_groot: aloc.id_groot,
+            bancada_id: proximaBancada.id,
+            bancada_fixa_id: novoFixoId,
+            tipo: novoTipo,
+          });
+        }
+      }
+      
+      // ROTAÇÃO 2: ajusta quem vai pra PESCA vs CATEGORIA (alternância)
+      if (comPesca) {
+        const idxPesca = ciclo.findIndex((b) => b.tipo_principal === 'PESCA');
+        const idxCat = ciclo.findIndex((b) => b.tipo_principal === 'CATEGORIA');
+        
+        if (idxPesca >= 0 && idxCat >= 0) {
+          // Quem está indo PRA pesca/categoria
+          const indoParaPesca = novasAlocacoes.filter((n) => n.bancada_id === ciclo[idxPesca].id);
+          const indoParaCat = novasAlocacoes.filter((n) => n.bancada_id === ciclo[idxCat].id);
+          
+          // Junta os 2 grupos e redistribui baseado em histórico
+          const candidatos = [...indoParaPesca, ...indoParaCat];
+          if (candidatos.length === 2) {
+            // Dupla - decide quem vai pra pesca
+            const c1 = candidatos[0];
+            const c2 = candidatos[1];
+            const v1 = await getHistoricoPesca(c1.id_groot, linha);
+            const v2 = await getHistoricoPesca(c2.id_groot, linha);
+            
+            // Quem foi MENOS vezes vai pra pesca
+            let paraPesca: typeof c1, paraCat: typeof c2;
+            if (v1 < v2) { paraPesca = c1; paraCat = c2; }
+            else if (v2 < v1) { paraPesca = c2; paraCat = c1; }
+            else { paraPesca = Math.random() < 0.5 ? c1 : c2; paraCat = paraPesca === c1 ? c2 : c1; }
+            
+            paraPesca.bancada_id = ciclo[idxPesca].id;
+            paraCat.bancada_id = ciclo[idxCat].id;
+            
+            // Registra no histórico
+            await registrarPesca(paraPesca.id_groot, linha);
+          }
+        }
+      }
+      
+      // Aplica no banco: deleta todas as alocações da linha e recria
+      const bancadasLinhaIds = ciclo.map((b) => b.id);
+      
+      // Pega ids das alocações a serem removidas
+      const alocsParaRemover = alocacoes.filter((a) => bancadasLinhaIds.includes(a.bancada_id));
+      
+      for (const aloc of alocsParaRemover) {
+        await supabase.from('layout_alocacao').delete().eq('id', aloc.id);
+      }
+      
+      // Cria as novas
+      if (novasAlocacoes.length > 0) {
+        await supabase.from('layout_alocacao').insert(
+          novasAlocacoes.map((n) => ({
+            bancada_id: n.bancada_id,
+            id_groot: n.id_groot,
+            tipo_alocacao: n.tipo,
+            bancada_fixa_id: n.bancada_fixa_id,
+            data_referencia: hoje,
+          }))
+        );
+      }
+    }
+  }
+
+  async function rotacaoNivelar() {
+    // Troca topo (#1) com último (#max) em cada lado de cada linha (só GM)
+    const hoje = new Date().toISOString().split('T')[0];
+    
+    for (const linha of [1, 2]) {
+      for (const lado of ['esquerdo', 'direito']) {
+        const qtd = linha === 1 
+          ? (lado === 'esquerdo' ? LAYOUT.L1_ESQ : LAYOUT.L1_DIR)
+          : (lado === 'esquerdo' ? LAYOUT.L2_ESQ : LAYOUT.L2_DIR);
+        
+        if (qtd < 2) continue;
+        
+        const bTopo = getBancada(linha, lado, 1);
+        const bUltimo = getBancada(linha, lado, qtd);
+        
+        if (!bTopo || !bUltimo) continue;
+        if (bTopo.tipo_principal !== 'GM' || bUltimo.tipo_principal !== 'GM') continue;
+        
+        const alocsTopo = alocacoes.filter((a) => a.bancada_id === bTopo.id);
+        const alocsUltimo = alocacoes.filter((a) => a.bancada_id === bUltimo.id);
+        
+        // Troca: alocações de topo viram último e vice-versa
+        for (const a of alocsTopo) {
+          await supabase.from('layout_alocacao').update({
+            bancada_id: bUltimo.id,
+            bancada_fixa_id: a.bancada_fixa_id === bTopo.id ? bUltimo.id : a.bancada_fixa_id,
+          }).eq('id', a.id);
+        }
+        
+        for (const a of alocsUltimo) {
+          await supabase.from('layout_alocacao').update({
+            bancada_id: bTopo.id,
+            bancada_fixa_id: a.bancada_fixa_id === bUltimo.id ? bTopo.id : a.bancada_fixa_id,
+          }).eq('id', a.id);
+        }
+      }
+    }
   }
 
   function getAlocacoesBancada(bancadaId: number) {
@@ -471,7 +665,6 @@ export default function LinhaPage() {
     return colabs.filter((c) => !alocadosIds.has(c.id_groot));
   }
 
-  // Sinergias = colabs cuja bancada_fixa_id é esta MAS estão em outro lugar
   function sinergiasDe(bancadaId: number) {
     return alocacoes.filter((a) => a.bancada_fixa_id === bancadaId && a.bancada_id !== bancadaId);
   }
@@ -485,9 +678,34 @@ export default function LinhaPage() {
     return atuais.length < maxColabsPorTipo(bancada.tipo_principal);
   }
 
+  function calcularRitmoLinha(linha: number) {
+    const bancadasLinha = bancadas.filter((b) => b.linha === linha);
+    const bancadasIds = new Set(bancadasLinha.map((b) => b.id));
+    const alocsLinha = alocacoes.filter((a) => bancadasIds.has(a.bancada_id));
+    const liquidas: number[] = [];
+    let supera = 0, alinhado = 0, ofensor = 0, semDado = 0;
+    alocsLinha.forEach((a) => {
+      const ritmo = ritmos[a.id_groot];
+      const liq = ritmo?.liquida;
+      if (liq == null || liq === 0) { semDado++; return; }
+      liquidas.push(liq);
+      if (liq < metas.p2m_base) ofensor++;
+      else if (liq <= metas.p2m_alinhado_max) alinhado++;
+      else supera++;
+    });
+    const totalAtivos = alocsLinha.length;
+    if (liquidas.length === 0) {
+      return { pctMedio: 0, mediaLiquida: 0, totalAtivos, supera: 0, alinhado: 0, ofensor: 0, semDado };
+    }
+    const mediaLiquida = liquidas.reduce((a, b) => a + b, 0) / liquidas.length;
+    const pctMedio = Math.round((mediaLiquida / metas.p2m_base) * 100);
+    return { pctMedio, mediaLiquida: Math.round(mediaLiquida), totalAtivos, supera, alinhado, ofensor, semDado };
+  }
+
   // ============================================================
-  // CARD COLAB SIDEBAR
+  // COMPONENTES
   // ============================================================
+  
   function CardColabSidebar({ c }: { c: Colaborador }) {
     const ritmo = ritmos[c.id_groot];
     const cor = corPorMeta(ritmo?.liquida, metas);
@@ -509,7 +727,7 @@ export default function LinhaPage() {
           (isDragging ? ' card-arrastando' : '') +
           (isAtivo ? ' card-ativo' : '')
         }
-        title="Arrasta pra alocar | Double-click pra ativar e clicar na bancada"
+        title="Arrasta pra alocar | Double-click pra ativar"
       >
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -527,9 +745,6 @@ export default function LinhaPage() {
     );
   }
 
-  // ============================================================
-  // CARD COLAB NA BANCADA
-  // ============================================================
   function CardColabBancada({ aloc, expandido, bancadaAtual }: { aloc: Alocacao; expandido?: boolean; bancadaAtual: Bancada }) {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
@@ -540,7 +755,6 @@ export default function LinhaPage() {
     const eTemporario = aloc.tipo_alocacao === 'temporario';
     const isDragging = draggingId === aloc.id_groot;
     const isAtivo = cardAtivo === aloc.id_groot;
-
     const dragHandlers = {
       draggable: true,
       onDragStart: (e: React.DragEvent) => {
@@ -555,9 +769,7 @@ export default function LinhaPage() {
         setCardAtivo(isAtivo ? null : aloc.id_groot);
       },
     };
-
     const titulo = c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoAqui ? ' · fixo aqui' : '') + (eTemporario ? ' · temporário' : '');
-
     if (expandido) {
       return (
         <div
@@ -567,9 +779,7 @@ export default function LinhaPage() {
             'relative group ' + cor.borda + ' ' + cor.bg +
             ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in' +
             ' cursor-grab active:cursor-grabbing card-hover' +
-            (isDragging ? ' card-arrastando' : '') +
-            (isAtivo ? ' card-ativo' : '') +
-            (eTemporario ? ' card-temporario' : '')
+            (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')
           }
         >
           <div className="flex items-center gap-1.5 min-w-0">
@@ -580,19 +790,16 @@ export default function LinhaPage() {
           <div className="flex items-center gap-1 flex-shrink-0">
             {liquida != null && liquida > 0 ? (
               <span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>
-            ) : (
-              <span className="text-gray-600 text-[10px]">—</span>
-            )}
+            ) : (<span className="text-gray-600 text-[10px]">—</span>)}
             <button
               onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
               className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
-              title="Remover (volta pra sidebar)"
+              title="Remover"
             >×</button>
           </div>
         </div>
       );
     }
-
     return (
       <div
         {...dragHandlers}
@@ -601,9 +808,7 @@ export default function LinhaPage() {
           'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg +
           ' flex flex-col items-center justify-center transition-all slide-in' +
           ' cursor-grab active:cursor-grabbing card-hover' +
-          (isDragging ? ' card-arrastando' : '') +
-          (isAtivo ? ' card-ativo' : '') +
-          (eTemporario ? ' card-temporario' : '')
+          (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')
         }
       >
         {eFixoAqui && (
@@ -611,39 +816,29 @@ export default function LinhaPage() {
         )}
         {liquida != null && liquida > 0 ? (
           <span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>
-        ) : (
-          <span className="text-gray-600 text-sm">—</span>
-        )}
+        ) : (<span className="text-gray-600 text-sm">—</span>)}
         <span className="text-[7px] text-gray-500 mt-0.5">{primeiroNome(c.nome)}</span>
         <button
           onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
           className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
-          title="Remover (volta pra sidebar)"
+          title="Remover"
         >×</button>
       </div>
     );
   }
 
-  // ============================================================
-  // CARD SINERGIA - agora NÃO é interativo pra alocação
-  // Só pra info visual + right-click pra remover fixo
-  // ============================================================
   function CardSinergia({ aloc, expandido }: { aloc: Alocacao; expandido?: boolean }) {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
-    
     function handleContextMenu(e: React.MouseEvent) {
       e.preventDefault();
-      if (confirm('Remover marca de fixo de ' + c!.nome + '? Ele perderá o lugar reservado aqui.')) {
-        removerFixo(aloc.id_groot);
-      }
+      if (confirm('Remover marca de fixo de ' + c!.nome + '?')) removerFixo(aloc.id_groot);
     }
-    
     if (expandido) {
       return (
         <div
           className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2"
-          title={c.nome + ' (fixo aqui · right-click pra remover fixo)'}
+          title={c.nome + ' (fixo aqui · right-click pra remover)'}
           onContextMenu={handleContextMenu}
         >
           <div className="flex items-center gap-1.5 min-w-0">
@@ -656,7 +851,7 @@ export default function LinhaPage() {
     return (
       <div
         className="card-sinergia flex-1 h-full rounded flex flex-col items-center justify-center"
-        title={c.nome + ' (fixo aqui · right-click pra remover fixo)'}
+        title={c.nome + ' (fixo aqui · right-click pra remover)'}
         onContextMenu={handleContextMenu}
       >
         <span className="text-[10px] font-bold text-yellow-400/70 leading-none">{iniciais(c.nome)}</span>
@@ -687,8 +882,7 @@ export default function LinhaPage() {
     const isCategoria = b.tipo_principal === 'CATEGORIA';
     const isCompativel = (cardAtivo || draggingId) && bancadaCompativel(b);
     const alturaClass = isCategoria 
-      ? (alocs.length > 0 || sinergias.length > 0 ? 'min-h-[78px]' : 'h-[78px]') 
-      : 'h-[78px]';
+      ? (alocs.length > 0 || sinergias.length > 0 ? 'min-h-[78px]' : 'h-[78px]') : 'h-[78px]';
     const classes = [
       'w-[140px]', alturaClass,
       'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200',
@@ -699,11 +893,7 @@ export default function LinhaPage() {
     ].join(' ');
     return (
       <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          setHoverBancada(b.id);
-        }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setHoverBancada(b.id); }}
         onDragLeave={() => setHoverBancada(null)}
         onDrop={(e) => {
           e.preventDefault();
@@ -711,9 +901,7 @@ export default function LinhaPage() {
           const idDropped = e.dataTransfer.getData('text/plain') || draggingId;
           if (idDropped) alocarColab(idDropped, b);
         }}
-        onClick={() => {
-          if (cardAtivo && bancadaCompativel(b)) alocarColab(cardAtivo, b);
-        }}
+        onClick={() => { if (cardAtivo && bancadaCompativel(b)) alocarColab(cardAtivo, b); }}
         className={classes}
         style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}
       >
@@ -755,9 +943,7 @@ export default function LinhaPage() {
           </div>
         ) : (
           <div className="flex-1 flex gap-1 px-1 pb-1 pt-0.5">
-            {alocs.length === 0 && sinergias.length === 0 ? (
-              <div className="flex-1" />
-            ) : (
+            {alocs.length === 0 && sinergias.length === 0 ? (<div className="flex-1" />) : (
               <>
                 {alocs.map((a) => <CardColabBancada key={a.id} aloc={a} bancadaAtual={b} />)}
                 {sinergias.map((s) => <CardSinergia key={'syn-' + s.id} aloc={s} />)}
@@ -811,37 +997,53 @@ export default function LinhaPage() {
     );
   }
 
-  function NomeLinha({ linha }: { linha: number }) {
+  function HeaderLinha({ linha }: { linha: number }) {
     const nome = linha === 1 ? nomesLinhas.linha1 : nomesLinhas.linha2;
     const editando = editandoLinha === linha;
-    if (editando) {
-      return (
-        <input
-          autoFocus
-          type="text"
-          maxLength={30}
-          value={nomeTemp}
-          onChange={(e) => setNomeTemp(e.target.value)}
-          onBlur={() => {
-            if (nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim());
-            else setEditandoLinha(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim());
-            if (e.key === 'Escape') setEditandoLinha(null);
-          }}
-          className="nome-linha-input"
-        />
-      );
-    }
+    const ritmoLinha = calcularRitmoLinha(linha);
+    const corLinha = corRitmoLinha(ritmoLinha.pctMedio, metas);
     return (
-      <span
-        className="nome-linha-display text-[10px] text-gray-500 font-bold uppercase tracking-widest"
-        onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }}
-        title="Click pra editar"
-      >
-        {nome} 🖊️
-      </span>
+      <div className="flex flex-col items-center gap-1 mb-2">
+        {editando ? (
+          <input
+            autoFocus type="text" maxLength={30}
+            value={nomeTemp}
+            onChange={(e) => setNomeTemp(e.target.value)}
+            onBlur={() => { if (nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim()); else setEditandoLinha(null); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim());
+              if (e.key === 'Escape') setEditandoLinha(null);
+            }}
+            className="nome-linha-input"
+          />
+        ) : (
+          <span
+            className="nome-linha-display text-[11px] text-gray-400 font-bold uppercase tracking-widest"
+            onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }}
+            title="Click pra editar"
+          >{nome} 🖊️</span>
+        )}
+        {ritmoLinha.totalAtivos > 0 ? (
+          <div className="bg-[#0f0f0f] border border-[#2a2a2a] rounded-md px-3 py-1.5 flex items-center gap-2 ritmo-linha-pulse">
+            <span className="text-[10px] text-gray-500 font-bold">RITMO:</span>
+            <span className={'text-base font-black ' + corLinha.texto}>{ritmoLinha.pctMedio}%</span>
+            <span className="text-sm">{corLinha.emoji}</span>
+            {ritmoLinha.mediaLiquida > 0 && (
+              <span className="text-[9px] text-gray-500">· {ritmoLinha.mediaLiquida} pç/h</span>
+            )}
+            <div className="flex items-center gap-1 ml-1 pl-2 border-l border-[#2a2a2a]">
+              {ritmoLinha.supera > 0 && <span className="text-[10px] text-green-400">🟢 {ritmoLinha.supera}</span>}
+              {ritmoLinha.alinhado > 0 && <span className="text-[10px] text-blue-400">🔵 {ritmoLinha.alinhado}</span>}
+              {ritmoLinha.ofensor > 0 && <span className="text-[10px] text-red-400">🔴 {ritmoLinha.ofensor}</span>}
+              {ritmoLinha.semDado > 0 && <span className="text-[10px] text-gray-500">⚪ {ritmoLinha.semDado}</span>}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md px-3 py-1 text-[9px] text-gray-600 italic">
+            Sem colabs alocados
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -867,6 +1069,16 @@ export default function LinhaPage() {
         <div className="flex items-center gap-2">
           <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleUploadCSV} className="hidden" />
           <button
+            onClick={() => setModalRotacao(true)}
+            disabled={rotacionando}
+            className="bg-purple-500/10 border border-purple-500/50 text-purple-300 text-xs px-3 py-1.5 rounded hover:bg-purple-500/20 transition disabled:opacity-50"
+          >🔄 Rotacionar</button>
+          <button
+            onClick={limparRitmos}
+            className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-2 py-1.5 rounded hover:bg-red-500/20 transition"
+            title="Limpar ritmos do dia"
+          >🧹 Limpar CSV</button>
+          <button
             onClick={() => fileInputRef.current?.click()}
             className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition"
           >↑ Upload Boletim</button>
@@ -876,28 +1088,24 @@ export default function LinhaPage() {
         <div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>
       )}
       {!loading && (
-        <div className="flex gap-3 p-3">
+        <div className={'flex gap-3 p-3 ' + (rotacionando ? 'canvas-rotacionando' : '')}>
           <aside className="w-[180px] flex-shrink-0">
             <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md p-2">
               <div className="flex items-center justify-between mb-2 px-1">
                 <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">Livres</span>
                 <span className="text-[10px] text-gray-500">{livres.length}</span>
               </div>
-              <div className="text-[9px] text-gray-600 italic mb-2 px-1">
-                Arrasta ou double-click
-              </div>
+              <div className="text-[9px] text-gray-600 italic mb-2 px-1">Arrasta ou double-click</div>
               <div className="max-h-[calc(100vh-160px)] overflow-y-auto pr-1">
                 {livres.length === 0 ? (
                   <div className="text-[10px] text-gray-600 italic text-center py-4">Todos alocados</div>
-                ) : (
-                  livres.map((c) => <CardColabSidebar key={c.id_groot} c={c} />)
-                )}
+                ) : (livres.map((c) => <CardColabSidebar key={c.id_groot} c={c} />))}
               </div>
             </div>
           </aside>
           <main className="flex-1 flex gap-4 items-start justify-center overflow-x-auto">
             <section className="flex flex-col items-center">
-              <div className="mb-2"><NomeLinha linha={1} /></div>
+              <HeaderLinha linha={1} />
               <div className="flex gap-1 items-stretch">
                 <ColunaBancadas linha={1} lado="esquerdo" qtd={LAYOUT.L1_ESQ} />
                 <Esteira />
@@ -909,7 +1117,7 @@ export default function LinhaPage() {
               <ZonaCentral />
             </section>
             <section className="flex flex-col items-center">
-              <div className="mb-2"><NomeLinha linha={2} /></div>
+              <HeaderLinha linha={2} />
               <div className="flex gap-1 items-stretch">
                 <ColunaBancadas linha={2} lado="esquerdo" qtd={LAYOUT.L2_ESQ} alinharFundo />
                 <Esteira />
@@ -920,6 +1128,57 @@ export default function LinhaPage() {
           </main>
         </div>
       )}
+      
+      {/* MODAL ROTAÇÃO */}
+      {modalRotacao && (
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={() => setModalRotacao(false)}
+        >
+          <div
+            className="bg-[#1a1a1a] border border-purple-500/30 rounded-lg p-4 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-sm font-bold text-purple-300 mb-3">🔄 Rotacionar</h2>
+            <div className="space-y-2">
+              <button
+                onClick={() => aplicarRotacao(1)}
+                disabled={rotacionando}
+                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50"
+              >
+                <div className="text-xs font-bold text-white mb-0.5">Rotação 1 · Sem Pesca</div>
+                <div className="text-[10px] text-gray-500">Esq sobe → Categoria → Dir desce</div>
+              </button>
+              <button
+                onClick={() => aplicarRotacao(2)}
+                disabled={rotacionando}
+                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50"
+              >
+                <div className="text-xs font-bold text-white mb-0.5">Rotação 2 · Com Pesca</div>
+                <div className="text-[10px] text-gray-500">Dupla atravessa: Pesca + Categoria</div>
+              </button>
+              <button
+                onClick={() => aplicarRotacao(3)}
+                disabled={rotacionando}
+                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50"
+              >
+                <div className="text-xs font-bold text-white mb-0.5">Rotação 3 · Nivelar Dia</div>
+                <div className="text-[10px] text-gray-500">Topo ↔ Último (mesmo lado)</div>
+              </button>
+            </div>
+            <button
+              onClick={() => setModalRotacao(false)}
+              disabled={rotacionando}
+              className="w-full mt-3 text-[10px] text-gray-500 hover:text-white transition py-1 disabled:opacity-50"
+            >Cancelar</button>
+            {rotacionando && (
+              <div className="text-center text-[10px] text-purple-400 mt-2 animate-pulse">Rotacionando...</div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* MODAL EDITAR CATEGORIA */}
       {modal && modal.bancadaExistente && (
         <div
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
