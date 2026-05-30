@@ -225,7 +225,7 @@ export default function Sidebar() {
           </button>
           {aberta && (
             <Link href="/" className="flex items-center gap-2 flex-1 pr-3 py-3">
-              <span className="text-2xl">🦅</span>
+              <span className="text-2xl">🚀</span>
               <div>
                 <h1 className="text-lg font-black text-white">
                   LIDER <span className="text-[#FFD700]">360</span>
@@ -321,8 +321,8 @@ export default function Sidebar() {
             {/* FOOTER */}
             <div className="p-4 border-t border-[#2a2a2a]">
               <div className="text-[10px] text-gray-500">
-                <p>Delman Pereira</p>
-                <p>TL P2M · RC01</p>
+                <p>dev. Delman J. Pereira</p>
+                <p>Team Lider · RC01</p>
               </div>
             </div>
           </>
