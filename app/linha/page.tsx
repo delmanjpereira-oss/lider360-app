@@ -238,11 +238,12 @@ export default function LinhaPage() {
       if (linhas.length < 2) { toast('error', 'CSV vazio'); return; }
       const sep = linhas[0].includes(';') ? ';' : ',';
       const header = linhas[0].split(sep).map((h) => h.trim().toLowerCase().replace(/"/g, '').replace(/^\uFEFF/, ''));
-      const idxGroot = header.findIndex((h) => h.includes('groot') || h === 'id' || h === 'id_groot' || h === 'usuario' || h === 'matricula' || h.includes('id_colab'));
-      const idxNome = header.findIndex((h) => h === 'nome' || h.includes('nome') || h === 'colaborador');
-      const idxRitmo = header.findIndex((h) => h.includes('ritmo') || h.includes('pct') || h === '%' || h.includes('liquid') || h.includes('produtividade') || h === 'prod' || h === 'prod_liquida');
-      const idxUnid = header.findIndex((h) => h.includes('unid') || h.includes('qtd') || h.includes('quantidade') || h === 'pcs');
-      const idxHoras = header.findIndex((h) => h.includes('hora') || h === 'h' || h === 'tempo');
+      const idxGroot = header.findIndex((h) => h.includes('groot') || h === 'id' || h === 'id_groot' || h === 'usuario' || h === 'matricula' || h.includes('id_colab') || h.includes('representante'));
+      const idxNome = header.findIndex((h) => h === 'nome' || h.includes('nome') || h === 'colaborador' || h.includes('representante'));
+      const idxRitmo = header.findIndex((h) => h.includes('liquida sist') || h.includes('liquid') || h.includes('ritmo') || h.includes('pct') || h === '%' || h.includes('produtividade') || h === 'prod' || h === 'prod_liquida');
+      const idxUnid = header.findIndex((h) => h.includes('unidades') || h.includes('unid') || h.includes('qtd') || h.includes('quantidade') || h === 'pcs');
+      // Prioriza "tempo em processo" (efetivo real), fallback pra outras variações
+      const idxHoras = header.findIndex((h) => h.includes('tempo em processo') || h.includes('tempo efetivo') || h.includes('tempo_processo') || h.includes('tempo'));
       if (idxGroot === -1 || idxRitmo === -1) { toast('error', 'CSV inválido. Faltam colunas id_groot/ritmo'); return; }
       const hoje = new Date().toISOString().split('T')[0];
       const registros: any[] = [];
@@ -257,7 +258,18 @@ export default function LinhaPage() {
         const reg: any = { id_groot, ritmo_pct, data_referencia: hoje, hora_atualizacao: new Date().toISOString() };
         if (idxNome !== -1 && cols[idxNome]) reg.nome = cols[idxNome];
         if (idxUnid !== -1 && cols[idxUnid]) { const u = parseInt(cols[idxUnid].replace(/\./g, ''), 10); if (!isNaN(u)) reg.unidades = u; }
-        if (idxHoras !== -1 && cols[idxHoras]) { const h = parseFloat(cols[idxHoras].replace(',', '.')); if (!isNaN(h)) reg.horas = h; }
+        if (idxHoras !== -1 && cols[idxHoras]) {
+          const raw = cols[idxHoras].trim();
+          let h = 0;
+          if (raw.includes(':')) {
+            // HH:MM:SS → decimal
+            const parts = raw.split(':').map((p) => parseInt(p, 10) || 0);
+            h = (parts[0] || 0) + ((parts[1] || 0) / 60) + ((parts[2] || 0) / 3600);
+          } else {
+            h = parseFloat(raw.replace(',', '.'));
+          }
+          if (!isNaN(h) && h > 0) reg.horas = h;
+        }
         registros.push(reg);
       }
       if (registros.length === 0) { toast('error', 'Nenhum registro válido'); return; }
@@ -577,14 +589,31 @@ export default function LinhaPage() {
     
     const totalAtivos = alocsLinha.length;
     
+    // FALLBACK: se não tem unidades/horas, usa média das líquidas individuais
     if (totalHoras === 0) {
-      return { 
-        pctMedio: 0, pecasHora: 0, totalUnidades: 0, totalHoras: 0,
-        totalAtivos, supera, alinhado, ofensor, semDado 
+      const liquidas: number[] = [];
+      alocsLinha.forEach((a) => {
+        const ritmo = ritmos[a.id_groot];
+        if (ritmo?.liquida && ritmo.liquida > 0) liquidas.push(ritmo.liquida);
+      });
+      if (liquidas.length === 0) {
+        return { 
+          pctMedio: 0, pecasHora: 0, totalUnidades: 0, totalHoras: 0,
+          totalAtivos, supera, alinhado, ofensor, semDado 
+        };
+      }
+      const mediaLiq = liquidas.reduce((a, b) => a + b, 0) / liquidas.length;
+      const pctMedio = Math.round((mediaLiq / metas.p2m_base) * 100);
+      return {
+        pctMedio,
+        pecasHora: Math.round(mediaLiq),
+        totalUnidades: 0,
+        totalHoras: 0,
+        totalAtivos, supera, alinhado, ofensor, semDado
       };
     }
     
-    // 🎯 Ritmo = soma das peças / soma das horas
+    // 🎯 IDEAL: Ritmo = soma das peças / soma das horas (efetivas)
     const pecasHora = totalUnidades / totalHoras;
     const pctMedio = Math.round((pecasHora / metas.p2m_base) * 100);
     
