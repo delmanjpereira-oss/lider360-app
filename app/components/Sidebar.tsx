@@ -314,11 +314,13 @@ export default function Sidebar() {
       {/* MODAL: Criar/Editar atalho COM IA */}
       {(modalSlot !== null || modalEditar !== null) && (
         <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4"
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999 }}
           onClick={fecharModal}
         >
           <div
-            className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-sm w-full"
+            className="bg-[#1a1a1a] border-2 border-yellow-500/40 rounded-lg p-5 max-w-sm w-full shadow-2xl"
+            style={{ backgroundColor: '#1a1a1a', boxShadow: '0 25px 80px rgba(0,0,0,0.8)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-sm font-bold text-white mb-1">
@@ -374,7 +376,8 @@ export default function Sidebar() {
                 value={formNome}
                 onChange={(e) => setFormNome(e.target.value)}
                 placeholder="Ex: Mercado Livre, Dashboard, Gmail..."
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-3 py-2 text-sm text-white focus:border-yellow-500/50 focus:outline-none"
+                className="w-full border border-[#2a2a2a] rounded px-3 py-2 text-sm text-white focus:border-yellow-500/50 focus:outline-none"
+                style={{ backgroundColor: '#0a0a0a' }}
                 autoFocus
               />
             </div>
@@ -387,7 +390,8 @@ export default function Sidebar() {
                 onChange={(e) => setFormUrl(e.target.value)}
                 placeholder="https://meusite.com"
                 onKeyDown={(e) => { if (e.key === 'Enter') salvarAtalho(); }}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-3 py-2 text-xs text-white focus:border-yellow-500/50 focus:outline-none"
+                className="w-full border border-[#2a2a2a] rounded px-3 py-2 text-xs text-white focus:border-yellow-500/50 focus:outline-none"
+                style={{ backgroundColor: '#0a0a0a' }}
               />
             </div>
 
@@ -417,11 +421,13 @@ export default function Sidebar() {
       {/* MODAL: Confirmar remoção */}
       {confirmRemover && (
         <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-[110] p-4"
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 10000 }}
           onClick={() => setConfirmRemover(null)}
         >
           <div
-            className="bg-[#1a1a1a] border border-red-500/30 rounded-lg p-4 max-w-xs w-full"
+            className="bg-[#1a1a1a] border-2 border-red-500/50 rounded-lg p-4 max-w-xs w-full shadow-2xl"
+            style={{ backgroundColor: '#1a1a1a', boxShadow: '0 25px 80px rgba(0,0,0,0.8)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-sm text-white mb-3">Remover atalho <strong className="text-yellow-400">{confirmRemover.nome_curto}</strong>?</p>
@@ -441,7 +447,7 @@ export default function Sidebar() {
 
       {/* TOAST */}
       {toast && (
-        <div className="fixed bottom-4 right-4 z-[120]">
+        <div className="fixed bottom-4 right-4" style={{ zIndex: 10001 }}>
           <div className={
             'border rounded-lg px-4 py-2 text-xs font-medium shadow-xl backdrop-blur-sm min-w-[200px] ' +
             (toast.tipo === 'success'
