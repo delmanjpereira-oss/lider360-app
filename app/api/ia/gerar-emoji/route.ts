@@ -1,10 +1,11 @@
 // app/api/ia/gerar-emoji/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
+const MODELO = 'claude-haiku-4-5-20251001';
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,48 +15,53 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ emoji: '🔗' });
     }
     
-    const prompt = `Você é um gerador de emojis. Dado um nome de site/serviço e a URL, retorne APENAS UM emoji que melhor representa o site. Sem texto, sem explicação, APENAS o emoji.
-
-Exemplos:
-- "Mercado Livre" → 🛒
-- "GitHub" → 🐙
-- "Gmail" → 📧
-- "Dashboard de Vendas" → 📊
-- "Calendário Google" → 📅
-- "Drive" → 📁
-- "WhatsApp" → 💬
-- "YouTube" → ▶️
-- "Notion" → 📓
-- "Slack" → 💬
-- "Boletim de Notas" → 📋
-- "Site de Logística" → 🚚
-- "Painel Financeiro" → 💰
-- "Time RH" → 👥
-- "Mapa de Operação" → 🗺️
-
-Nome: ${nome.trim()}
-URL: ${url || 'não informada'}
-
-Responda APENAS com 1 emoji. Nada mais.`;
-
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 10,
-      messages: [{ role: 'user', content: prompt }],
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      console.error('ANTHROPIC_API_KEY não configurada');
+      return NextResponse.json({ emoji: '🔗' });
+    }
+    
+    const systemPrompt = 'Você é um gerador de emojis. Dado um nome de site/serviço e a URL, retorne APENAS UM emoji que melhor representa o site. Sem texto, sem explicação, APENAS o emoji.\n\nExemplos:\n- "Mercado Livre" -> 🛒\n- "GitHub" -> 🐙\n- "Gmail" -> 📧\n- "Dashboard de Vendas" -> 📊\n- "Calendário Google" -> 📅\n- "Drive" -> 📁\n- "WhatsApp" -> 💬\n- "YouTube" -> ▶️\n- "Notion" -> 📓\n- "Slack" -> 💬\n- "Boletim de Notas" -> 📋\n- "Site de Logística" -> 🚚\n- "Painel Financeiro" -> 💰\n- "Time RH" -> 👥\n- "Mapa de Operação" -> 🗺️\n- "Discord" -> 🎮\n- "Twitter X" -> 🐦\n- "Spotify" -> 🎵\n- "Linkedin" -> 💼\n\nResponda APENAS com 1 emoji. Nada mais.';
+    
+    const userMessage = 'Nome: ' + nome.trim() + '\nURL: ' + (url || 'não informada');
+    
+    const response = await fetch(ANTHROPIC_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: MODELO,
+        max_tokens: 10,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: userMessage },
+        ],
+      }),
     });
     
-    let emoji = '🔗';
-    if (message.content[0].type === 'text') {
-      const texto = message.content[0].text.trim();
-      // Pega o primeiro caracter (que deve ser o emoji)
-      // Usa Array.from pra lidar com emojis compostos (UTF-16)
-      const chars = Array.from(texto);
-      if (chars.length > 0) emoji = chars[0];
+    if (!response.ok) {
+      const txt = await response.text();
+      console.error('Anthropic erro:', response.status, txt.slice(0, 200));
+      return NextResponse.json({ emoji: '🔗' });
     }
+    
+    const data = await response.json();
+    
+    let texto = '';
+    if (Array.isArray(data?.content) && data.content[0]?.type === 'text') {
+      texto = String(data.content[0].text || '').trim();
+    }
+    
+    // Pega o primeiro caractere visual (emoji)
+    const chars = Array.from(texto);
+    const emoji = chars.length > 0 ? chars[0] : '🔗';
     
     return NextResponse.json({ emoji });
   } catch (error: any) {
-    console.error('Erro ao gerar emoji:', error);
-    return NextResponse.json({ emoji: '🔗', erro: error.message });
+    console.error('Erro ao gerar emoji:', error?.message || error);
+    return NextResponse.json({ emoji: '🔗' });
   }
 }
