@@ -315,7 +315,7 @@ export default function Sidebar() {
       {(modalSlot !== null || modalEditar !== null) && (
         <div
           className="fixed inset-0 flex items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999 }}
+          style={{ backgroundColor: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', zIndex: 9999 }}
           onClick={fecharModal}
         >
           <div
@@ -422,7 +422,7 @@ export default function Sidebar() {
       {confirmRemover && (
         <div
           className="fixed inset-0 flex items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 10000 }}
+          style={{ backgroundColor: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', zIndex: 10000 }}
           onClick={() => setConfirmRemover(null)}
         >
           <div
