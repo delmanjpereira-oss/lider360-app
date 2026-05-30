@@ -38,7 +38,7 @@ const MENU = [
 ];
 
 const SIDEBAR_STORAGE_KEY = 'lider360_sidebar_aberta';
-const TOTAL_SLOTS = 8;
+const TOTAL_SLOTS = 12;
 
 const STYLES = `
   @keyframes slideInSidebar {
@@ -52,6 +52,14 @@ const STYLES = `
   @keyframes toastIn {
     from { opacity: 0; transform: translateX(20px); }
     to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes spinAi {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  @keyframes pulseAi {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
   }
   .sidebar-transition {
     transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -86,6 +94,15 @@ const STYLES = `
   .toast-feedback {
     animation: toastIn 0.3s ease-out;
   }
+  .ai-spinner {
+    animation: spinAi 1s linear infinite;
+  }
+  .ai-pulse {
+    animation: pulseAi 1.5s ease-in-out infinite;
+  }
+  .emoji-preview {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
 `;
 
 export default function Sidebar() {
@@ -96,6 +113,9 @@ export default function Sidebar() {
   const [modalEditar, setModalEditar] = useState<Atalho | null>(null);
   const [formNome, setFormNome] = useState('');
   const [formUrl, setFormUrl] = useState('');
+  const [emojiPreview, setEmojiPreview] = useState('🔗');
+  const [gerandoEmoji, setGerandoEmoji] = useState(false);
+  const [emojiManual, setEmojiManual] = useState(false);
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null);
   const [confirmRemover, setConfirmRemover] = useState<Atalho | null>(null);
 
@@ -138,16 +158,56 @@ export default function Sidebar() {
     setAtalhos(data || []);
   }
 
+  // 🤖 GERA EMOJI VIA IA (debounce 800ms)
+  async function gerarEmojiIA(nome: string, url: string) {
+    if (!nome.trim() || nome.length < 2) {
+      setEmojiPreview('🔗');
+      return;
+    }
+    if (emojiManual) return; // Se TL escolheu manual, não sobrescreve
+    
+    setGerandoEmoji(true);
+    try {
+      const res = await fetch('/api/ia/gerar-emoji', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome, url }),
+      });
+      const data = await res.json();
+      if (data.emoji) setEmojiPreview(data.emoji);
+    } catch (err) {
+      console.error('Erro gerar emoji:', err);
+    } finally {
+      setGerandoEmoji(false);
+    }
+  }
+
+  // Debounce: espera 800ms parado pra gerar
+  useEffect(() => {
+    if (modalSlot === null && modalEditar === null) return;
+    if (emojiManual) return;
+    
+    const timer = setTimeout(() => {
+      gerarEmojiIA(formNome, formUrl);
+    }, 800);
+    
+    return () => clearTimeout(timer);
+  }, [formNome, formUrl, emojiManual]);
+
   function abrirModalNovo(slot: number) {
     setModalSlot(slot);
     setFormNome('');
     setFormUrl('');
+    setEmojiPreview('🔗');
+    setEmojiManual(false);
   }
 
   function abrirModalEditar(atalho: Atalho) {
     setModalEditar(atalho);
     setFormNome(atalho.nome_curto);
     setFormUrl(atalho.url);
+    setEmojiPreview(atalho.nome_curto);
+    setEmojiManual(true); // Já tem um, não auto-gera
   }
 
   function fecharModal() {
@@ -155,18 +215,35 @@ export default function Sidebar() {
     setModalEditar(null);
     setFormNome('');
     setFormUrl('');
+    setEmojiPreview('🔗');
+    setEmojiManual(false);
+    setGerandoEmoji(false);
+  }
+
+  // TL clica no preview pra trocar pra emoji manual digitado
+  function usarManual() {
+    setEmojiManual(true);
+    setEmojiPreview(formNome.substring(0, 4) || '🔗');
+  }
+
+  // Reseta pra usar IA novamente
+  function voltarParaIA() {
+    setEmojiManual(false);
+    gerarEmojiIA(formNome, formUrl);
   }
 
   async function salvarAtalho() {
-    if (!formNome.trim() || !formUrl.trim()) {
-      showToast('error', 'Preencha nome e URL');
+    if (!formUrl.trim()) {
+      showToast('error', 'Preencha a URL');
       return;
     }
     let urlFinal = formUrl.trim();
     if (!urlFinal.startsWith('http://') && !urlFinal.startsWith('https://')) {
       urlFinal = 'https://' + urlFinal;
     }
-    let nomeFinal = formNome.trim().substring(0, 4);
+    
+    // Usa o emoji do preview (IA OU manual)
+    const nomeFinal = emojiPreview.substring(0, 4);
 
     if (modalEditar) {
       const { error } = await supabase.from('atalhos_sidebar')
@@ -213,7 +290,6 @@ export default function Sidebar() {
         className={'sidebar-transition bg-[#0a0a0a] border-r border-[#2a2a2a] flex flex-col h-screen sticky top-0 ' + widthClass}
         style={{ overflow: 'hidden' }}
       >
-        {/* TOPO - Botão toggle + Logo */}
         <div className="border-b border-[#2a2a2a] flex items-center" style={{ minHeight: '76px' }}>
           <button
             onClick={() => setAberta(!aberta)}
@@ -236,7 +312,6 @@ export default function Sidebar() {
           )}
         </div>
 
-        {/* CONTEÚDO - só se aberta */}
         {aberta && (
           <>
             <nav className="sidebar-content flex-1 overflow-y-auto py-4">
@@ -276,11 +351,14 @@ export default function Sidebar() {
                 </div>
               ))}
 
-              {/* ATALHOS - Grid 4x2 */}
+              {/* ATALHOS - Grid 4x3 (12 slots) */}
               <div className="mt-2 pt-4 border-t border-[#2a2a2a]">
-                <p className="px-5 mb-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                  Atalhos
-                </p>
+                <div className="flex items-center justify-between px-5 mb-2">
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                    Atalhos
+                  </p>
+                  <span className="text-[9px] text-gray-600">🤖 IA</span>
+                </div>
                 <div className="grid grid-cols-4 gap-1.5 px-3">
                   {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
                     const slot = i + 1;
@@ -295,7 +373,7 @@ export default function Sidebar() {
                             e.preventDefault();
                             abrirModalEditar(atalho);
                           }}
-                          className="atalho-slot aspect-square bg-[#1a1a1a] border border-[#2a2a2a] rounded flex items-center justify-center text-[11px] font-bold text-yellow-300 hover:border-yellow-500/50 hover:bg-yellow-500/10"
+                          className="atalho-slot aspect-square bg-[#1a1a1a] border border-[#2a2a2a] rounded flex items-center justify-center text-[16px] font-bold text-yellow-300 hover:border-yellow-500/50 hover:bg-yellow-500/10"
                           title={atalho.url + ' (Right-click pra editar)'}
                         >
                           {atalho.nome_curto}
@@ -318,7 +396,6 @@ export default function Sidebar() {
               </div>
             </nav>
 
-            {/* FOOTER */}
             <div className="p-4 border-t border-[#2a2a2a]">
               <div className="text-[10px] text-gray-500">
                 <p>dev. Delman J. Pereira</p>
@@ -329,7 +406,7 @@ export default function Sidebar() {
         )}
       </aside>
 
-      {/* MODAL: Criar/Editar atalho */}
+      {/* MODAL: Criar/Editar atalho COM IA */}
       {(modalSlot !== null || modalEditar !== null) && (
         <div
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4"
@@ -346,16 +423,53 @@ export default function Sidebar() {
               {modalEditar ? 'Slot ' + modalEditar.slot : 'Slot ' + modalSlot}
             </p>
             
+            {/* PREVIEW DO EMOJI/IDENTIFICAÇÃO */}
+            <div className="flex items-center gap-3 mb-4 p-3 bg-[#0a0a0a] border border-[#2a2a2a] rounded">
+              <div className={'emoji-preview w-14 h-14 bg-[#1a1a1a] border border-yellow-500/30 rounded flex items-center justify-center text-2xl ' + (gerandoEmoji ? 'ai-pulse' : '')}>
+                {gerandoEmoji ? (
+                  <span className="text-yellow-400 ai-spinner">⚡</span>
+                ) : (
+                  emojiPreview
+                )}
+              </div>
+              <div className="flex-1">
+                <p className="text-[10px] text-gray-400 mb-1">
+                  {gerandoEmoji ? (
+                    <span className="text-yellow-400">🤖 IA pensando...</span>
+                  ) : emojiManual ? (
+                    <span>✏️ Manual</span>
+                  ) : (
+                    <span className="text-purple-300">🤖 Gerado por IA</span>
+                  )}
+                </p>
+                <div className="flex gap-2">
+                  {!emojiManual && (
+                    <button
+                      onClick={usarManual}
+                      className="text-[9px] text-gray-500 hover:text-white transition"
+                      title="Usar nome digitado em vez do emoji"
+                    >Usar texto</button>
+                  )}
+                  {emojiManual && formNome.trim().length >= 2 && (
+                    <button
+                      onClick={voltarParaIA}
+                      className="text-[9px] text-purple-400 hover:text-purple-300 transition"
+                      title="Voltar pro emoji da IA"
+                    >🤖 Usar IA</button>
+                  )}
+                </div>
+              </div>
+            </div>
+            
             <div className="mb-3">
               <label className="text-[10px] text-gray-400 mb-1 block">
-                Nome curto (3 letras ou emoji):
+                Nome do site (a IA vai gerar emoji automaticamente):
               </label>
               <input
                 type="text"
                 value={formNome}
                 onChange={(e) => setFormNome(e.target.value)}
-                maxLength={4}
-                placeholder="📊 ou ML"
+                placeholder="Ex: Mercado Livre, Dashboard, Gmail..."
                 className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-3 py-2 text-sm text-white focus:border-yellow-500/50 focus:outline-none"
                 autoFocus
               />
@@ -387,7 +501,8 @@ export default function Sidebar() {
                 >Cancelar</button>
                 <button
                   onClick={salvarAtalho}
-                  className="px-3 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition"
+                  disabled={gerandoEmoji}
+                  className="px-3 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition disabled:opacity-50"
                 >Salvar</button>
               </div>
             </div>
@@ -395,7 +510,6 @@ export default function Sidebar() {
         </div>
       )}
 
-      {/* MODAL: Confirmar remoção */}
       {confirmRemover && (
         <div
           className="fixed inset-0 bg-black/80 flex items-center justify-center z-[110] p-4"
@@ -420,7 +534,6 @@ export default function Sidebar() {
         </div>
       )}
 
-      {/* TOAST */}
       {toast && (
         <div className="fixed bottom-4 right-4 z-[120] toast-feedback">
           <div className={
