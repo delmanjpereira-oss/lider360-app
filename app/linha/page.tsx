@@ -1,1045 +1,435 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
-interface Colaborador { id_groot: string; nome: string; processo: string; status: string; }
-interface Ritmo { id_groot: string; ritmo_pct: number; liquida?: number; unidades?: number; horas?: number; }
-interface Bancada {
-  id: number; zona: string; linha: number; lado: string; posicao: number;
-  tipo_principal: string; subtipo: string | null; fixo_categoria: boolean; data_referencia: string;
+interface Atalho {
+  id: number;
+  slot: number;
+  nome_curto: string;
+  url: string;
 }
-interface Alocacao {
-  id: number; bancada_id: number; id_groot: string; tipo_alocacao: string;
-  bancada_fixa_id: number | null; data_referencia: string;
-}
-interface MetasConfig { p2m_base: number; p2m_alinhado_max: number; }
-interface Toast { id: number; tipo: 'success' | 'error' | 'info'; msg: string; }
-interface ConfirmModal { msg: string; onConfirm: () => void; onCancel?: () => void; }
 
-const ZONA = 'p2m';
-const LAYOUT = { L1_ESQ: 5, L1_DIR: 3, L2_ESQ: 3, L2_DIR: 5 };
-const ALTURA_COLUNA = 422;
-const SUBTIPOS_CATEGORIA = ['Saneante', 'High Value', 'Cosméticos', 'Mapa', 'Saúde', 'Alimento'];
+const menuItems = [
+  { path: '/copiloto', label: 'Copilot IA', icon: '🤖', secao: 'INTELIGÊNCIA' },
+  { path: '/linha', label: 'Mapeamento Linha', icon: '🏭', secao: 'INTELIGÊNCIA' },
+  { path: '/config', label: 'Configurações', icon: '⚙️', secao: 'CONFIGURAÇÕES' },
+];
 
-function maxColabsPorTipo(tipo: string): number {
-  if (tipo === 'CATEGORIA') return 999;
-  return 2;
-}
-function tipoEFixoAutomatico(tipo: string): boolean {
-  return tipo === 'GM' || tipo === 'PESCA';
-}
-function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
-  if (liquida == null || liquida === 0) {
-    return { status: 'sem_dado' as const, texto: 'text-gray-400', borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', emoji: '⚪', label: 'Sem dado' };
-  }
-  if (liquida < metas.p2m_base) return { status: 'ofensor' as const, texto: 'text-red-400', borda: 'border-red-500/50', bg: 'bg-red-500/10', emoji: '🔴', label: 'Ofensor' };
-  if (liquida <= metas.p2m_alinhado_max) return { status: 'alinhado' as const, texto: 'text-blue-400', borda: 'border-blue-500/50', bg: 'bg-blue-500/10', emoji: '🔵', label: 'Alinhado' };
-  return { status: 'supera' as const, texto: 'text-green-400', borda: 'border-green-500/50', bg: 'bg-green-500/10', emoji: '🟢', label: 'Supera' };
-}
-function corRitmoLinha(pct: number, metas: MetasConfig) {
-  if (pct === 0) return { texto: 'text-gray-400', emoji: '⚪', label: 'Sem dados' };
-  if (pct < 90) return { texto: 'text-red-400', emoji: '🔴', label: 'Ofensor' };
-  if (pct < 100) return { texto: 'text-yellow-400', emoji: '🟡', label: 'Bom ritmo' };
-  if (pct <= 106) return { texto: 'text-blue-400', emoji: '🔵', label: 'Alinhado' };
-  return { texto: 'text-green-400', emoji: '🟢', label: 'Supera' };
-}
-function iniciais(nome: string) {
-  const p = nome.trim().split(/\s+/);
-  if (p.length === 1) return p[0].substring(0, 2).toUpperCase();
-  return (p[0][0] + p[p.length - 1][0]).toUpperCase();
-}
-function corTipo(tipo: string) {
-  switch (tipo) {
-    case 'GM': return { hex: '#FFD700', text: 'text-yellow-400' };
-    case 'PESCA': return { hex: '#3b82f6', text: 'text-blue-400' };
-    case 'CATEGORIA': return { hex: '#a855f7', text: 'text-purple-400' };
-    default: return { hex: '#6b7280', text: 'text-gray-400' };
-  }
-}
-function primeiroNome(nome: string) { return nome.trim().split(/\s+/)[0]; }
+const SIDEBAR_STORAGE_KEY = 'lider360_sidebar_aberta';
+const TOTAL_SLOTS = 8;
 
 const STYLES = `
-  @keyframes pulseGold { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.9), 0 0 30px rgba(255, 215, 0, 0.6); } 50% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.8); } }
-  @keyframes pulseGreen { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); border-color: rgba(34, 197, 94, 0.6) !important; } 50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); border-color: rgba(34, 197, 94, 1) !important; } }
-  @keyframes successFlash { 0% { background: rgba(34, 197, 94, 0.4); } 50% { background: rgba(34, 197, 94, 0.15); } 100% { background: transparent; } }
-  @keyframes ghostFloat { 0%, 100% { opacity: 0.35; transform: translateY(0px); } 50% { opacity: 0.55; transform: translateY(-2px); } }
-  @keyframes synergyGlow { 0%, 100% { box-shadow: 0 0 8px rgba(255, 215, 0, 0.3); } 50% { box-shadow: 0 0 15px rgba(255, 215, 0, 0.5); } }
-  @keyframes shakeError { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
-  @keyframes slideIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
-  @keyframes pulseLine { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
-  @keyframes rotacionando { 0% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); } 30% { opacity: 0.3; transform: scale(0.85) rotate(-3deg); filter: blur(2px); } 60% { opacity: 0.3; transform: scale(0.85) rotate(3deg); filter: blur(2px); } 100% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); } }
-  @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
-  @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(20px); } }
-  .card-ativo { animation: pulseGold 1.2s ease-in-out infinite !important; border-color: #FFD700 !important; border-width: 2px !important; outline: 2px solid #FFD700 !important; outline-offset: 2px !important; z-index: 50; position: relative; }
-  .bancada-compativel { animation: pulseGreen 1s ease-in-out infinite; cursor: pointer !important; }
-  .bancada-encaixe { animation: successFlash 0.5s ease-out; }
-  .bancada-erro { animation: shakeError 0.3s ease-in-out; }
-  .card-sinergia { animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite; background: rgba(255, 215, 0, 0.08) !important; border: 2px dashed #FFD700 !important; position: relative; overflow: hidden; }
-  .card-sinergia::after { content: 'SINERGIA'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); font-size: 7px; font-weight: 900; color: rgba(255, 215, 0, 0.5); letter-spacing: 1px; pointer-events: none; white-space: nowrap; }
-  .card-temporario { border-style: dashed !important; position: relative; }
-  .card-temporario::before { content: '🔄'; position: absolute; top: -2px; right: -2px; font-size: 10px; z-index: 5; }
-  .card-hover { transition: all 0.15s ease; }
-  .card-hover:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
-  .card-arrastando { opacity: 0.4; }
-  .nome-linha-input { background: transparent; border: none; outline: 1px solid #FFD700; color: #FFD700; font-size: 10px; font-weight: bold; text-align: center; width: 100%; padding: 2px 4px; border-radius: 3px; }
-  .nome-linha-display { cursor: pointer; transition: all 0.15s ease; padding: 2px 6px; border-radius: 3px; }
-  .nome-linha-display:hover { background: rgba(255, 215, 0, 0.1); color: #FFD700; }
-  .badge-fixo { animation: synergyGlow 2s ease-in-out infinite; }
-  .slide-in { animation: slideIn 0.3s ease-out; }
-  .ritmo-linha-pulse { animation: pulseLine 2s ease-in-out infinite; }
-  .canvas-rotacionando * { animation: rotacionando 0.6s ease-in-out !important; }
-  .toast-in { animation: toastIn 0.3s ease-out; }
-  .toast-out { animation: toastOut 0.3s ease-out forwards; }
+  @keyframes slideInSidebar {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes pulseGold {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.5); }
+    50% { box-shadow: 0 0 0 4px rgba(255, 215, 0, 0); }
+  }
+  @keyframes modalSlideIn {
+    from { opacity: 0; transform: scale(0.9) translateY(-10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .sidebar-transition {
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease;
+  }
+  .sidebar-content-fade {
+    transition: opacity 0.2s ease;
+  }
+  .atalho-slot {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .atalho-slot:hover {
+    transform: scale(1.08);
+    box-shadow: 0 4px 12px rgba(255, 215, 0, 0.15);
+  }
+  .atalho-slot-empty {
+    border-style: dashed;
+    border-color: #2a2a2a;
+  }
+  .atalho-slot-empty:hover {
+    border-color: #FFD700;
+    background: rgba(255, 215, 0, 0.05);
+  }
+  .toggle-btn {
+    transition: all 0.2s ease;
+  }
+  .toggle-btn:hover {
+    background: rgba(255, 215, 0, 0.15);
+  }
+  .sidebar-content {
+    animation: slideInSidebar 0.3s ease-out;
+  }
+  .modal-atalho {
+    animation: modalSlideIn 0.25s ease-out;
+  }
+  .toast-feedback {
+    animation: toastIn 0.3s ease-out;
+  }
 `;
 
-export default function LinhaPage() {
-  const [colabs, setColabs] = useState<Colaborador[]>([]);
-  const [ritmos, setRitmos] = useState<Record<string, Ritmo>>({});
-  const [bancadas, setBancadas] = useState<Bancada[]>([]);
-  const [alocacoes, setAlocacoes] = useState<Alocacao[]>([]);
-  const [metas, setMetas] = useState<MetasConfig>({ p2m_base: 329, p2m_alinhado_max: 350 });
-  const [nomesLinhas, setNomesLinhas] = useState<{ linha1: string; linha2: string }>({ linha1: 'Linha 1', linha2: 'Linha 2' });
-  const [editandoLinha, setEditandoLinha] = useState<number | null>(null);
-  const [nomeTemp, setNomeTemp] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [cardAtivo, setCardAtivo] = useState<string | null>(null);
-  const [hoverBancada, setHoverBancada] = useState<number | null>(null);
-  const [encaixeBancada, setEncaixeBancada] = useState<number | null>(null);
-  const [erroBancada, setErroBancada] = useState<number | null>(null);
-  const [modal, setModal] = useState<{ linha: number; lado: string; posicao: number; bancadaExistente?: Bancada } | null>(null);
-  const [modalSubtipo, setModalSubtipo] = useState<string>('');
-  const [modalRotacao, setModalRotacao] = useState(false);
-  const [rotacionando, setRotacionando] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+export default function Sidebar() {
+  const pathname = usePathname();
+  const [aberta, setAberta] = useState(true);
+  const [atalhos, setAtalhos] = useState<Atalho[]>([]);
+  const [modalSlot, setModalSlot] = useState<number | null>(null);
+  const [modalEditar, setModalEditar] = useState<Atalho | null>(null);
+  const [formNome, setFormNome] = useState('');
+  const [formUrl, setFormUrl] = useState('');
+  const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null);
+  const [confirmRemover, setConfirmRemover] = useState<Atalho | null>(null);
 
-  // ============================================================
-  // 🎨 TOAST SYSTEM
-  // ============================================================
-  function toast(tipo: 'success' | 'error' | 'info', msg: string) {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, tipo, msg }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  }
-
-  function confirmar(msg: string, onConfirm: () => void) {
-    setConfirmModal({ msg, onConfirm });
-  }
-
-  useEffect(() => { carregarTudo(); }, []);
-
+  // Carrega estado da sidebar do localStorage
   useEffect(() => {
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setCardAtivo(null); setDraggingId(null); setModalRotacao(false); setConfirmModal(null);
-      }
-    }
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
+    if (typeof window === 'undefined') return;
+    const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    if (saved !== null) setAberta(saved === 'true');
   }, []);
 
-  async function carregarTudo() {
-    setLoading(true);
-    await carregarMetas();
-    await carregarNomesLinhas();
-    await garantirSlotsFixos();
-    await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes()]);
-    setLoading(false);
-  }
+  // Salva estado quando muda
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(SIDEBAR_STORAGE_KEY, String(aberta));
+  }, [aberta]);
 
-  async function carregarMetas() {
-    const { data } = await supabase.from('config').select('chave, valor').in('chave', ['meta_p2m_base', 'meta_p2m_alinhado_max']);
-    const map: Record<string, number> = {};
-    (data || []).forEach((c: any) => { map[c.chave] = Number(c.valor) || 0; });
-    setMetas({ p2m_base: map.meta_p2m_base || 329, p2m_alinhado_max: map.meta_p2m_alinhado_max || 350 });
-  }
+  // Carrega atalhos do Supabase
+  useEffect(() => {
+    carregarAtalhos();
+  }, []);
 
-  async function carregarNomesLinhas() {
-    const { data } = await supabase.from('config').select('chave, valor').in('chave', ['nome_linha_1', 'nome_linha_2']);
-    const map: Record<string, string> = {};
-    (data || []).forEach((c: any) => { map[c.chave] = String(c.valor); });
-    setNomesLinhas({ linha1: map.nome_linha_1 || 'Linha 1', linha2: map.nome_linha_2 || 'Linha 2' });
-  }
-
-  async function salvarNomeLinha(linha: number, nome: string) {
-    const chave = 'nome_linha_' + linha;
-    await supabase.from('config').upsert({ chave, valor: nome }, { onConflict: 'chave' });
-    setNomesLinhas((prev) => ({ ...prev, [linha === 1 ? 'linha1' : 'linha2']: nome }));
-    setEditandoLinha(null);
-  }
-
-  async function carregarColabs() {
-    const { data } = await supabase.from('colaboradores').select('id_groot, nome, processo, status').eq('status', 'Ativo').eq('processo', 'P2M').order('nome');
-    setColabs(data || []);
-  }
-
-  async function carregarRitmos() {
-    const hoje = new Date().toISOString().split('T')[0];
-    const { data } = await supabase.from('ritmo_atual').select('id_groot, ritmo_pct, unidades, horas').eq('data_referencia', hoje);
-    const map: Record<string, Ritmo> = {};
-    (data || []).forEach((r: any) => {
-      let liquida = r.ritmo_pct;
-      if (r.unidades && r.horas && r.horas > 0) liquida = Math.round(r.unidades / r.horas);
-      map[r.id_groot] = { ...r, liquida };
-    });
-    setRitmos(map);
-  }
-
-  async function carregarBancadas() {
-    const hoje = new Date().toISOString().split('T')[0];
-    const { data } = await supabase.from('layout_bancadas').select('*').eq('zona', ZONA).eq('data_referencia', hoje).order('posicao');
-    setBancadas(data || []);
-  }
-
-  async function carregarAlocacoes() {
-    const hoje = new Date().toISOString().split('T')[0];
-    const { data } = await supabase.from('layout_alocacao').select('*').eq('data_referencia', hoje);
-    setAlocacoes(data || []);
-  }
-
-  async function garantirSlotsFixos() {
-    const hoje = new Date().toISOString().split('T')[0];
-    const { data: existentes } = await supabase.from('layout_bancadas').select('id, linha, posicao').eq('zona', ZONA).eq('lado', 'centro').eq('fixo_categoria', true).eq('data_referencia', hoje);
-    const jaTem = new Set((existentes || []).map((b: any) => b.linha + '-' + b.posicao));
-    const slotsFixos = [
-      { linha: 1, posicao: 1, tipo_principal: 'PESCA' },
-      { linha: 1, posicao: 2, tipo_principal: 'CATEGORIA' },
-      { linha: 2, posicao: 1, tipo_principal: 'PESCA' },
-      { linha: 2, posicao: 2, tipo_principal: 'CATEGORIA' },
-    ];
-    const aCriar = slotsFixos.filter((s) => !jaTem.has(s.linha + '-' + s.posicao));
-    if (aCriar.length === 0) return;
-    await supabase.from('layout_bancadas').insert(aCriar.map((s) => ({
-      zona: ZONA, linha: s.linha, lado: 'centro', posicao: s.posicao,
-      tipo_principal: s.tipo_principal, subtipo: null, fixo_categoria: true, data_referencia: hoje,
-    })));
-  }
-
-  function limparRitmos() {
-    confirmar('Limpar TODOS os ritmos do dia?', async () => {
-      const hoje = new Date().toISOString().split('T')[0];
-      const { error } = await supabase.from('ritmo_atual').delete().eq('data_referencia', hoje);
-      if (error) { toast('error', 'Erro: ' + error.message); return; }
-      toast('success', '✅ Ritmos limpos');
-      await carregarRitmos();
-    });
-  }
-
-  async function handleUploadCSV(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const texto = await file.text();
-      const linhas = texto.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (linhas.length < 2) { toast('error', 'CSV vazio'); return; }
-      const sep = linhas[0].includes(';') ? ';' : ',';
-      const header = linhas[0].split(sep).map((h) => h.trim().toLowerCase().replace(/"/g, '').replace(/^\uFEFF/, ''));
-      const idxGroot = header.findIndex((h) => h.includes('groot') || h === 'id' || h === 'id_groot' || h === 'usuario' || h === 'matricula' || h.includes('id_colab') || h.includes('representante'));
-      const idxNome = header.findIndex((h) => h === 'nome' || h.includes('nome') || h === 'colaborador' || h.includes('representante'));
-      const idxRitmo = header.findIndex((h) => h.includes('liquida sist') || h.includes('liquid') || h.includes('ritmo') || h.includes('pct') || h === '%' || h.includes('produtividade') || h === 'prod' || h === 'prod_liquida');
-      const idxUnid = header.findIndex((h) => h.includes('unidades') || h.includes('unid') || h.includes('qtd') || h.includes('quantidade') || h === 'pcs');
-      // Prioriza "tempo em processo" (efetivo real), fallback pra outras variações
-      const idxHoras = header.findIndex((h) => h.includes('tempo em processo') || h.includes('tempo efetivo') || h.includes('tempo_processo') || h.includes('tempo'));
-      if (idxGroot === -1 || idxRitmo === -1) { toast('error', 'CSV inválido. Faltam colunas id_groot/ritmo'); return; }
-      const hoje = new Date().toISOString().split('T')[0];
-      const registros: any[] = [];
-      let pulou = 0;
-      for (let i = 1; i < linhas.length; i++) {
-        const cols = linhas[i].split(sep).map((c) => c.trim().replace(/"/g, ''));
-        const id_groot = cols[idxGroot];
-        if (!id_groot) { pulou++; continue; }
-        const ritmoRaw = (cols[idxRitmo] || '').replace('%', '').replace(',', '.').trim();
-        const ritmo_pct = Math.round(parseFloat(ritmoRaw));
-        if (isNaN(ritmo_pct) || ritmo_pct < 0) { pulou++; continue; }
-        const reg: any = { id_groot, ritmo_pct, data_referencia: hoje, hora_atualizacao: new Date().toISOString() };
-        if (idxNome !== -1 && cols[idxNome]) reg.nome = cols[idxNome];
-        if (idxUnid !== -1 && cols[idxUnid]) { const u = parseInt(cols[idxUnid].replace(/\./g, ''), 10); if (!isNaN(u)) reg.unidades = u; }
-        if (idxHoras !== -1 && cols[idxHoras]) {
-          const raw = cols[idxHoras].trim();
-          let h = 0;
-          if (raw.includes(':')) {
-            // HH:MM:SS → decimal
-            const parts = raw.split(':').map((p) => parseInt(p, 10) || 0);
-            h = (parts[0] || 0) + ((parts[1] || 0) / 60) + ((parts[2] || 0) / 3600);
-          } else {
-            h = parseFloat(raw.replace(',', '.'));
-          }
-          if (!isNaN(h) && h > 0) reg.horas = h;
-        }
-        registros.push(reg);
+  // Atalho de teclado: Ctrl+B pra toggle sidebar
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+        e.preventDefault();
+        setAberta((prev) => !prev);
       }
-      if (registros.length === 0) { toast('error', 'Nenhum registro válido'); return; }
-      const { error } = await supabase.from('ritmo_atual').upsert(registros, { onConflict: 'id_groot,data_referencia' });
-      if (error) { toast('error', 'Erro: ' + error.message); return; }
-      toast('success', '✅ ' + registros.length + ' ritmo(s) atualizado(s)');
-      await carregarRitmos();
-    } catch (err: any) {
-      toast('error', 'Erro: ' + err.message);
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (e.key === 'Escape') {
+        setModalSlot(null);
+        setModalEditar(null);
+        setConfirmRemover(null);
+      }
     }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
+
+  function showToast(tipo: 'success' | 'error', msg: string) {
+    setToast({ tipo, msg });
+    setTimeout(() => setToast(null), 3000);
   }
 
-  async function criarBancadaGM(linha: number, lado: string, posicao: number) {
-    const hoje = new Date().toISOString().split('T')[0];
-    const { error } = await supabase.from('layout_bancadas').insert({
-      zona: ZONA, linha, lado, posicao, tipo_principal: 'GM', subtipo: null, fixo_categoria: false, data_referencia: hoje,
-    });
-    if (error) { toast('error', 'Erro: ' + error.message); return; }
-    await carregarBancadas();
+  async function carregarAtalhos() {
+    const { data } = await supabase.from('atalhos_sidebar').select('*').order('slot');
+    setAtalhos(data || []);
   }
 
-  function abrirModalEditarSubtipo(b: Bancada) {
-    setModal({ linha: b.linha, lado: b.lado, posicao: b.posicao, bancadaExistente: b });
-    setModalSubtipo(b.subtipo || '');
-  }
-  function fecharModal() { setModal(null); setModalSubtipo(''); }
-
-  async function salvarModal() {
-    if (!modal || !modal.bancadaExistente) return;
-    if (!modalSubtipo) { toast('error', 'Escolha um sub-tipo'); return; }
-    const { error } = await supabase.from('layout_bancadas').update({ subtipo: modalSubtipo }).eq('id', modal.bancadaExistente.id);
-    if (error) { toast('error', 'Erro: ' + error.message); return; }
-    await carregarBancadas();
-    fecharModal();
+  function abrirModalNovo(slot: number) {
+    setModalSlot(slot);
+    setFormNome('');
+    setFormUrl('');
   }
 
-  function limparBancada(b: Bancada) {
-    if (b.fixo_categoria) { toast('error', 'Bancada fixa não pode ser removida'); return; }
-    confirmar('Limpar esta bancada?', async () => {
-      const { error } = await supabase.from('layout_bancadas').delete().eq('id', b.id);
-      if (error) { toast('error', 'Erro: ' + error.message); return; }
-      await Promise.all([carregarBancadas(), carregarAlocacoes()]);
-    });
+  function abrirModalEditar(atalho: Atalho) {
+    setModalEditar(atalho);
+    setFormNome(atalho.nome_curto);
+    setFormUrl(atalho.url);
   }
 
-  async function alocarColab(idGroot: string, bancada: Bancada) {
-    const hoje = new Date().toISOString().split('T')[0];
-    const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
-    const maxColabs = maxColabsPorTipo(bancada.tipo_principal);
-    if (atuais.length >= maxColabs) {
-      setErroBancada(bancada.id);
-      setTimeout(() => setErroBancada(null), 400);
-      toast('error', 'Bancada cheia');
+  function fecharModal() {
+    setModalSlot(null);
+    setModalEditar(null);
+    setFormNome('');
+    setFormUrl('');
+  }
+
+  async function salvarAtalho() {
+    if (!formNome.trim() || !formUrl.trim()) {
+      showToast('error', 'Preencha nome e URL');
       return;
     }
-    const alocAtual = alocacoes.find((a) => a.id_groot === idGroot);
-    let bancadaFixaId: number | null = null;
-    if (alocAtual?.bancada_fixa_id) bancadaFixaId = alocAtual.bancada_fixa_id;
-    else if (tipoEFixoAutomatico(bancada.tipo_principal)) bancadaFixaId = bancada.id;
-    let tipoAlocacao = 'fixo';
-    if (bancadaFixaId && bancadaFixaId !== bancada.id) tipoAlocacao = 'temporario';
-    await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot).eq('data_referencia', hoje);
-    const { error } = await supabase.from('layout_alocacao').insert({
-      bancada_id: bancada.id, id_groot: idGroot,
-      tipo_alocacao: tipoAlocacao, bancada_fixa_id: bancadaFixaId, data_referencia: hoje,
-    });
-    if (error) { toast('error', 'Erro: ' + error.message); return; }
-    setEncaixeBancada(bancada.id);
-    setTimeout(() => setEncaixeBancada(null), 500);
-    setCardAtivo(null);
-    setDraggingId(null);
-    await carregarAlocacoes();
-  }
 
-  async function removerColab(alocId: number) {
-    const { error } = await supabase.from('layout_alocacao').delete().eq('id', alocId);
-    if (error) { toast('error', 'Erro: ' + error.message); return; }
-    await carregarAlocacoes();
-  }
-
-  async function removerFixo(idGroot: string) {
-    const aloc = alocacoes.find((a) => a.id_groot === idGroot);
-    if (!aloc) return;
-    const { error } = await supabase.from('layout_alocacao').update({ bancada_fixa_id: null, tipo_alocacao: 'fixo' }).eq('id', aloc.id);
-    if (error) { toast('error', 'Erro: ' + error.message); return; }
-    await carregarAlocacoes();
-  }
-
-  function getBancada(linha: number, lado: string, posicao: number) {
-    return bancadas.find((b) => b.zona === ZONA && b.linha === linha && b.lado === lado && b.posicao === posicao);
-  }
-
-  function getCicloLinha(linha: number, comPesca: boolean): Bancada[] {
-    const ciclo: Bancada[] = [];
-    const qtdEsq = linha === 1 ? LAYOUT.L1_ESQ : LAYOUT.L2_ESQ;
-    for (let p = qtdEsq; p >= 1; p--) {
-      const b = getBancada(linha, 'esquerdo', p);
-      if (b && b.tipo_principal === 'GM') ciclo.push(b);
+    // Valida URL
+    let urlFinal = formUrl.trim();
+    if (!urlFinal.startsWith('http://') && !urlFinal.startsWith('https://')) {
+      urlFinal = 'https://' + urlFinal;
     }
-    const cat = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'CATEGORIA');
-    const pesca = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'PESCA');
-    if (comPesca && pesca) ciclo.push(pesca);
-    if (cat) ciclo.push(cat);
-    const qtdDir = linha === 1 ? LAYOUT.L1_DIR : LAYOUT.L2_DIR;
-    for (let p = 1; p <= qtdDir; p++) {
-      const b = getBancada(linha, 'direito', p);
-      if (b && b.tipo_principal === 'GM') ciclo.push(b);
-    }
-    return ciclo;
-  }
 
-  async function getHistoricoPesca(idGroot: string, linha: number): Promise<number> {
-    const { data } = await supabase.from('rotacao_pesca_historico').select('id').eq('id_groot', idGroot).eq('linha', linha);
-    return (data || []).length;
-  }
+    // Limita nome em 4 chars max (cabe 3 letras OU 1-2 emojis)
+    let nomeFinal = formNome.trim().substring(0, 4);
 
-  async function registrarPesca(idGroot: string, linha: number) {
-    await supabase.from('rotacao_pesca_historico').insert({
-      id_groot: idGroot, linha, data_pesca: new Date().toISOString().split('T')[0],
-    });
-  }
-
-  // ============================================================
-  // 🔄 ROTAÇÃO - FIX: fixo MUDA pra nova bancada
-  // ============================================================
-  async function aplicarRotacao(tipo: 1 | 2 | 3) {
-    setRotacionando(true);
-    try {
-      if (tipo === 3) await rotacaoNivelar();
-      else await rotacaoCiclo(tipo === 2);
-      await carregarAlocacoes();
-      await new Promise((r) => setTimeout(r, 600));
-      toast('success', '✅ Rotação ' + tipo + ' aplicada');
-    } catch (err: any) {
-      toast('error', 'Erro: ' + err.message);
-    } finally {
-      setRotacionando(false);
-      setModalRotacao(false);
-    }
-  }
-
-  async function rotacaoCiclo(comPesca: boolean) {
-    const hoje = new Date().toISOString().split('T')[0];
-    for (const linha of [1, 2]) {
-      const ciclo = getCicloLinha(linha, comPesca);
-      if (ciclo.length === 0) continue;
-
-      // Mapeia ocupantes atuais de cada bancada do ciclo
-      const ocupantes: Array<{ bancada: Bancada; alocs: Alocacao[] }> = ciclo.map((b) => ({
-        bancada: b,
-        alocs: alocacoes.filter((a) => a.bancada_id === b.id),
-      }));
-
-      // Define novas alocações
-      const novas: Array<{ id_groot: string; bancada_id: number; bancada_fixa_id: number | null; tipo: string }> = [];
-
-      for (let i = 0; i < ocupantes.length; i++) {
-        const proximaIdx = (i + 1) % ocupantes.length;
-        const proximaBancada = ocupantes[proximaIdx].bancada;
-
-        for (const aloc of ocupantes[i].alocs) {
-          let novoFixoId: number | null = null;
-          let novoTipo = 'fixo';
-
-          if (tipoEFixoAutomatico(proximaBancada.tipo_principal)) {
-            // GM ou PESCA: 🆕 ATUALIZA o fixo pra nova bancada (rotação = mudança oficial de casa)
-            novoFixoId = proximaBancada.id;
-            novoTipo = 'fixo';
-          } else {
-            // CATEGORIA: mantém vínculo de origem (era fixo em GM, agora é temporário em Cat)
-            novoFixoId = aloc.bancada_fixa_id;
-            novoTipo = novoFixoId ? 'temporario' : 'fixo';
-          }
-
-          novas.push({
-            id_groot: aloc.id_groot,
-            bancada_id: proximaBancada.id,
-            bancada_fixa_id: novoFixoId,
-            tipo: novoTipo,
-          });
-        }
-      }
-
-      // ROTAÇÃO 2: alterna PESCA vs CATEGORIA com histórico
-      if (comPesca) {
-        const idxPesca = ciclo.findIndex((b) => b.tipo_principal === 'PESCA');
-        const idxCat = ciclo.findIndex((b) => b.tipo_principal === 'CATEGORIA');
-        if (idxPesca >= 0 && idxCat >= 0) {
-          const indoPesca = novas.filter((n) => n.bancada_id === ciclo[idxPesca].id);
-          const indoCat = novas.filter((n) => n.bancada_id === ciclo[idxCat].id);
-          const candidatos = [...indoPesca, ...indoCat];
-          if (candidatos.length === 2) {
-            const c1 = candidatos[0];
-            const c2 = candidatos[1];
-            const v1 = await getHistoricoPesca(c1.id_groot, linha);
-            const v2 = await getHistoricoPesca(c2.id_groot, linha);
-            let paraPesca: typeof c1;
-            let paraCat: typeof c2;
-            if (v1 < v2) { paraPesca = c1; paraCat = c2; }
-            else if (v2 < v1) { paraPesca = c2; paraCat = c1; }
-            else { paraPesca = Math.random() < 0.5 ? c1 : c2; paraCat = paraPesca === c1 ? c2 : c1; }
-            paraPesca.bancada_id = ciclo[idxPesca].id;
-            paraPesca.bancada_fixa_id = ciclo[idxPesca].id;
-            paraPesca.tipo = 'fixo';
-            paraCat.bancada_id = ciclo[idxCat].id;
-            // Cat: mantém vínculo se tinha fixo de GM
-            paraCat.tipo = paraCat.bancada_fixa_id ? 'temporario' : 'fixo';
-            await registrarPesca(paraPesca.id_groot, linha);
-          }
-        }
-      }
-
-      // 🆕 OTIMIZADO: batch delete + batch insert (em vez de loop)
-      const bancadasLinhaIds = ciclo.map((b) => b.id);
-      const idsRemove = alocacoes.filter((a) => bancadasLinhaIds.includes(a.bancada_id)).map((a) => a.id);
-      
-      if (idsRemove.length > 0) {
-        await supabase.from('layout_alocacao').delete().in('id', idsRemove);
-      }
-      
-      if (novas.length > 0) {
-        await supabase.from('layout_alocacao').insert(
-          novas.map((n) => ({
-            bancada_id: n.bancada_id,
-            id_groot: n.id_groot,
-            tipo_alocacao: n.tipo,
-            bancada_fixa_id: n.bancada_fixa_id,
-            data_referencia: hoje,
-          }))
-        );
-      }
-    }
-  }
-
-  async function rotacaoNivelar() {
-    // Troca topo ↔ último de GM em cada lado de cada linha
-    for (const linha of [1, 2]) {
-      for (const lado of ['esquerdo', 'direito']) {
-        const qtd = linha === 1
-          ? (lado === 'esquerdo' ? LAYOUT.L1_ESQ : LAYOUT.L1_DIR)
-          : (lado === 'esquerdo' ? LAYOUT.L2_ESQ : LAYOUT.L2_DIR);
-        if (qtd < 2) continue;
-        const bTopo = getBancada(linha, lado, 1);
-        const bUltimo = getBancada(linha, lado, qtd);
-        if (!bTopo || !bUltimo) continue;
-        if (bTopo.tipo_principal !== 'GM' || bUltimo.tipo_principal !== 'GM') continue;
-        
-        const alocsTopo = alocacoes.filter((a) => a.bancada_id === bTopo.id);
-        const alocsUltimo = alocacoes.filter((a) => a.bancada_id === bUltimo.id);
-        
-        // 🆕 Troca: nova bancada = nova casa fixa
-        for (const a of alocsTopo) {
-          await supabase.from('layout_alocacao').update({
-            bancada_id: bUltimo.id,
-            bancada_fixa_id: bUltimo.id, // 🆕 vira fixo do novo lugar
-            tipo_alocacao: 'fixo',
-          }).eq('id', a.id);
-        }
-        for (const a of alocsUltimo) {
-          await supabase.from('layout_alocacao').update({
-            bancada_id: bTopo.id,
-            bancada_fixa_id: bTopo.id, // 🆕 vira fixo do novo lugar
-            tipo_alocacao: 'fixo',
-          }).eq('id', a.id);
-        }
-      }
-    }
-  }
-
-  function getAlocacoesBancada(bancadaId: number) { return alocacoes.filter((a) => a.bancada_id === bancadaId); }
-  function getColab(idGroot: string) { return colabs.find((c) => c.id_groot === idGroot); }
-  function colabsLivres() {
-    const ids = new Set(alocacoes.map((a) => a.id_groot));
-    return colabs.filter((c) => !ids.has(c.id_groot));
-  }
-  function sinergiasDe(bancadaId: number) {
-    return alocacoes.filter((a) => a.bancada_fixa_id === bancadaId && a.bancada_id !== bancadaId);
-  }
-  function bancadaCompativel(bancada: Bancada): boolean {
-    if (!cardAtivo && !draggingId) return false;
-    const idCheck = cardAtivo || draggingId;
-    const alocAtual = alocacoes.find((a) => a.id_groot === idCheck);
-    if (alocAtual?.bancada_id === bancada.id) return false;
-    const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
-    return atuais.length < maxColabsPorTipo(bancada.tipo_principal);
-  }
-
-  function calcularRitmoLinha(linha: number) {
-    const bancadasLinha = bancadas.filter((b) => b.linha === linha);
-    const bancadasIds = new Set(bancadasLinha.map((b) => b.id));
-    const alocsLinha = alocacoes.filter((a) => bancadasIds.has(a.bancada_id));
-    
-    let totalUnidades = 0;
-    let totalHoras = 0;
-    let supera = 0, alinhado = 0, ofensor = 0, semDado = 0;
-    
-    alocsLinha.forEach((a) => {
-      const ritmo = ritmos[a.id_groot];
-      if (!ritmo) { semDado++; return; }
-      
-      const liq = ritmo.liquida;
-      
-      // Acumula unidades e horas (pra ritmo da linha)
-      if (ritmo.unidades && ritmo.horas && ritmo.horas > 0) {
-        totalUnidades += ritmo.unidades;
-        totalHoras += ritmo.horas;
-      }
-      
-      // Distribuição usa líquida individual
-      if (liq == null || liq === 0) { semDado++; return; }
-      if (liq < metas.p2m_base) ofensor++;
-      else if (liq <= metas.p2m_alinhado_max) alinhado++;
-      else supera++;
-    });
-    
-    const totalAtivos = alocsLinha.length;
-    
-    // FALLBACK: se não tem unidades/horas, usa média das líquidas individuais
-    if (totalHoras === 0) {
-      const liquidas: number[] = [];
-      alocsLinha.forEach((a) => {
-        const ritmo = ritmos[a.id_groot];
-        if (ritmo?.liquida && ritmo.liquida > 0) liquidas.push(ritmo.liquida);
+    if (modalEditar) {
+      // Edição
+      const { error } = await supabase.from('atalhos_sidebar')
+        .update({ nome_curto: nomeFinal, url: urlFinal })
+        .eq('id', modalEditar.id);
+      if (error) { showToast('error', 'Erro: ' + error.message); return; }
+      showToast('success', '✅ Atalho atualizado');
+    } else if (modalSlot) {
+      // Novo
+      const { error } = await supabase.from('atalhos_sidebar').insert({
+        slot: modalSlot,
+        nome_curto: nomeFinal,
+        url: urlFinal,
       });
-      if (liquidas.length === 0) {
-        return { 
-          pctMedio: 0, pecasHora: 0, totalUnidades: 0, totalHoras: 0,
-          totalAtivos, supera, alinhado, ofensor, semDado 
-        };
-      }
-      const mediaLiq = liquidas.reduce((a, b) => a + b, 0) / liquidas.length;
-      const pctMedio = Math.round((mediaLiq / metas.p2m_base) * 100);
-      return {
-        pctMedio,
-        pecasHora: Math.round(mediaLiq),
-        totalUnidades: 0,
-        totalHoras: 0,
-        totalAtivos, supera, alinhado, ofensor, semDado
-      };
+      if (error) { showToast('error', 'Erro: ' + error.message); return; }
+      showToast('success', '✅ Atalho criado');
     }
-    
-    // 🎯 IDEAL: Ritmo = soma das peças / soma das horas (efetivas)
-    const pecasHora = totalUnidades / totalHoras;
-    const pctMedio = Math.round((pecasHora / metas.p2m_base) * 100);
-    
-    return { 
-      pctMedio, 
-      pecasHora: Math.round(pecasHora),
-      totalUnidades,
-      totalHoras: Math.round(totalHoras * 10) / 10,
-      totalAtivos, supera, alinhado, ofensor, semDado 
-    };
+
+    fecharModal();
+    await carregarAtalhos();
   }
 
-  function CardColabSidebar({ c }: { c: Colaborador }) {
-    const ritmo = ritmos[c.id_groot];
-    const cor = corPorMeta(ritmo?.liquida, metas);
-    const isDragging = draggingId === c.id_groot;
-    const isAtivo = cardAtivo === c.id_groot;
-    return (
-      <div
-        draggable
-        onDragStart={(e) => { setDraggingId(c.id_groot); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.id_groot); }}
-        onDragEnd={() => { setDraggingId(null); setHoverBancada(null); }}
-        onDoubleClick={() => setCardAtivo(isAtivo ? null : c.id_groot)}
-        className={cor.bg + ' ' + cor.borda + ' border-2 rounded-md px-2 py-1.5 mb-1.5 cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '')}
-        title="Arrasta pra alocar | Double-click pra ativar"
-      >
-        <div className="flex items-center justify-between gap-1">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className={'text-[10px] font-bold ' + cor.texto + ' flex-shrink-0'}>{iniciais(c.nome)}</span>
-            <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
-          </div>
-          <div className="flex items-center gap-0.5 flex-shrink-0">
-            {ritmo?.liquida != null && ritmo.liquida > 0 && (<span className={'text-[9px] font-bold ' + cor.texto}>{ritmo.liquida}</span>)}
-            <span className="text-[9px]">{cor.emoji}</span>
-          </div>
-        </div>
-      </div>
-    );
+  async function removerAtalho(atalho: Atalho) {
+    const { error } = await supabase.from('atalhos_sidebar').delete().eq('id', atalho.id);
+    if (error) { showToast('error', 'Erro: ' + error.message); return; }
+    showToast('success', '✅ Atalho removido');
+    setConfirmRemover(null);
+    await carregarAtalhos();
   }
 
-  function CardColabBancada({ aloc, expandido, bancadaAtual }: { aloc: Alocacao; expandido?: boolean; bancadaAtual: Bancada }) {
-    const c = getColab(aloc.id_groot);
-    if (!c) return null;
-    const ritmo = ritmos[aloc.id_groot];
-    const cor = corPorMeta(ritmo?.liquida, metas);
-    const liquida = ritmo?.liquida;
-    const eFixoAqui = aloc.bancada_fixa_id === bancadaAtual.id && aloc.bancada_id === bancadaAtual.id;
-    const eTemporario = aloc.tipo_alocacao === 'temporario';
-    const isDragging = draggingId === aloc.id_groot;
-    const isAtivo = cardAtivo === aloc.id_groot;
-    const dragHandlers = {
-      draggable: true,
-      onDragStart: (e: React.DragEvent) => { e.stopPropagation(); setDraggingId(aloc.id_groot); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', aloc.id_groot); },
-      onDragEnd: () => { setDraggingId(null); setHoverBancada(null); },
-      onDoubleClick: (e: React.MouseEvent) => { e.stopPropagation(); setCardAtivo(isAtivo ? null : aloc.id_groot); },
-    };
-    const titulo = c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoAqui ? ' · fixo' : '') + (eTemporario ? ' · temp' : '');
-    if (expandido) {
-      return (
-        <div {...dragHandlers} title={titulo}
-          className={'relative group ' + cor.borda + ' ' + cor.bg + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
-            <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
-            {eFixoAqui && <span className="text-[9px] badge-fixo" title="Fixo">📍</span>}
-          </div>
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {liquida != null && liquida > 0 ? (<span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>) : (<span className="text-gray-600 text-[10px]">—</span>)}
-            <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
-              className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
-              title="Remover">×</button>
-          </div>
-        </div>
-      );
-    }
-    return (
-      <div {...dragHandlers} title={titulo}
-        className={'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
-        {eFixoAqui && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
-        {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="text-gray-600 text-sm">—</span>)}
-        <span className="text-[7px] text-gray-500 mt-0.5">{primeiroNome(c.nome)}</span>
-        <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
-          className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
-          title="Remover">×</button>
-      </div>
-    );
+  function clickAtalho(atalho: Atalho) {
+    window.open(atalho.url, '_blank', 'noopener,noreferrer');
   }
 
-  function CardSinergia({ aloc, expandido }: { aloc: Alocacao; expandido?: boolean }) {
-    const c = getColab(aloc.id_groot);
-    if (!c) return null;
-    function handleContextMenu(e: React.MouseEvent) {
-      e.preventDefault();
-      confirmar('Remover marca de fixo de ' + c!.nome + '?', () => removerFixo(aloc.id_groot));
-    }
-    if (expandido) {
-      return (
-        <div className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2"
-          title={c.nome + ' (fixo aqui · right-click pra remover)'}
-          onContextMenu={handleContextMenu}>
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-[9px] font-bold text-yellow-400/70">{iniciais(c.nome)}</span>
-            <span className="text-[10px] text-yellow-400/70 truncate">{primeiroNome(c.nome)}</span>
-          </div>
-        </div>
-      );
-    }
-    return (
-      <div className="card-sinergia flex-1 h-full rounded flex flex-col items-center justify-center"
-        title={c.nome + ' (fixo aqui · right-click pra remover)'}
-        onContextMenu={handleContextMenu}>
-        <span className="text-[10px] font-bold text-yellow-400/70 leading-none">{iniciais(c.nome)}</span>
-        <span className="text-[7px] text-yellow-400/50 mt-0.5">{primeiroNome(c.nome)}</span>
-      </div>
-    );
+  function getAtalhoSlot(slot: number): Atalho | null {
+    return atalhos.find((a) => a.slot === slot) || null;
   }
 
-  function SlotBancada({ linha, lado, posicao }: { linha: number; lado: string; posicao: number }) {
-    const b = getBancada(linha, lado, posicao);
-    if (!b) {
-      return (
-        <div onClick={() => criarBancadaGM(linha, lado, posicao)}
-          className="w-[140px] h-[78px] border-2 border-dashed border-[#2a2a2a] rounded-md flex items-center justify-center cursor-pointer hover:border-yellow-500/40 hover:bg-yellow-500/5 transition"
-          title="Criar bancada GM">
-          <span className="text-2xl text-[#3a3a3a]">+</span>
-        </div>
-      );
-    }
-    const cor = corTipo(b.tipo_principal);
-    const alocs = getAlocacoesBancada(b.id);
-    const sinergias = sinergiasDe(b.id);
-    const isHover = hoverBancada === b.id;
-    const isEncaixe = encaixeBancada === b.id;
-    const isErro = erroBancada === b.id;
-    const isCategoria = b.tipo_principal === 'CATEGORIA';
-    const isCompativel = (cardAtivo || draggingId) && bancadaCompativel(b);
-    const alturaClass = isCategoria ? (alocs.length > 0 || sinergias.length > 0 ? 'min-h-[78px]' : 'h-[78px]') : 'h-[78px]';
-    const classes = [
-      'w-[140px]', alturaClass,
-      'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200',
-      isCompativel ? 'bancada-compativel' : '',
-      isEncaixe ? 'bancada-encaixe' : '',
-      isErro ? 'bancada-erro' : '',
-      isHover && !isCompativel ? 'ring-2 ring-green-500/80 shadow-xl shadow-green-500/20' : '',
-    ].join(' ');
-    return (
-      <div
-        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setHoverBancada(b.id); }}
-        onDragLeave={() => setHoverBancada(null)}
-        onDrop={(e) => {
-          e.preventDefault(); setHoverBancada(null);
-          const idDropped = e.dataTransfer.getData('text/plain') || draggingId;
-          if (idDropped) alocarColab(idDropped, b);
-        }}
-        onClick={() => { if (cardAtivo && bancadaCompativel(b)) alocarColab(cardAtivo, b); }}
-        className={classes}
-        style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}>
-        <div className="flex items-center justify-between px-1.5 pt-0.5 pb-0">
-          <div className="flex items-center gap-1 min-w-0">
-            <span className={'text-[9px] font-bold ' + cor.text + ' uppercase tracking-wider'}>{b.tipo_principal}</span>
-            {b.subtipo && <span className="text-[8px] text-purple-300/70 truncate">· {b.subtipo}</span>}
-            {isCategoria && alocs.length > 0 && (<span className="text-[8px] text-gray-500 ml-0.5">({alocs.length})</span>)}
-          </div>
-          <div className="flex items-center gap-0.5 flex-shrink-0">
-            {b.tipo_principal === 'CATEGORIA' && (
-              <button onClick={(e) => { e.stopPropagation(); abrirModalEditarSubtipo(b); }}
-                className="text-gray-600 hover:text-white text-[9px] leading-none" title="Editar sub-tipo">✏️</button>
-            )}
-            {!b.fixo_categoria && (
-              <button onClick={(e) => { e.stopPropagation(); limparBancada(b); }}
-                className="text-gray-600 hover:text-red-400 text-[10px] leading-none" title="Limpar">×</button>
-            )}
-          </div>
-        </div>
-        {isCategoria ? (
-          <div className="flex-1 flex flex-col gap-0.5 px-1 pb-1 pt-0.5">
-            {alocs.length === 0 && sinergias.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-[9px] text-gray-700 italic">Arrasta colabs</div>
-            ) : (
-              <>
-                {alocs.map((a) => <CardColabBancada key={a.id} aloc={a} expandido bancadaAtual={b} />)}
-                {sinergias.map((s) => <CardSinergia key={'syn-' + s.id} aloc={s} expandido />)}
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="flex-1 flex gap-1 px-1 pb-1 pt-0.5">
-            {alocs.length === 0 && sinergias.length === 0 ? (<div className="flex-1" />) : (
-              <>
-                {alocs.map((a) => <CardColabBancada key={a.id} aloc={a} bancadaAtual={b} />)}
-                {sinergias.map((s) => <CardSinergia key={'syn-' + s.id} aloc={s} />)}
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
+  const widthClass = aberta ? 'w-[220px]' : 'w-[48px]';
 
-  function Esteira() {
-    return (<div className="w-[44px] mx-1 rounded-sm border border-[#444]" style={{ minHeight: ALTURA_COLUNA + 'px', background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)' }} aria-hidden="true" />);
-  }
-
-  function ColunaBancadas({ linha, lado, qtd, alinharFundo = false }: { linha: number; lado: string; qtd: number; alinharFundo?: boolean }) {
-    return (
-      <div className={'flex flex-col gap-2 ' + (alinharFundo ? 'justify-end' : 'justify-start')} style={{ minHeight: ALTURA_COLUNA + 'px' }}>
-        {Array.from({ length: qtd }, (_, i) => (
-          <SlotBancada key={linha + '-' + lado + '-' + (i + 1)} linha={linha} lado={lado} posicao={i + 1} />
-        ))}
-      </div>
-    );
-  }
-
-  function ZonaCentral() {
-    return (
-      <div className="border-2 border-dashed border-[#3a3a2a] rounded-md p-3 self-start">
-        <div className="text-center mb-2">
-          <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
-        </div>
-        <div className="grid grid-cols-2 gap-2 items-start">
-          <SlotBancada linha={1} lado="centro" posicao={1} />
-          <SlotBancada linha={2} lado="centro" posicao={1} />
-          <SlotBancada linha={1} lado="centro" posicao={2} />
-          <SlotBancada linha={2} lado="centro" posicao={2} />
-        </div>
-      </div>
-    );
-  }
-
-  function HeaderLinha({ linha }: { linha: number }) {
-    const nome = linha === 1 ? nomesLinhas.linha1 : nomesLinhas.linha2;
-    const editando = editandoLinha === linha;
-    const ritmoLinha = calcularRitmoLinha(linha);
-    const corLinha = corRitmoLinha(ritmoLinha.pctMedio, metas);
-    return (
-      <div className="flex flex-col items-center gap-1 mb-2">
-        {editando ? (
-          <input autoFocus type="text" maxLength={30} value={nomeTemp}
-            onChange={(e) => setNomeTemp(e.target.value)}
-            onBlur={() => { if (nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim()); else setEditandoLinha(null); }}
-            onKeyDown={(e) => { if (e.key === 'Enter' && nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim()); if (e.key === 'Escape') setEditandoLinha(null); }}
-            className="nome-linha-input" />
-        ) : (
-          <span className="nome-linha-display text-[11px] text-gray-400 font-bold uppercase tracking-widest"
-            onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }} title="Click pra editar">{nome} 🖊️</span>
-        )}
-        {ritmoLinha.totalAtivos > 0 ? (
-          <div className="bg-[#0f0f0f] border border-[#2a2a2a] rounded-md px-3 py-1.5 flex items-center gap-2 ritmo-linha-pulse">
-            <span className="text-[10px] text-gray-500 font-bold">RITMO:</span>
-            <span className={'text-base font-black ' + corLinha.texto}>{ritmoLinha.pctMedio}%</span>
-            <span className="text-sm">{corLinha.emoji}</span>
-            {ritmoLinha.pecasHora > 0 && (
-              <span className="text-[9px] text-gray-500">· {ritmoLinha.pecasHora} pç/h</span>
-            )}
-            {ritmoLinha.totalUnidades > 0 && (
-              <span className="text-[9px] text-gray-600">({ritmoLinha.totalUnidades} pç / {ritmoLinha.totalHoras}h)</span>
-            )}
-            <div className="flex items-center gap-1 ml-1 pl-2 border-l border-[#2a2a2a]">
-              {ritmoLinha.supera > 0 && <span className="text-[10px] text-green-400">🟢 {ritmoLinha.supera}</span>}
-              {ritmoLinha.alinhado > 0 && <span className="text-[10px] text-blue-400">🔵 {ritmoLinha.alinhado}</span>}
-              {ritmoLinha.ofensor > 0 && <span className="text-[10px] text-red-400">🔴 {ritmoLinha.ofensor}</span>}
-              {ritmoLinha.semDado > 0 && <span className="text-[10px] text-gray-500">⚪ {ritmoLinha.semDado}</span>}
-            </div>
-          </div>
-        ) : (
-          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md px-3 py-1 text-[9px] text-gray-600 italic">Sem colabs alocados</div>
-        )}
-      </div>
-    );
-  }
-
-  const livres = colabsLivres();
+  // Agrupa items por seção
+  const grupos = menuItems.reduce<Record<string, typeof menuItems>>((acc, item) => {
+    if (!acc[item.secao]) acc[item.secao] = [];
+    acc[item.secao].push(item);
+    return acc;
+  }, {});
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <>
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
       
-      <header className="border-b border-[#1a1a1a] px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold">
-            🏭 <span className="text-yellow-400">Mapeamento Linha</span>
-            <span className="text-gray-500 text-sm font-normal ml-2">· P2M</span>
-          </h1>
-          <span className="text-[10px] text-gray-500">{new Date().toLocaleDateString('pt-BR')}</span>
-          <span className="text-[10px] text-gray-500">· Metas: {metas.p2m_base}-{metas.p2m_alinhado_max}</span>
-          {cardAtivo && (<span className="text-[10px] text-yellow-400 font-bold animate-pulse">✨ Card ativado · click na bancada (ESC)</span>)}
-        </div>
-        <div className="flex items-center gap-2">
-          <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleUploadCSV} className="hidden" />
-          <button onClick={() => setModalRotacao(true)} disabled={rotacionando}
-            className="bg-purple-500/10 border border-purple-500/50 text-purple-300 text-xs px-3 py-1.5 rounded hover:bg-purple-500/20 transition disabled:opacity-50">🔄 Rotacionar</button>
-          <button onClick={limparRitmos}
-            className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-2 py-1.5 rounded hover:bg-red-500/20 transition"
-            title="Limpar ritmos do dia">🧹 Limpar CSV</button>
-          <button onClick={() => fileInputRef.current?.click()}
-            className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition">↑ Upload Boletim</button>
-        </div>
-      </header>
-
-      {loading && (<div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>)}
-
-      {!loading && (
-        <div className={'flex gap-3 p-3 ' + (rotacionando ? 'canvas-rotacionando' : '')}>
-          <aside className="w-[180px] flex-shrink-0">
-            <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md p-2">
-              <div className="flex items-center justify-between mb-2 px-1">
-                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">Livres</span>
-                <span className="text-[10px] text-gray-500">{livres.length}</span>
-              </div>
-              <div className="text-[9px] text-gray-600 italic mb-2 px-1">Arrasta ou double-click</div>
-              <div className="max-h-[calc(100vh-160px)] overflow-y-auto pr-1">
-                {livres.length === 0 ? (
-                  <div className="text-[10px] text-gray-600 italic text-center py-4">Todos alocados</div>
-                ) : (livres.map((c) => <CardColabSidebar key={c.id_groot} c={c} />))}
-              </div>
+      <aside
+        className={'sidebar-transition bg-[#0a0a0a] border-r border-[#1a1a1a] flex flex-col h-screen sticky top-0 ' + widthClass}
+        style={{ overflow: 'hidden' }}
+      >
+        {/* TOPO - Botão toggle + Logo */}
+        <div className="border-b border-[#1a1a1a] flex items-center" style={{ height: '52px' }}>
+          <button
+            onClick={() => setAberta(!aberta)}
+            className="toggle-btn flex items-center justify-center text-yellow-400 hover:text-yellow-300"
+            style={{ width: '48px', height: '52px', flexShrink: 0 }}
+            title={aberta ? 'Fechar (Ctrl+B)' : 'Abrir (Ctrl+B)'}
+          >
+            <span className="text-lg">☰</span>
+          </button>
+          {aberta && (
+            <div className="sidebar-content-fade flex items-center justify-between flex-1 pr-3">
+              <h1 className="text-sm font-bold text-white">
+                LÍDER <span className="text-yellow-400">360</span>
+              </h1>
+              <span className="text-[10px] text-gray-500 bg-[#1a1a1a] px-1.5 py-0.5 rounded">CD</span>
             </div>
-          </aside>
-          <main className="flex-1 flex gap-4 items-start justify-center overflow-x-auto">
-            <section className="flex flex-col items-center">
-              <HeaderLinha linha={1} />
-              <div className="flex gap-1 items-stretch">
-                <ColunaBancadas linha={1} lado="esquerdo" qtd={LAYOUT.L1_ESQ} />
-                <Esteira />
-                <ColunaBancadas linha={1} lado="direito" qtd={LAYOUT.L1_DIR} alinharFundo />
-              </div>
-              <div className="text-gray-700 text-xs mt-2">↓</div>
-            </section>
-            <section className="flex flex-col items-center mt-5">
-              <ZonaCentral />
-            </section>
-            <section className="flex flex-col items-center">
-              <HeaderLinha linha={2} />
-              <div className="flex gap-1 items-stretch">
-                <ColunaBancadas linha={2} lado="esquerdo" qtd={LAYOUT.L2_ESQ} alinharFundo />
-                <Esteira />
-                <ColunaBancadas linha={2} lado="direito" qtd={LAYOUT.L2_DIR} />
-              </div>
-              <div className="text-gray-700 text-xs mt-2">↓</div>
-            </section>
-          </main>
+          )}
         </div>
-      )}
 
-      {/* 🎨 TOAST CONTAINER (canto inferior direito) */}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
-        {toasts.map((t) => {
-          const corClass = t.tipo === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-300' :
-                          t.tipo === 'error' ? 'bg-red-500/20 border-red-500/50 text-red-300' :
-                          'bg-blue-500/20 border-blue-500/50 text-blue-300';
-          return (
-            <div key={t.id}
-              className={'toast-in ' + corClass + ' border rounded-lg px-4 py-2 text-xs font-medium shadow-xl backdrop-blur-sm min-w-[200px] max-w-[400px]'}>
-              {t.msg}
-            </div>
-          );
-        })}
-      </div>
+        {/* CONTEÚDO - só se aberta */}
+        {aberta && (
+          <div className="sidebar-content flex-1 overflow-y-auto py-3">
+            {/* Menu agrupado por seção */}
+            {Object.entries(grupos).map(([secao, items]) => (
+              <div key={secao} className="mb-4">
+                <div className="px-3 mb-1.5">
+                  <span className="text-[9px] text-gray-600 font-bold uppercase tracking-wider">{secao}</span>
+                </div>
+                <nav className="space-y-0.5">
+                  {items.map((item) => {
+                    const isActive = pathname === item.path;
+                    return (
+                      <Link
+                        key={item.path}
+                        href={item.path}
+                        className={
+                          'flex items-center gap-2 px-3 py-2 mx-1.5 rounded text-xs transition ' +
+                          (isActive
+                            ? 'bg-yellow-500/15 text-yellow-300 font-bold border-l-2 border-yellow-400'
+                            : 'text-gray-400 hover:bg-[#1a1a1a] hover:text-white')
+                        }
+                      >
+                        <span className="text-sm">{item.icon}</span>
+                        <span>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+            ))}
 
-      {/* 🎨 MODAL DE CONFIRMAÇÃO CUSTOM */}
-      {confirmModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[90] p-4"
-          onClick={() => setConfirmModal(null)}>
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-sm w-full slide-in"
-            onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm text-white mb-4">{confirmModal.msg}</p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmModal(null)}
-                className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">Cancelar</button>
-              <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }}
-                className="px-4 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition">Confirmar</button>
+            {/* ATALHOS - Grid 4x2 */}
+            <div className="mt-4 pt-3 border-t border-[#1a1a1a]">
+              <div className="px-3 mb-2">
+                <span className="text-[9px] text-gray-600 font-bold uppercase tracking-wider">Atalhos</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 px-1.5">
+                {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
+                  const slot = i + 1;
+                  const atalho = getAtalhoSlot(slot);
+                  
+                  if (atalho) {
+                    return (
+                      <button
+                        key={slot}
+                        onClick={() => clickAtalho(atalho)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          abrirModalEditar(atalho);
+                        }}
+                        className="atalho-slot aspect-square bg-[#1a1a1a] border border-[#2a2a2a] rounded flex items-center justify-center text-[11px] font-bold text-yellow-300 hover:border-yellow-500/50 hover:bg-yellow-500/10"
+                        title={atalho.url + ' (Right-click pra editar)'}
+                      >
+                        {atalho.nome_curto}
+                      </button>
+                    );
+                  }
+                  
+                  return (
+                    <button
+                      key={slot}
+                      onClick={() => abrirModalNovo(slot)}
+                      className="atalho-slot atalho-slot-empty aspect-square border-2 rounded flex items-center justify-center text-[14px] text-gray-700 hover:text-yellow-400"
+                      title="Adicionar atalho"
+                    >
+                      +
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* MODAL ROTAÇÃO */}
-      {modalRotacao && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setModalRotacao(false)}>
-          <div className="bg-[#1a1a1a] border border-purple-500/30 rounded-lg p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-sm font-bold text-purple-300 mb-3">🔄 Rotacionar</h2>
-            <div className="space-y-2">
-              <button onClick={() => aplicarRotacao(1)} disabled={rotacionando}
-                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
-                <div className="text-xs font-bold text-white mb-0.5">Rotação 1 · Sem Pesca</div>
-                <div className="text-[10px] text-gray-500">Esq sobe → Categoria → Dir desce</div>
-              </button>
-              <button onClick={() => aplicarRotacao(2)} disabled={rotacionando}
-                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
-                <div className="text-xs font-bold text-white mb-0.5">Rotação 2 · Com Pesca</div>
-                <div className="text-[10px] text-gray-500">Dupla atravessa: Pesca + Categoria</div>
-              </button>
-              <button onClick={() => aplicarRotacao(3)} disabled={rotacionando}
-                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
-                <div className="text-xs font-bold text-white mb-0.5">Rotação 3 · Nivelar Dia</div>
-                <div className="text-[10px] text-gray-500">Topo ↔ Último (mesmo lado)</div>
-              </button>
-            </div>
-            <button onClick={() => setModalRotacao(false)} disabled={rotacionando}
-              className="w-full mt-3 text-[10px] text-gray-500 hover:text-white transition py-1 disabled:opacity-50">Cancelar</button>
-            {rotacionando && (<div className="text-center text-[10px] text-purple-400 mt-2 animate-pulse">Rotacionando...</div>)}
+        {/* FOOTER - só se aberta */}
+        {aberta && (
+          <div className="border-t border-[#1a1a1a] p-3 sidebar-content-fade">
+            <p className="text-[9px] text-gray-500">
+              Dev: <strong className="text-gray-400">Delman Pereira</strong>
+            </p>
+            <p className="text-[9px] text-gray-600 mt-0.5">RC01 Perus · v2.0</p>
           </div>
-        </div>
-      )}
+        )}
+      </aside>
 
-      {/* MODAL EDITAR CATEGORIA */}
-      {modal && modal.bancadaExistente && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={fecharModal}>
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-base font-bold text-white mb-1">Editar Categoria</h2>
-            <p className="text-xs text-gray-500 mb-4">Linha {modal.linha} · Zona Central</p>
+      {/* MODAL: Criar/Editar atalho */}
+      {(modalSlot !== null || modalEditar !== null) && (
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4"
+          onClick={fecharModal}
+        >
+          <div
+            className="modal-atalho bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-sm font-bold text-white mb-1">
+              {modalEditar ? '✏️ Editar Atalho' : '🔗 Novo Atalho'}
+            </h2>
+            <p className="text-[10px] text-gray-500 mb-4">
+              {modalEditar ? 'Slot ' + modalEditar.slot : 'Slot ' + modalSlot}
+            </p>
+            
+            <div className="mb-3">
+              <label className="text-[10px] text-gray-400 mb-1 block">
+                Nome curto (3 letras ou emoji):
+              </label>
+              <input
+                type="text"
+                value={formNome}
+                onChange={(e) => setFormNome(e.target.value)}
+                maxLength={4}
+                placeholder="📊 ou ML"
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-3 py-2 text-sm text-white focus:border-yellow-500/50 focus:outline-none"
+                autoFocus
+              />
+            </div>
+            
             <div className="mb-4">
-              <label className="text-xs text-gray-400 mb-1.5 block">Sub-tipo:</label>
-              <div className="grid grid-cols-2 gap-2">
-                {SUBTIPOS_CATEGORIA.map((s) => (
-                  <button key={s} onClick={() => setModalSubtipo(s)}
-                    className={'py-1.5 px-2 rounded text-xs font-medium border transition ' + (modalSubtipo === s ? 'border-purple-500 bg-purple-500/20 text-purple-300' : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')}>{s}</button>
-                ))}
-              </div>
+              <label className="text-[10px] text-gray-400 mb-1 block">URL do site:</label>
+              <input
+                type="text"
+                value={formUrl}
+                onChange={(e) => setFormUrl(e.target.value)}
+                placeholder="https://meusite.com"
+                onKeyDown={(e) => { if (e.key === 'Enter') salvarAtalho(); }}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-3 py-2 text-xs text-white focus:border-yellow-500/50 focus:outline-none"
+              />
             </div>
-            <div className="flex gap-2 justify-end pt-2 border-t border-[#2a2a2a]">
-              <button onClick={fecharModal} className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">Cancelar</button>
-              <button onClick={salvarModal} className="px-4 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition">Salvar</button>
+            
+            <div className="flex gap-2 justify-between items-center pt-2 border-t border-[#2a2a2a]">
+              {modalEditar ? (
+                <button
+                  onClick={() => setConfirmRemover(modalEditar)}
+                  className="text-[10px] text-red-400 hover:text-red-300 transition"
+                >🗑️ Remover</button>
+              ) : <div />}
+              <div className="flex gap-2">
+                <button
+                  onClick={fecharModal}
+                  className="px-3 py-1.5 text-xs text-gray-400 hover:text-white transition"
+                >Cancelar</button>
+                <button
+                  onClick={salvarAtalho}
+                  className="px-3 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition"
+                >Salvar</button>
+              </div>
             </div>
           </div>
         </div>
       )}
-    </div>
+
+      {/* MODAL: Confirmar remoção */}
+      {confirmRemover && (
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-[110] p-4"
+          onClick={() => setConfirmRemover(null)}
+        >
+          <div
+            className="modal-atalho bg-[#1a1a1a] border border-red-500/30 rounded-lg p-4 max-w-xs w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm text-white mb-3">Remover atalho <strong className="text-yellow-400">{confirmRemover.nome_curto}</strong>?</p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmRemover(null)}
+                className="px-3 py-1.5 text-xs text-gray-400 hover:text-white"
+              >Cancelar</button>
+              <button
+                onClick={() => removerAtalho(confirmRemover)}
+                className="px-3 py-1.5 text-xs font-bold bg-red-500/20 border border-red-500/50 text-red-400 rounded hover:bg-red-500/30"
+              >Remover</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST */}
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-[120] toast-feedback">
+          <div className={
+            'border rounded-lg px-4 py-2 text-xs font-medium shadow-xl backdrop-blur-sm min-w-[200px] ' +
+            (toast.tipo === 'success' 
+              ? 'bg-green-500/20 border-green-500/50 text-green-300'
+              : 'bg-red-500/20 border-red-500/50 text-red-300')
+          }>
+            {toast.msg}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
