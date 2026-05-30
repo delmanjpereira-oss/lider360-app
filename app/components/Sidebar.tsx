@@ -162,11 +162,8 @@ export default function Sidebar() {
       urlFinal = 'https://' + urlFinal;
     }
 
-    // Limita nome em 3 chars (a não ser que seja emoji)
-    let nomeFinal = formNome.trim();
-    if (nomeFinal.length > 3 && !/\p{Emoji}/u.test(nomeFinal)) {
-      nomeFinal = nomeFinal.substring(0, 3);
-    }
+    // Limita nome em 4 chars max (cabe 3 letras OU 1-2 emojis)
+    let nomeFinal = formNome.trim().substring(0, 4);
 
     if (modalEditar) {
       // Edição
