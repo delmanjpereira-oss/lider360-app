@@ -38,9 +38,11 @@ const MENU = [
 ];
 
 const TOTAL_SLOTS = 12;
+const STORAGE_KEY = 'lider360_sidebar_aberta';
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [aberta, setAberta] = useState(true);
   const [atalhos, setAtalhos] = useState<Atalho[]>([]);
   const [modalSlot, setModalSlot] = useState<number | null>(null);
   const [modalEditar, setModalEditar] = useState<Atalho | null>(null);
@@ -52,10 +54,27 @@ export default function Sidebar() {
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null);
   const [confirmRemover, setConfirmRemover] = useState<Atalho | null>(null);
 
+  // Carrega estado da sidebar
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved !== null) setAberta(saved === 'true');
+  }, []);
+
+  // Salva estado quando muda
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(STORAGE_KEY, String(aberta));
+  }, [aberta]);
+
   useEffect(() => { carregarAtalhos(); }, []);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+        e.preventDefault();
+        setAberta((prev) => !prev);
+      }
       if (e.key === 'Escape') {
         setModalSlot(null);
         setModalEditar(null);
@@ -145,7 +164,6 @@ export default function Sidebar() {
       urlFinal = 'https://' + urlFinal;
     }
     const nomeFinal = emojiPreview.substring(0, 4);
-
     if (modalEditar) {
       const { error } = await supabase.from('atalhos_sidebar')
         .update({ nome_curto: nomeFinal, url: urlFinal })
@@ -179,102 +197,119 @@ export default function Sidebar() {
     return atalhos.find((a) => a.slot === slot) || null;
   }
 
+  // Largura dinâmica - SEM transition complexa
+  const widthClass = aberta ? 'w-64' : 'w-14';
+
   return (
-    <aside className="w-64 bg-[#0a0a0a] border-r border-[#2a2a2a] flex flex-col h-screen sticky top-0">
-      {/* Logo */}
-      <div className="p-5 border-b border-[#2a2a2a]">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="text-2xl">🚀</span>
-          <div>
-            <h1 className="text-lg font-black text-white">
-              LIDER <span className="text-[#FFD700]">360</span>
-            </h1>
-            <p className="text-[10px] text-gray-500">RC01 Perus · MELI</p>
-          </div>
-        </Link>
+    <aside className={widthClass + ' bg-[#0a0a0a] border-r border-[#2a2a2a] flex flex-col h-screen sticky top-0 transition-all duration-300'}>
+      {/* TOPO COM BOTÃO ☰ + LOGO */}
+      <div className="border-b border-[#2a2a2a] flex items-center" style={{ minHeight: '76px' }}>
+        <button
+          onClick={() => setAberta(!aberta)}
+          className="flex items-center justify-center text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10 transition-all"
+          style={{ width: '56px', height: '76px', flexShrink: 0 }}
+          title={aberta ? 'Fechar sidebar (Ctrl+B)' : 'Abrir sidebar (Ctrl+B)'}
+        >
+          <span className="text-xl">☰</span>
+        </button>
+        {aberta && (
+          <Link href="/" className="flex items-center gap-2 flex-1 pr-3">
+            <span className="text-2xl">🚀</span>
+            <div>
+              <h1 className="text-lg font-black text-white">
+                LIDER <span className="text-[#FFD700]">360</span>
+              </h1>
+              <p className="text-[10px] text-gray-500">RC01 Perus · MELI</p>
+            </div>
+          </Link>
+        )}
       </div>
 
-      {/* Menu */}
-      <nav className="flex-1 overflow-y-auto py-4">
-        {MENU.map((secao) => (
-          <div key={secao.titulo} className="mb-6">
-            <p className="px-5 mb-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-              {secao.titulo}
-            </p>
-            <ul>
-              {secao.items.map((item: any) => {
-                const ativo = pathname === item.href || 
-                              (item.href !== '/' && pathname.startsWith(item.href));
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      className={`flex items-center gap-3 px-5 py-2.5 text-sm transition-all relative ${
-                        ativo
-                          ? 'bg-[#FFD700]/10 text-[#FFD700] border-l-4 border-[#FFD700]'
-                          : 'text-gray-400 hover:bg-[#1a1a1a] hover:text-white border-l-4 border-transparent'
-                      }`}
+      {/* MENU - Só aparece quando aberta */}
+      {aberta && (
+        <>
+          <nav className="flex-1 overflow-y-auto py-4">
+            {MENU.map((secao) => (
+              <div key={secao.titulo} className="mb-6">
+                <p className="px-5 mb-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  {secao.titulo}
+                </p>
+                <ul>
+                  {secao.items.map((item: any) => {
+                    const ativo = pathname === item.href ||
+                                  (item.href !== '/' && pathname.startsWith(item.href));
+                    return (
+                      <li key={item.href}>
+                        <Link
+                          href={item.href}
+                          className={`flex items-center gap-3 px-5 py-2.5 text-sm transition-all relative ${
+                            ativo
+                              ? 'bg-[#FFD700]/10 text-[#FFD700] border-l-4 border-[#FFD700]'
+                              : 'text-gray-400 hover:bg-[#1a1a1a] hover:text-white border-l-4 border-transparent'
+                          }`}
+                        >
+                          <span className="text-lg">{item.icon}</span>
+                          <span className="font-bold">{item.nome}</span>
+                          {item.destaque && !ativo && (
+                            <span className="ml-auto text-[9px] bg-gradient-to-br from-purple-500 to-pink-500 text-white px-1.5 py-0.5 rounded-full font-bold">
+                              NOVO
+                            </span>
+                          )}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+
+            {/* ATALHOS - Grid 4x3 (12 slots) */}
+            <div className="mt-2 pt-4 border-t border-[#2a2a2a]">
+              <div className="flex items-center justify-between px-5 mb-2">
+                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Atalhos</p>
+                <span className="text-[9px] text-gray-600">🤖 IA</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 px-3">
+                {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
+                  const slot = i + 1;
+                  const atalho = getAtalhoSlot(slot);
+                  if (atalho) {
+                    return (
+                      <button
+                        key={slot}
+                        onClick={() => clickAtalho(atalho)}
+                        onContextMenu={(e) => { e.preventDefault(); abrirModalEditar(atalho); }}
+                        className="aspect-square bg-[#1a1a1a] border border-[#2a2a2a] rounded flex items-center justify-center text-[16px] font-bold text-yellow-300 hover:border-yellow-500/50 hover:bg-yellow-500/10 transition-all hover:scale-105"
+                        title={atalho.url + ' (Right-click pra editar)'}
+                      >
+                        {atalho.nome_curto}
+                      </button>
+                    );
+                  }
+                  return (
+                    <button
+                      key={slot}
+                      onClick={() => abrirModalNovo(slot)}
+                      className="aspect-square border-2 border-dashed border-[#2a2a2a] rounded flex items-center justify-center text-[14px] text-gray-700 hover:border-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/5 transition-all"
+                      title="Adicionar atalho"
                     >
-                      <span className="text-lg">{item.icon}</span>
-                      <span className="font-bold">{item.nome}</span>
-                      {item.destaque && !ativo && (
-                        <span className="ml-auto text-[9px] bg-gradient-to-br from-purple-500 to-pink-500 text-white px-1.5 py-0.5 rounded-full font-bold">
-                          NOVO
-                        </span>
-                      )}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
+                      +
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </nav>
 
-        {/* ATALHOS - Grid 4x3 (12 slots) */}
-        <div className="mt-2 pt-4 border-t border-[#2a2a2a]">
-          <div className="flex items-center justify-between px-5 mb-2">
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Atalhos</p>
-            <span className="text-[9px] text-gray-600">🤖 IA</span>
+          {/* Footer */}
+          <div className="p-4 border-t border-[#2a2a2a]">
+            <div className="text-[10px] text-gray-500">
+              <p>dev. Delman J. Pereira</p>
+              <p>Team Lider · RC01</p>
+            </div>
           </div>
-          <div className="grid grid-cols-4 gap-1.5 px-3">
-            {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
-              const slot = i + 1;
-              const atalho = getAtalhoSlot(slot);
-              if (atalho) {
-                return (
-                  <button
-                    key={slot}
-                    onClick={() => clickAtalho(atalho)}
-                    onContextMenu={(e) => { e.preventDefault(); abrirModalEditar(atalho); }}
-                    className="aspect-square bg-[#1a1a1a] border border-[#2a2a2a] rounded flex items-center justify-center text-[16px] font-bold text-yellow-300 hover:border-yellow-500/50 hover:bg-yellow-500/10 transition-all hover:scale-105"
-                    title={atalho.url + ' (Right-click pra editar)'}
-                  >
-                    {atalho.nome_curto}
-                  </button>
-                );
-              }
-              return (
-                <button
-                  key={slot}
-                  onClick={() => abrirModalNovo(slot)}
-                  className="aspect-square border-2 border-dashed border-[#2a2a2a] rounded flex items-center justify-center text-[14px] text-gray-700 hover:border-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/5 transition-all"
-                  title="Adicionar atalho"
-                >
-                  +
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </nav>
-
-      {/* Footer */}
-      <div className="p-4 border-t border-[#2a2a2a]">
-        <div className="text-[10px] text-gray-500">
-          <p>dev. Delman J. Pereira</p>
-          <p>Team Lider · RC01</p>
-        </div>
-      </div>
+        </>
+      )}
 
       {/* MODAL: Criar/Editar atalho COM IA */}
       {(modalSlot !== null || modalEditar !== null) && (
@@ -292,8 +327,7 @@ export default function Sidebar() {
             <p className="text-[10px] text-gray-500 mb-4">
               {modalEditar ? 'Slot ' + modalEditar.slot : 'Slot ' + modalSlot}
             </p>
-            
-            {/* PREVIEW DO EMOJI */}
+
             <div className="flex items-center gap-3 mb-4 p-3 bg-[#0a0a0a] border border-[#2a2a2a] rounded">
               <div className={'w-14 h-14 bg-[#1a1a1a] border border-yellow-500/30 rounded flex items-center justify-center text-2xl transition-all ' + (gerandoEmoji ? 'animate-pulse' : '')}>
                 {gerandoEmoji ? (
@@ -330,7 +364,7 @@ export default function Sidebar() {
                 </div>
               </div>
             </div>
-            
+
             <div className="mb-3">
               <label className="text-[10px] text-gray-400 mb-1 block">
                 Nome do site (a IA vai gerar emoji automaticamente):
@@ -344,7 +378,7 @@ export default function Sidebar() {
                 autoFocus
               />
             </div>
-            
+
             <div className="mb-4">
               <label className="text-[10px] text-gray-400 mb-1 block">URL do site:</label>
               <input
@@ -356,7 +390,7 @@ export default function Sidebar() {
                 className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-3 py-2 text-xs text-white focus:border-yellow-500/50 focus:outline-none"
               />
             </div>
-            
+
             <div className="flex gap-2 justify-between items-center pt-2 border-t border-[#2a2a2a]">
               {modalEditar ? (
                 <button
@@ -410,7 +444,7 @@ export default function Sidebar() {
         <div className="fixed bottom-4 right-4 z-[120]">
           <div className={
             'border rounded-lg px-4 py-2 text-xs font-medium shadow-xl backdrop-blur-sm min-w-[200px] ' +
-            (toast.tipo === 'success' 
+            (toast.tipo === 'success'
               ? 'bg-green-500/20 border-green-500/50 text-green-300'
               : 'bg-red-500/20 border-red-500/50 text-red-300')
           }>
