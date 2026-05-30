@@ -11,10 +11,30 @@ interface Atalho {
   url: string;
 }
 
-const menuItems = [
-  { path: '/copiloto', label: 'Copilot IA', icon: '🤖', secao: 'INTELIGÊNCIA' },
-  { path: '/linha', label: 'Mapeamento Linha', icon: '🏭', secao: 'INTELIGÊNCIA' },
-  { path: '/config', label: 'Configurações', icon: '⚙️', secao: 'CONFIGURAÇÕES' },
+const MENU = [
+  {
+    titulo: 'OPERAÇÃO DIÁRIA',
+    items: [
+      { nome: 'Calculadora NET', href: '/calculadora', icon: '🎯' },
+      { nome: 'Lista de Presença', href: '/presenca', icon: '📋' },
+      { nome: 'Mapeamento Linha', href: '/linha', icon: '🏭', destaque: true },
+      { nome: 'Copiloto IA', href: '/copiloto', icon: '🤖' },
+    ],
+  },
+  {
+    titulo: 'GESTÃO DE TIME',
+    items: [
+      { nome: 'Meu Time', href: '/meu-time', icon: '👥' },
+      { nome: 'Calibração', href: '/calibracao', icon: '⚖️' },
+      { nome: 'Boletim', href: '/boletim', icon: '📊' },
+    ],
+  },
+  {
+    titulo: 'CONFIGURAÇÕES',
+    items: [
+      { nome: 'Configurações', href: '/configuracoes', icon: '⚙️' },
+    ],
+  },
 ];
 
 const SIDEBAR_STORAGE_KEY = 'lider360_sidebar_aberta';
@@ -25,10 +45,6 @@ const STYLES = `
     from { opacity: 0; transform: translateX(-10px); }
     to { opacity: 1; transform: translateX(0); }
   }
-  @keyframes pulseGold {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.5); }
-    50% { box-shadow: 0 0 0 4px rgba(255, 215, 0, 0); }
-  }
   @keyframes modalSlideIn {
     from { opacity: 0; transform: scale(0.9) translateY(-10px); }
     to { opacity: 1; transform: scale(1) translateY(0); }
@@ -38,10 +54,7 @@ const STYLES = `
     to { opacity: 1; transform: translateX(0); }
   }
   .sidebar-transition {
-    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease;
-  }
-  .sidebar-content-fade {
-    transition: opacity 0.2s ease;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .atalho-slot {
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -86,25 +99,19 @@ export default function Sidebar() {
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null);
   const [confirmRemover, setConfirmRemover] = useState<Atalho | null>(null);
 
-  // Carrega estado da sidebar do localStorage
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY);
     if (saved !== null) setAberta(saved === 'true');
   }, []);
 
-  // Salva estado quando muda
   useEffect(() => {
     if (typeof window === 'undefined') return;
     localStorage.setItem(SIDEBAR_STORAGE_KEY, String(aberta));
   }, [aberta]);
 
-  // Carrega atalhos do Supabase
-  useEffect(() => {
-    carregarAtalhos();
-  }, []);
+  useEffect(() => { carregarAtalhos(); }, []);
 
-  // Atalho de teclado: Ctrl+B pra toggle sidebar
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
@@ -155,25 +162,19 @@ export default function Sidebar() {
       showToast('error', 'Preencha nome e URL');
       return;
     }
-
-    // Valida URL
     let urlFinal = formUrl.trim();
     if (!urlFinal.startsWith('http://') && !urlFinal.startsWith('https://')) {
       urlFinal = 'https://' + urlFinal;
     }
-
-    // Limita nome em 4 chars max (cabe 3 letras OU 1-2 emojis)
     let nomeFinal = formNome.trim().substring(0, 4);
 
     if (modalEditar) {
-      // Edição
       const { error } = await supabase.from('atalhos_sidebar')
         .update({ nome_curto: nomeFinal, url: urlFinal })
         .eq('id', modalEditar.id);
       if (error) { showToast('error', 'Erro: ' + error.message); return; }
       showToast('success', '✅ Atalho atualizado');
     } else if (modalSlot) {
-      // Novo
       const { error } = await supabase.from('atalhos_sidebar').insert({
         slot: modalSlot,
         nome_curto: nomeFinal,
@@ -182,7 +183,6 @@ export default function Sidebar() {
       if (error) { showToast('error', 'Erro: ' + error.message); return; }
       showToast('success', '✅ Atalho criado');
     }
-
     fecharModal();
     await carregarAtalhos();
   }
@@ -203,126 +203,129 @@ export default function Sidebar() {
     return atalhos.find((a) => a.slot === slot) || null;
   }
 
-  const widthClass = aberta ? 'w-[220px]' : 'w-[48px]';
-
-  // Agrupa items por seção
-  const grupos = menuItems.reduce<Record<string, typeof menuItems>>((acc, item) => {
-    if (!acc[item.secao]) acc[item.secao] = [];
-    acc[item.secao].push(item);
-    return acc;
-  }, {});
+  const widthClass = aberta ? 'w-64' : 'w-12';
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
       
       <aside
-        className={'sidebar-transition bg-[#0a0a0a] border-r border-[#1a1a1a] flex flex-col h-screen sticky top-0 ' + widthClass}
+        className={'sidebar-transition bg-[#0a0a0a] border-r border-[#2a2a2a] flex flex-col h-screen sticky top-0 ' + widthClass}
         style={{ overflow: 'hidden' }}
       >
         {/* TOPO - Botão toggle + Logo */}
-        <div className="border-b border-[#1a1a1a] flex items-center" style={{ height: '52px' }}>
+        <div className="border-b border-[#2a2a2a] flex items-center" style={{ minHeight: '76px' }}>
           <button
             onClick={() => setAberta(!aberta)}
             className="toggle-btn flex items-center justify-center text-yellow-400 hover:text-yellow-300"
-            style={{ width: '48px', height: '52px', flexShrink: 0 }}
+            style={{ width: '48px', height: '76px', flexShrink: 0 }}
             title={aberta ? 'Fechar (Ctrl+B)' : 'Abrir (Ctrl+B)'}
           >
             <span className="text-lg">☰</span>
           </button>
           {aberta && (
-            <div className="sidebar-content-fade flex items-center justify-between flex-1 pr-3">
-              <h1 className="text-sm font-bold text-white">
-                LÍDER <span className="text-yellow-400">360</span>
-              </h1>
-              <span className="text-[10px] text-gray-500 bg-[#1a1a1a] px-1.5 py-0.5 rounded">CD</span>
-            </div>
+            <Link href="/" className="flex items-center gap-2 flex-1 pr-3 py-3">
+              <span className="text-2xl">🦅</span>
+              <div>
+                <h1 className="text-lg font-black text-white">
+                  LIDER <span className="text-[#FFD700]">360</span>
+                </h1>
+                <p className="text-[10px] text-gray-500">RC01 Perus · MELI</p>
+              </div>
+            </Link>
           )}
         </div>
 
         {/* CONTEÚDO - só se aberta */}
         {aberta && (
-          <div className="sidebar-content flex-1 overflow-y-auto py-3">
-            {/* Menu agrupado por seção */}
-            {Object.entries(grupos).map(([secao, items]) => (
-              <div key={secao} className="mb-4">
-                <div className="px-3 mb-1.5">
-                  <span className="text-[9px] text-gray-600 font-bold uppercase tracking-wider">{secao}</span>
+          <>
+            <nav className="sidebar-content flex-1 overflow-y-auto py-4">
+              {MENU.map((secao) => (
+                <div key={secao.titulo} className="mb-6">
+                  <p className="px-5 mb-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                    {secao.titulo}
+                  </p>
+                  <ul>
+                    {secao.items.map((item: any) => {
+                      const ativo = pathname === item.href || 
+                                    (item.href !== '/' && pathname.startsWith(item.href));
+                      return (
+                        <li key={item.href}>
+                          <Link
+                            href={item.href}
+                            className={
+                              'flex items-center gap-3 px-5 py-2.5 text-sm transition-all relative ' + (
+                              ativo
+                                ? 'bg-[#FFD700]/10 text-[#FFD700] border-l-4 border-[#FFD700]'
+                                : 'text-gray-400 hover:bg-[#1a1a1a] hover:text-white border-l-4 border-transparent'
+                              )
+                            }
+                          >
+                            <span className="text-lg">{item.icon}</span>
+                            <span className="font-bold">{item.nome}</span>
+                            {item.destaque && !ativo && (
+                              <span className="ml-auto text-[9px] bg-gradient-to-br from-purple-500 to-pink-500 text-white px-1.5 py-0.5 rounded-full font-bold">
+                                NOVO
+                              </span>
+                            )}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
-                <nav className="space-y-0.5">
-                  {items.map((item) => {
-                    const isActive = pathname === item.path;
-                    return (
-                      <Link
-                        key={item.path}
-                        href={item.path}
-                        className={
-                          'flex items-center gap-2 px-3 py-2 mx-1.5 rounded text-xs transition ' +
-                          (isActive
-                            ? 'bg-yellow-500/15 text-yellow-300 font-bold border-l-2 border-yellow-400'
-                            : 'text-gray-400 hover:bg-[#1a1a1a] hover:text-white')
-                        }
-                      >
-                        <span className="text-sm">{item.icon}</span>
-                        <span>{item.label}</span>
-                      </Link>
-                    );
-                  })}
-                </nav>
-              </div>
-            ))}
+              ))}
 
-            {/* ATALHOS - Grid 4x2 */}
-            <div className="mt-4 pt-3 border-t border-[#1a1a1a]">
-              <div className="px-3 mb-2">
-                <span className="text-[9px] text-gray-600 font-bold uppercase tracking-wider">Atalhos</span>
-              </div>
-              <div className="grid grid-cols-4 gap-1.5 px-1.5">
-                {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
-                  const slot = i + 1;
-                  const atalho = getAtalhoSlot(slot);
-                  
-                  if (atalho) {
+              {/* ATALHOS - Grid 4x2 */}
+              <div className="mt-2 pt-4 border-t border-[#2a2a2a]">
+                <p className="px-5 mb-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  Atalhos
+                </p>
+                <div className="grid grid-cols-4 gap-1.5 px-3">
+                  {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
+                    const slot = i + 1;
+                    const atalho = getAtalhoSlot(slot);
+                    
+                    if (atalho) {
+                      return (
+                        <button
+                          key={slot}
+                          onClick={() => clickAtalho(atalho)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            abrirModalEditar(atalho);
+                          }}
+                          className="atalho-slot aspect-square bg-[#1a1a1a] border border-[#2a2a2a] rounded flex items-center justify-center text-[11px] font-bold text-yellow-300 hover:border-yellow-500/50 hover:bg-yellow-500/10"
+                          title={atalho.url + ' (Right-click pra editar)'}
+                        >
+                          {atalho.nome_curto}
+                        </button>
+                      );
+                    }
+                    
                     return (
                       <button
                         key={slot}
-                        onClick={() => clickAtalho(atalho)}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          abrirModalEditar(atalho);
-                        }}
-                        className="atalho-slot aspect-square bg-[#1a1a1a] border border-[#2a2a2a] rounded flex items-center justify-center text-[11px] font-bold text-yellow-300 hover:border-yellow-500/50 hover:bg-yellow-500/10"
-                        title={atalho.url + ' (Right-click pra editar)'}
+                        onClick={() => abrirModalNovo(slot)}
+                        className="atalho-slot atalho-slot-empty aspect-square border-2 rounded flex items-center justify-center text-[14px] text-gray-700 hover:text-yellow-400"
+                        title="Adicionar atalho"
                       >
-                        {atalho.nome_curto}
+                        +
                       </button>
                     );
-                  }
-                  
-                  return (
-                    <button
-                      key={slot}
-                      onClick={() => abrirModalNovo(slot)}
-                      className="atalho-slot atalho-slot-empty aspect-square border-2 rounded flex items-center justify-center text-[14px] text-gray-700 hover:text-yellow-400"
-                      title="Adicionar atalho"
-                    >
-                      +
-                    </button>
-                  );
-                })}
+                  })}
+                </div>
+              </div>
+            </nav>
+
+            {/* FOOTER */}
+            <div className="p-4 border-t border-[#2a2a2a]">
+              <div className="text-[10px] text-gray-500">
+                <p>Delman Pereira</p>
+                <p>TL P2M · RC01</p>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* FOOTER - só se aberta */}
-        {aberta && (
-          <div className="border-t border-[#1a1a1a] p-3 sidebar-content-fade">
-            <p className="text-[9px] text-gray-500">
-              Dev: <strong className="text-gray-400">Delman Pereira</strong>
-            </p>
-            <p className="text-[9px] text-gray-600 mt-0.5">RC01 Perus · v2.0</p>
-          </div>
+          </>
         )}
       </aside>
 
