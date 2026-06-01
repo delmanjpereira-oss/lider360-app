@@ -175,20 +175,16 @@ export default function LinhaPage() {
     setEditandoLinha(null);
   }
 
-  // 🛡️ CORRIGIDO: tolerante a espaços e case
   async function carregarColabs() {
     const { data } = await supabase
       .from('colaboradores')
       .select('id_groot, nome, processo, status')
       .order('nome');
-    
-    // Normaliza: TRIM + case-insensitive
     const filtrados = (data || []).filter((c: any) => {
       const proc = (c.processo || '').trim().toUpperCase();
       const stat = (c.status || '').trim().toLowerCase();
       return proc === 'P2M' && stat === 'ativo';
     });
-    
     setColabs(filtrados);
   }
 
@@ -483,11 +479,11 @@ export default function LinhaPage() {
       }
       const bancadasLinhaIds = ciclo.map((b) => b.id);
       const idsRemove = alocacoes.filter((a) => bancadasLinhaIds.includes(a.bancada_id)).map((a) => a.id);
-      
+
       if (idsRemove.length > 0) {
         await supabase.from('layout_alocacao').delete().in('id', idsRemove);
       }
-      
+
       if (novas.length > 0) {
         await supabase.from('layout_alocacao').insert(
           novas.map((n) => ({
@@ -513,10 +509,10 @@ export default function LinhaPage() {
         const bUltimo = getBancada(linha, lado, qtd);
         if (!bTopo || !bUltimo) continue;
         if (bTopo.tipo_principal !== 'GM' || bUltimo.tipo_principal !== 'GM') continue;
-        
+
         const alocsTopo = alocacoes.filter((a) => a.bancada_id === bTopo.id);
         const alocsUltimo = alocacoes.filter((a) => a.bancada_id === bUltimo.id);
-        
+
         for (const a of alocsTopo) {
           await supabase.from('layout_alocacao').update({
             bancada_id: bUltimo.id,
@@ -557,30 +553,30 @@ export default function LinhaPage() {
     const bancadasLinha = bancadas.filter((b) => b.linha === linha);
     const bancadasIds = new Set(bancadasLinha.map((b) => b.id));
     const alocsLinha = alocacoes.filter((a) => bancadasIds.has(a.bancada_id));
-    
+
     let totalUnidades = 0;
     let totalHoras = 0;
     let supera = 0, alinhado = 0, ofensor = 0, semDado = 0;
-    
+
     alocsLinha.forEach((a) => {
       const ritmo = ritmos[a.id_groot];
       if (!ritmo) { semDado++; return; }
-      
+
       const liq = ritmo.liquida;
-      
+
       if (ritmo.unidades && ritmo.horas && ritmo.horas > 0) {
         totalUnidades += ritmo.unidades;
         totalHoras += ritmo.horas;
       }
-      
+
       if (liq == null || liq === 0) { semDado++; return; }
       if (liq < metas.p2m_base) ofensor++;
       else if (liq <= metas.p2m_alinhado_max) alinhado++;
       else supera++;
     });
-    
+
     const totalAtivos = alocsLinha.length;
-    
+
     if (totalHoras === 0) {
       const liquidas: number[] = [];
       alocsLinha.forEach((a) => {
@@ -588,9 +584,9 @@ export default function LinhaPage() {
         if (ritmo?.liquida && ritmo.liquida > 0) liquidas.push(ritmo.liquida);
       });
       if (liquidas.length === 0) {
-        return { 
+        return {
           pctMedio: 0, pecasHora: 0, totalUnidades: 0, totalHoras: 0,
-          totalAtivos, supera, alinhado, ofensor, semDado 
+          totalAtivos, supera, alinhado, ofensor, semDado
         };
       }
       const mediaLiq = liquidas.reduce((a, b) => a + b, 0) / liquidas.length;
@@ -603,16 +599,16 @@ export default function LinhaPage() {
         totalAtivos, supera, alinhado, ofensor, semDado
       };
     }
-    
+
     const pecasHora = totalUnidades / totalHoras;
     const pctMedio = Math.round((pecasHora / metas.p2m_base) * 100);
-    
-    return { 
-      pctMedio, 
+
+    return {
+      pctMedio,
       pecasHora: Math.round(pecasHora),
       totalUnidades,
       totalHoras: Math.round(totalHoras * 10) / 10,
-      totalAtivos, supera, alinhado, ofensor, semDado 
+      totalAtivos, supera, alinhado, ofensor, semDado
     };
   }
 
@@ -664,7 +660,7 @@ export default function LinhaPage() {
     if (expandido) {
       return (
         <div {...dragHandlers} title={titulo}
-          className={'relative group ' + cor.borda + ' ' + cor.bg + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
+          className={'relative group ' + cor.borda + ' ' + cor.bg + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in cursor-grab active:cursor-grabbing card-hover flex-shrink-0' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
             <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
@@ -701,7 +697,7 @@ export default function LinhaPage() {
     }
     if (expandido) {
       return (
-        <div className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2"
+        <div className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2 flex-shrink-0"
           title={c.nome + ' (fixo aqui · right-click pra remover)'}
           onContextMenu={handleContextMenu}>
           <div className="flex items-center gap-1.5 min-w-0">
@@ -740,9 +736,9 @@ export default function LinhaPage() {
     const isErro = erroBancada === b.id;
     const isCategoria = b.tipo_principal === 'CATEGORIA';
     const isCompativel = (cardAtivo || draggingId) && bancadaCompativel(b);
-    const alturaClass = isCategoria ? (alocs.length > 0 || sinergias.length > 0 ? 'min-h-[78px]' : 'h-[78px]') : 'h-[78px]';
+    // 🔧 FIX 1: altura SEMPRE fixa em 78px — sem ternário, sem min-h variável
     const classes = [
-      'w-[140px]', alturaClass,
+      'w-[140px] h-[78px]',
       'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200',
       isCompativel ? 'bancada-compativel' : '',
       isEncaixe ? 'bancada-encaixe' : '',
@@ -761,7 +757,7 @@ export default function LinhaPage() {
         onClick={() => { if (cardAtivo && bancadaCompativel(b)) alocarColab(cardAtivo, b); }}
         className={classes}
         style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}>
-        <div className="flex items-center justify-between px-1.5 pt-0.5 pb-0">
+        <div className="flex items-center justify-between px-1.5 pt-0.5 pb-0 flex-shrink-0">
           <div className="flex items-center gap-1 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.text + ' uppercase tracking-wider'}>{b.tipo_principal}</span>
             {b.subtipo && <span className="text-[8px] text-purple-300/70 truncate">· {b.subtipo}</span>}
@@ -779,7 +775,8 @@ export default function LinhaPage() {
           </div>
         </div>
         {isCategoria ? (
-          <div className="flex-1 flex flex-col gap-0.5 px-1 pb-1 pt-0.5">
+          // 🔧 FIX 2: overflow-y-auto + min-h-0 → scroll interno qd lotar, bancada continua 78px
+          <div className="flex-1 flex flex-col gap-0.5 px-1 pb-1 pt-0.5 overflow-y-auto min-h-0">
             {alocs.length === 0 && sinergias.length === 0 ? (
               <div className="flex-1 flex items-center justify-center text-[9px] text-gray-700 italic">Arrasta colabs</div>
             ) : (
@@ -790,7 +787,7 @@ export default function LinhaPage() {
             )}
           </div>
         ) : (
-          <div className="flex-1 flex gap-1 px-1 pb-1 pt-0.5">
+          <div className="flex-1 flex gap-1 px-1 pb-1 pt-0.5 min-h-0">
             {alocs.length === 0 && sinergias.length === 0 ? (<div className="flex-1" />) : (
               <>
                 {alocs.map((a) => <CardColabBancada key={a.id} aloc={a} bancadaAtual={b} />)}
@@ -823,7 +820,8 @@ export default function LinhaPage() {
         <div className="text-center mb-2">
           <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
         </div>
-        <div className="grid grid-cols-2 gap-2 items-start">
+        {/* 🔧 FIX 3: grid-rows-2 força as 2 linhas do grid a terem alturas iguais */}
+        <div className="grid grid-cols-2 grid-rows-2 gap-2">
           <SlotBancada linha={1} lado="centro" posicao={1} />
           <SlotBancada linha={2} lado="centro" posicao={1} />
           <SlotBancada linha={1} lado="centro" posicao={2} />
@@ -880,7 +878,7 @@ export default function LinhaPage() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
-      
+
       <header className="border-b border-[#1a1a1a] px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-bold">
