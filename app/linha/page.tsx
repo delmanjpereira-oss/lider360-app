@@ -73,17 +73,17 @@ const STYLES = `
   @keyframes shakeError { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
   @keyframes slideIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
   @keyframes pulseLine { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
-  @keyframes rotacionando { 0% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); } 30% { opacity: 0.3; transform: scale(0.85) rotate(-3deg); filter: blur(2px); } 60% { opacity: 0.3; transform: scale(0.85) rotate(3deg); filter: blur(2px); } 100% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); } }
   @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
   @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(20px); } }
+  @keyframes floatPulse { 0%, 100% { transform: translateY(0px); filter: brightness(1); } 50% { transform: translateY(-3px); filter: brightness(1.15); } }
+  @keyframes shimmerGold { 0% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); } 50% { box-shadow: 0 0 20px 2px rgba(255, 215, 0, 0.4); } 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); } }
   .card-ativo { animation: pulseGold 1.2s ease-in-out infinite !important; border-color: #FFD700 !important; border-width: 2px !important; outline: 2px solid #FFD700 !important; outline-offset: 2px !important; z-index: 50; position: relative; }
   .bancada-compativel { animation: pulseGreen 1s ease-in-out infinite; cursor: pointer !important; }
   .bancada-encaixe { animation: successFlash 0.5s ease-out; }
   .bancada-erro { animation: shakeError 0.3s ease-in-out; }
   .card-sinergia { animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite; background: rgba(255, 215, 0, 0.08) !important; border: 2px dashed #FFD700 !important; position: relative; overflow: hidden; }
   .card-sinergia::after { content: 'SINERGIA'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); font-size: 7px; font-weight: 900; color: rgba(255, 215, 0, 0.5); letter-spacing: 1px; pointer-events: none; white-space: nowrap; }
-  .card-temporario { border-style: dashed !important; position: relative; }
-  .card-temporario::before { content: '🔄'; position: absolute; top: -2px; right: -2px; font-size: 10px; z-index: 5; }
+  .card-temporario { border-color: #FFD700 !important; border-style: dashed !important; box-shadow: 0 0 6px rgba(255, 215, 0, 0.2); }
   .card-hover { transition: all 0.15s ease; }
   .card-hover:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
   .card-arrastando { opacity: 0.4; }
@@ -93,9 +93,12 @@ const STYLES = `
   .badge-fixo { animation: synergyGlow 2s ease-in-out infinite; }
   .slide-in { animation: slideIn 0.3s ease-out; }
   .ritmo-linha-pulse { animation: pulseLine 2s ease-in-out infinite; }
-  .canvas-rotacionando * { animation: rotacionando 0.6s ease-in-out !important; }
   .toast-in { animation: toastIn 0.3s ease-out; }
   .toast-out { animation: toastOut 0.3s ease-out forwards; }
+  /* 🔄 ANIMAÇÃO LEVE DE ROTAÇÃO (FLIP technique) */
+  [data-flip-key] { will-change: transform; transition: transform 700ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .flip-animating [data-flip-key] { animation: floatPulse 700ms ease-in-out, shimmerGold 700ms ease-out; }
+  .flip-flash { animation: shimmerGold 800ms ease-out; }
 `;
 
 export default function LinhaPage() {
@@ -119,6 +122,8 @@ export default function LinhaPage() {
   const [rotacionando, setRotacionando] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
+  // 🔧 ITEM 2: menu de contexto right-click pra card em sinergia
+  const [menuSinergia, setMenuSinergia] = useState<{ x: number; y: number; aloc: Alocacao } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function toast(tipo: 'success' | 'error' | 'info', msg: string) {
@@ -138,7 +143,7 @@ export default function LinhaPage() {
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        setCardAtivo(null); setDraggingId(null); setModalRotacao(false); setConfirmModal(null);
+        setCardAtivo(null); setDraggingId(null); setModalRotacao(false); setConfirmModal(null); setMenuSinergia(null);
       }
     }
     window.addEventListener('keydown', handleEsc);
@@ -370,6 +375,40 @@ export default function LinhaPage() {
     await carregarAlocacoes();
   }
 
+  // 🔧 ITEM 2: volta o colab pra bancada de origem (a fixa_id dele)
+  async function voltarOrigem(aloc: Alocacao) {
+    if (!aloc.bancada_fixa_id) { toast('error', 'Sem origem registrada'); return; }
+    const bancadaOrigem = bancadas.find((b) => b.id === aloc.bancada_fixa_id);
+    if (!bancadaOrigem) { toast('error', 'Bancada de origem não encontrada'); return; }
+    // valida lotação da origem
+    const ocupacaoOrigem = alocacoes.filter((a) => a.bancada_id === bancadaOrigem.id && a.id !== aloc.id).length;
+    if (ocupacaoOrigem >= maxColabsPorTipo(bancadaOrigem.tipo_principal)) {
+      toast('error', 'Bancada de origem está cheia');
+      return;
+    }
+    const posicoesAntes = capturarPosicoesCards();
+    const { error } = await supabase
+      .from('layout_alocacao')
+      .update({ bancada_id: bancadaOrigem.id, tipo_alocacao: 'fixo' })
+      .eq('id', aloc.id);
+    if (error) { toast('error', 'Erro: ' + error.message); return; }
+    await carregarAlocacoes();
+    await new Promise((r) => setTimeout(r, 50));
+    animarFLIP(posicoesAntes);
+    toast('success', '↩️ Voltou pra origem');
+  }
+
+  // 🔧 ITEM 2: fixa o colab na bancada atual (perde marca de sinergia)
+  async function fixarAqui(aloc: Alocacao) {
+    const { error } = await supabase
+      .from('layout_alocacao')
+      .update({ bancada_fixa_id: aloc.bancada_id, tipo_alocacao: 'fixo' })
+      .eq('id', aloc.id);
+    if (error) { toast('error', 'Erro: ' + error.message); return; }
+    await carregarAlocacoes();
+    toast('success', '📍 Fixado aqui');
+  }
+
   function getBancada(linha: number, lado: string, posicao: number) {
     return bancadas.find((b) => b.zona === ZONA && b.linha === linha && b.lado === lado && b.posicao === posicao);
   }
@@ -416,13 +455,78 @@ export default function LinhaPage() {
     });
   }
 
+  // 🎬 FLIP Animation: captura posições, deixa React mover os cards no DOM,
+  //    e anima do "ponto onde tava" pro "ponto onde foi" com transição CSS suave.
+  function capturarPosicoesCards(): Map<string, DOMRect> {
+    const map = new Map<string, DOMRect>();
+    document.querySelectorAll('[data-flip-key]').forEach((el) => {
+      const key = (el as HTMLElement).dataset.flipKey;
+      if (key) map.set(key, el.getBoundingClientRect());
+    });
+    return map;
+  }
+
+  function animarFLIP(posicoesAntes: Map<string, DOMRect>) {
+    requestAnimationFrame(() => {
+      document.querySelectorAll('[data-flip-key]').forEach((el) => {
+        const elemento = el as HTMLElement;
+        const key = elemento.dataset.flipKey;
+        if (!key) return;
+        const antes = posicoesAntes.get(key);
+        if (!antes) return;
+        const depois = elemento.getBoundingClientRect();
+        const dx = antes.left - depois.left;
+        const dy = antes.top - depois.top;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return; // não se mexeu
+        // Trava na posição antiga sem transição...
+        elemento.style.transition = 'none';
+        elemento.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+        // ...força reflow e libera transição pra voltar ao 0,0 animando
+        elemento.offsetHeight; // força reflow
+        requestAnimationFrame(() => {
+          elemento.style.transition = 'transform 700ms cubic-bezier(0.34, 1.56, 0.64, 1)';
+          elemento.style.transform = 'translate(0px, 0px)';
+          elemento.classList.add('flip-flash');
+          setTimeout(() => {
+            elemento.style.transition = '';
+            elemento.style.transform = '';
+            elemento.classList.remove('flip-flash');
+          }, 800);
+        });
+      });
+    });
+  }
+
   async function aplicarRotacao(tipo: 1 | 2 | 3) {
     setRotacionando(true);
     try {
+      const posicoesAntes = capturarPosicoesCards();
       if (tipo === 3) await rotacaoNivelar();
       else await rotacaoCiclo(tipo === 2);
+
+      // 🔧 ITEM 1: rotação zera todas as sinergias.
+      // Todo mundo passa a ser fixo da bancada onde caiu após a rotação.
+      const hoje = new Date().toISOString().split('T')[0];
+      const { data: alocsAtuais } = await supabase
+        .from('layout_alocacao')
+        .select('id, bancada_id')
+        .eq('data_referencia', hoje);
+      if (alocsAtuais && alocsAtuais.length > 0) {
+        // atualiza cada alocação: bancada_fixa_id = bancada_id, tipo = 'fixo'
+        await Promise.all(
+          alocsAtuais.map((a: any) =>
+            supabase
+              .from('layout_alocacao')
+              .update({ bancada_fixa_id: a.bancada_id, tipo_alocacao: 'fixo' })
+              .eq('id', a.id)
+          )
+        );
+      }
+
       await carregarAlocacoes();
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 50));
+      animarFLIP(posicoesAntes);
+      await new Promise((r) => setTimeout(r, 800));
       toast('success', '✅ Rotação ' + tipo + ' aplicada');
     } catch (err: any) {
       toast('error', 'Erro: ' + err.message);
@@ -562,8 +666,9 @@ export default function LinhaPage() {
   }
 
   function calcularRitmoLinha(linha: number) {
-    const bancadasLinha = bancadas.filter((b) => b.linha === linha);
-    const bancadasIds = new Set(bancadasLinha.map((b) => b.id));
+    // 🔧 ITEM 3b: ritmo da linha SÓ considera quem está em bancadas GM
+    const bancadasGM = bancadas.filter((b) => b.linha === linha && b.tipo_principal === 'GM');
+    const bancadasIds = new Set(bancadasGM.map((b) => b.id));
     const alocsLinha = alocacoes.filter((a) => bancadasIds.has(a.bancada_id));
 
     let totalUnidades = 0;
@@ -667,11 +772,19 @@ export default function LinhaPage() {
       onDragStart: (e: React.DragEvent) => { e.stopPropagation(); setDraggingId(aloc.id_groot); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', aloc.id_groot); },
       onDragEnd: () => { setDraggingId(null); setHoverBancada(null); },
       onDoubleClick: (e: React.MouseEvent) => { e.stopPropagation(); setCardAtivo(isAtivo ? null : aloc.id_groot); },
+      // 🔧 ITEM 2: right-click no card temporário abre menu de sinergia
+      onContextMenu: (e: React.MouseEvent) => {
+        if (!eTemporario) return; // só sinergias têm menu
+        e.preventDefault();
+        e.stopPropagation();
+        setMenuSinergia({ x: e.clientX, y: e.clientY, aloc });
+      },
     };
     const titulo = c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoAqui ? ' · fixo' : '') + (eTemporario ? ' · temp' : '');
     if (expandido) {
       return (
         <div {...dragHandlers} title={titulo}
+          data-flip-key={'colab-' + aloc.id_groot}
           className={'relative group ' + cor.borda + ' ' + cor.bg + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in cursor-grab active:cursor-grabbing card-hover flex-shrink-0' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
@@ -689,6 +802,7 @@ export default function LinhaPage() {
     }
     return (
       <div {...dragHandlers} title={titulo}
+        data-flip-key={'colab-' + aloc.id_groot}
         className={'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
         {eFixoAqui && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
         {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="text-gray-600 text-sm">—</span>)}
@@ -826,18 +940,61 @@ export default function LinhaPage() {
     );
   }
 
+  // 🔧 ITEM 3a: calcula ritmo médio das bancadas PESCA e CATEGORIA de uma linha
+  function calcularRitmoPescaCat(linha: number, tipo: 'PESCA' | 'CATEGORIA') {
+    const bancadasMatch = bancadas.filter((b) => b.linha === linha && b.tipo_principal === tipo);
+    const ids = new Set(bancadasMatch.map((b) => b.id));
+    const alocs = alocacoes.filter((a) => ids.has(a.bancada_id));
+    if (alocs.length === 0) return null;
+    let totalUnid = 0, totalH = 0;
+    const liquidas: number[] = [];
+    alocs.forEach((a) => {
+      const r = ritmos[a.id_groot];
+      if (!r) return;
+      if (r.unidades && r.horas && r.horas > 0) { totalUnid += r.unidades; totalH += r.horas; }
+      if (r.liquida && r.liquida > 0) liquidas.push(r.liquida);
+    });
+    if (totalH > 0) return Math.round(totalUnid / totalH);
+    if (liquidas.length > 0) return Math.round(liquidas.reduce((a, b) => a + b, 0) / liquidas.length);
+    return null;
+  }
+
   function ZonaCentral() {
+    const p1 = calcularRitmoPescaCat(1, 'PESCA');
+    const c1 = calcularRitmoPescaCat(1, 'CATEGORIA');
+    const p2 = calcularRitmoPescaCat(2, 'PESCA');
+    const c2 = calcularRitmoPescaCat(2, 'CATEGORIA');
+    const temAlgum = p1 != null || c1 != null || p2 != null || c2 != null;
     return (
-      <div className="border-2 border-dashed border-[#3a3a2a] rounded-md p-3 self-start">
-        <div className="text-center mb-2">
-          <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
-        </div>
-        {/* 🔧 FIX 3: grid-rows-2 força as 2 linhas do grid a terem alturas iguais */}
-        <div className="grid grid-cols-2 grid-rows-2 gap-2">
-          <SlotBancada linha={1} lado="centro" posicao={1} />
-          <SlotBancada linha={2} lado="centro" posicao={1} />
-          <SlotBancada linha={1} lado="centro" posicao={2} />
-          <SlotBancada linha={2} lado="centro" posicao={2} />
+      <div className="flex flex-col items-center gap-2">
+        {/* 🔧 ITEM 3a: painel minimalista de ritmo pesca/cat por linha */}
+        {temAlgum && (
+          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded px-3 py-1 flex items-center gap-3 text-[10px]">
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-600 font-bold">L1:</span>
+              <span className="text-blue-400">🐟 {p1 ?? '—'}</span>
+              <span className="text-gray-700">·</span>
+              <span className="text-purple-400">📦 {c1 ?? '—'}</span>
+            </div>
+            <span className="text-gray-700">|</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-600 font-bold">L2:</span>
+              <span className="text-blue-400">🐟 {p2 ?? '—'}</span>
+              <span className="text-gray-700">·</span>
+              <span className="text-purple-400">📦 {c2 ?? '—'}</span>
+            </div>
+          </div>
+        )}
+        <div className="border-2 border-dashed border-[#3a3a2a] rounded-md p-3 self-start">
+          <div className="text-center mb-2">
+            <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
+          </div>
+          <div className="grid grid-cols-2 grid-rows-2 gap-2">
+            <SlotBancada linha={1} lado="centro" posicao={1} />
+            <SlotBancada linha={2} lado="centro" posicao={1} />
+            <SlotBancada linha={1} lado="centro" posicao={2} />
+            <SlotBancada linha={2} lado="centro" posicao={2} />
+          </div>
         </div>
       </div>
     );
@@ -915,7 +1072,7 @@ export default function LinhaPage() {
       </header>
       {loading && (<div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>)}
       {!loading && (
-        <div className={'flex gap-3 p-3 ' + (rotacionando ? 'canvas-rotacionando' : '')}>
+        <div className="flex gap-3 p-3">
           <aside className="w-[180px] flex-shrink-0">
             <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md p-2">
               <div className="flex items-center justify-between mb-2 px-1">
@@ -968,6 +1125,42 @@ export default function LinhaPage() {
           );
         })}
       </div>
+      {/* 🔧 ITEM 2: Menu de contexto da sinergia (right-click) */}
+      {menuSinergia && (() => {
+        const c = getColab(menuSinergia.aloc.id_groot);
+        const bancadaOrigem = bancadas.find((b) => b.id === menuSinergia.aloc.bancada_fixa_id);
+        const labelOrigem = bancadaOrigem
+          ? bancadaOrigem.tipo_principal + ' L' + bancadaOrigem.linha + (bancadaOrigem.lado !== 'centro' ? ' ' + bancadaOrigem.lado : '')
+          : 'origem';
+        return (
+          <>
+            <div className="fixed inset-0 z-[95]" onClick={() => setMenuSinergia(null)} onContextMenu={(e) => { e.preventDefault(); setMenuSinergia(null); }} />
+            <div
+              className="fixed z-[96] bg-[#1a1a1a] border border-yellow-500/40 rounded-md shadow-2xl py-1 min-w-[200px] slide-in"
+              style={{ left: Math.min(menuSinergia.x, window.innerWidth - 220) + 'px', top: Math.min(menuSinergia.y, window.innerHeight - 120) + 'px' }}
+            >
+              <div className="px-3 py-1 border-b border-[#2a2a2a]">
+                <div className="text-[10px] text-yellow-400/80 font-bold">{c?.nome}</div>
+                <div className="text-[9px] text-gray-500">em sinergia</div>
+              </div>
+              <button
+                onClick={() => { voltarOrigem(menuSinergia.aloc); setMenuSinergia(null); }}
+                className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
+              >
+                <span>↩️</span>
+                <span>Voltar pra origem <span className="text-gray-500">({labelOrigem})</span></span>
+              </button>
+              <button
+                onClick={() => { fixarAqui(menuSinergia.aloc); setMenuSinergia(null); }}
+                className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
+              >
+                <span>📍</span>
+                <span>Fixar aqui</span>
+              </button>
+            </div>
+          </>
+        );
+      })()}
       {confirmModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[90] p-4"
           onClick={() => setConfirmModal(null)}>
