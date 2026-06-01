@@ -25,9 +25,11 @@ function maxColabsPorTipo(tipo: string): number {
   if (tipo === 'CATEGORIA') return 999;
   return 2;
 }
+
 function tipoEFixoAutomatico(tipo: string): boolean {
   return tipo === 'GM' || tipo === 'PESCA';
 }
+
 function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
   if (liquida == null || liquida === 0) {
     return { status: 'sem_dado' as const, texto: 'text-gray-400', borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', emoji: '⚪', label: 'Sem dado' };
@@ -36,6 +38,7 @@ function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
   if (liquida <= metas.p2m_alinhado_max) return { status: 'alinhado' as const, texto: 'text-blue-400', borda: 'border-blue-500/50', bg: 'bg-blue-500/10', emoji: '🔵', label: 'Alinhado' };
   return { status: 'supera' as const, texto: 'text-green-400', borda: 'border-green-500/50', bg: 'bg-green-500/10', emoji: '🟢', label: 'Supera' };
 }
+
 function corRitmoLinha(pct: number, metas: MetasConfig) {
   if (pct === 0) return { texto: 'text-gray-400', emoji: '⚪', label: 'Sem dados' };
   if (pct < 90) return { texto: 'text-red-400', emoji: '🔴', label: 'Ofensor' };
@@ -43,11 +46,13 @@ function corRitmoLinha(pct: number, metas: MetasConfig) {
   if (pct <= 106) return { texto: 'text-blue-400', emoji: '🔵', label: 'Alinhado' };
   return { texto: 'text-green-400', emoji: '🟢', label: 'Supera' };
 }
+
 function iniciais(nome: string) {
   const p = nome.trim().split(/\s+/);
   if (p.length === 1) return p[0].substring(0, 2).toUpperCase();
   return (p[0][0] + p[p.length - 1][0]).toUpperCase();
 }
+
 function corTipo(tipo: string) {
   switch (tipo) {
     case 'GM': return { hex: '#FFD700', text: 'text-yellow-400' };
@@ -56,6 +61,7 @@ function corTipo(tipo: string) {
     default: return { hex: '#6b7280', text: 'text-gray-400' };
   }
 }
+
 function primeiroNome(nome: string) { return nome.trim().split(/\s+/)[0]; }
 
 const STYLES = `
@@ -115,9 +121,6 @@ export default function LinhaPage() {
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ============================================================
-  // 🎨 TOAST SYSTEM
-  // ============================================================
   function toast(tipo: 'success' | 'error' | 'info', msg: string) {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, tipo, msg }]);
@@ -172,9 +175,21 @@ export default function LinhaPage() {
     setEditandoLinha(null);
   }
 
+  // 🛡️ CORRIGIDO: tolerante a espaços e case
   async function carregarColabs() {
-    const { data } = await supabase.from('colaboradores').select('id_groot, nome, processo, status').eq('status', 'Ativo').eq('processo', 'P2M').order('nome');
-    setColabs(data || []);
+    const { data } = await supabase
+      .from('colaboradores')
+      .select('id_groot, nome, processo, status')
+      .order('nome');
+    
+    // Normaliza: TRIM + case-insensitive
+    const filtrados = (data || []).filter((c: any) => {
+      const proc = (c.processo || '').trim().toUpperCase();
+      const stat = (c.status || '').trim().toLowerCase();
+      return proc === 'P2M' && stat === 'ativo';
+    });
+    
+    setColabs(filtrados);
   }
 
   async function carregarRitmos() {
@@ -242,7 +257,6 @@ export default function LinhaPage() {
       const idxNome = header.findIndex((h) => h === 'nome' || h.includes('nome') || h === 'colaborador' || h.includes('representante'));
       const idxRitmo = header.findIndex((h) => h.includes('liquida sist') || h.includes('liquid') || h.includes('ritmo') || h.includes('pct') || h === '%' || h.includes('produtividade') || h === 'prod' || h === 'prod_liquida');
       const idxUnid = header.findIndex((h) => h.includes('unidades') || h.includes('unid') || h.includes('qtd') || h.includes('quantidade') || h === 'pcs');
-      // Prioriza "tempo em processo" (efetivo real), fallback pra outras variações
       const idxHoras = header.findIndex((h) => h.includes('tempo em processo') || h.includes('tempo efetivo') || h.includes('tempo_processo') || h.includes('tempo'));
       if (idxGroot === -1 || idxRitmo === -1) { toast('error', 'CSV inválido. Faltam colunas id_groot/ritmo'); return; }
       const hoje = new Date().toISOString().split('T')[0];
@@ -262,7 +276,6 @@ export default function LinhaPage() {
           const raw = cols[idxHoras].trim();
           let h = 0;
           if (raw.includes(':')) {
-            // HH:MM:SS → decimal
             const parts = raw.split(':').map((p) => parseInt(p, 10) || 0);
             h = (parts[0] || 0) + ((parts[1] || 0) / 60) + ((parts[2] || 0) / 3600);
           } else {
@@ -297,6 +310,7 @@ export default function LinhaPage() {
     setModal({ linha: b.linha, lado: b.lado, posicao: b.posicao, bancadaExistente: b });
     setModalSubtipo(b.subtipo || '');
   }
+
   function fecharModal() { setModal(null); setModalSubtipo(''); }
 
   async function salvarModal() {
@@ -394,9 +408,6 @@ export default function LinhaPage() {
     });
   }
 
-  // ============================================================
-  // 🔄 ROTAÇÃO - FIX: fixo MUDA pra nova bancada
-  // ============================================================
   async function aplicarRotacao(tipo: 1 | 2 | 3) {
     setRotacionando(true);
     try {
@@ -418,34 +429,24 @@ export default function LinhaPage() {
     for (const linha of [1, 2]) {
       const ciclo = getCicloLinha(linha, comPesca);
       if (ciclo.length === 0) continue;
-
-      // Mapeia ocupantes atuais de cada bancada do ciclo
       const ocupantes: Array<{ bancada: Bancada; alocs: Alocacao[] }> = ciclo.map((b) => ({
         bancada: b,
         alocs: alocacoes.filter((a) => a.bancada_id === b.id),
       }));
-
-      // Define novas alocações
       const novas: Array<{ id_groot: string; bancada_id: number; bancada_fixa_id: number | null; tipo: string }> = [];
-
       for (let i = 0; i < ocupantes.length; i++) {
         const proximaIdx = (i + 1) % ocupantes.length;
         const proximaBancada = ocupantes[proximaIdx].bancada;
-
         for (const aloc of ocupantes[i].alocs) {
           let novoFixoId: number | null = null;
           let novoTipo = 'fixo';
-
           if (tipoEFixoAutomatico(proximaBancada.tipo_principal)) {
-            // GM ou PESCA: 🆕 ATUALIZA o fixo pra nova bancada (rotação = mudança oficial de casa)
             novoFixoId = proximaBancada.id;
             novoTipo = 'fixo';
           } else {
-            // CATEGORIA: mantém vínculo de origem (era fixo em GM, agora é temporário em Cat)
             novoFixoId = aloc.bancada_fixa_id;
             novoTipo = novoFixoId ? 'temporario' : 'fixo';
           }
-
           novas.push({
             id_groot: aloc.id_groot,
             bancada_id: proximaBancada.id,
@@ -454,8 +455,6 @@ export default function LinhaPage() {
           });
         }
       }
-
-      // ROTAÇÃO 2: alterna PESCA vs CATEGORIA com histórico
       if (comPesca) {
         const idxPesca = ciclo.findIndex((b) => b.tipo_principal === 'PESCA');
         const idxCat = ciclo.findIndex((b) => b.tipo_principal === 'CATEGORIA');
@@ -477,14 +476,11 @@ export default function LinhaPage() {
             paraPesca.bancada_fixa_id = ciclo[idxPesca].id;
             paraPesca.tipo = 'fixo';
             paraCat.bancada_id = ciclo[idxCat].id;
-            // Cat: mantém vínculo se tinha fixo de GM
             paraCat.tipo = paraCat.bancada_fixa_id ? 'temporario' : 'fixo';
             await registrarPesca(paraPesca.id_groot, linha);
           }
         }
       }
-
-      // 🆕 OTIMIZADO: batch delete + batch insert (em vez de loop)
       const bancadasLinhaIds = ciclo.map((b) => b.id);
       const idsRemove = alocacoes.filter((a) => bancadasLinhaIds.includes(a.bancada_id)).map((a) => a.id);
       
@@ -507,7 +503,6 @@ export default function LinhaPage() {
   }
 
   async function rotacaoNivelar() {
-    // Troca topo ↔ último de GM em cada lado de cada linha
     for (const linha of [1, 2]) {
       for (const lado of ['esquerdo', 'direito']) {
         const qtd = linha === 1
@@ -522,18 +517,17 @@ export default function LinhaPage() {
         const alocsTopo = alocacoes.filter((a) => a.bancada_id === bTopo.id);
         const alocsUltimo = alocacoes.filter((a) => a.bancada_id === bUltimo.id);
         
-        // 🆕 Troca: nova bancada = nova casa fixa
         for (const a of alocsTopo) {
           await supabase.from('layout_alocacao').update({
             bancada_id: bUltimo.id,
-            bancada_fixa_id: bUltimo.id, // 🆕 vira fixo do novo lugar
+            bancada_fixa_id: bUltimo.id,
             tipo_alocacao: 'fixo',
           }).eq('id', a.id);
         }
         for (const a of alocsUltimo) {
           await supabase.from('layout_alocacao').update({
             bancada_id: bTopo.id,
-            bancada_fixa_id: bTopo.id, // 🆕 vira fixo do novo lugar
+            bancada_fixa_id: bTopo.id,
             tipo_alocacao: 'fixo',
           }).eq('id', a.id);
         }
@@ -574,13 +568,11 @@ export default function LinhaPage() {
       
       const liq = ritmo.liquida;
       
-      // Acumula unidades e horas (pra ritmo da linha)
       if (ritmo.unidades && ritmo.horas && ritmo.horas > 0) {
         totalUnidades += ritmo.unidades;
         totalHoras += ritmo.horas;
       }
       
-      // Distribuição usa líquida individual
       if (liq == null || liq === 0) { semDado++; return; }
       if (liq < metas.p2m_base) ofensor++;
       else if (liq <= metas.p2m_alinhado_max) alinhado++;
@@ -589,7 +581,6 @@ export default function LinhaPage() {
     
     const totalAtivos = alocsLinha.length;
     
-    // FALLBACK: se não tem unidades/horas, usa média das líquidas individuais
     if (totalHoras === 0) {
       const liquidas: number[] = [];
       alocsLinha.forEach((a) => {
@@ -613,7 +604,6 @@ export default function LinhaPage() {
       };
     }
     
-    // 🎯 IDEAL: Ritmo = soma das peças / soma das horas (efetivas)
     const pecasHora = totalUnidades / totalHoras;
     const pctMedio = Math.round((pecasHora / metas.p2m_base) * 100);
     
@@ -899,6 +889,7 @@ export default function LinhaPage() {
           </h1>
           <span className="text-[10px] text-gray-500">{new Date().toLocaleDateString('pt-BR')}</span>
           <span className="text-[10px] text-gray-500">· Metas: {metas.p2m_base}-{metas.p2m_alinhado_max}</span>
+          <span className="text-[10px] text-gray-500">· Colabs: {colabs.length}</span>
           {cardAtivo && (<span className="text-[10px] text-yellow-400 font-bold animate-pulse">✨ Card ativado · click na bancada (ESC)</span>)}
         </div>
         <div className="flex items-center gap-2">
@@ -912,9 +903,7 @@ export default function LinhaPage() {
             className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition">↑ Upload Boletim</button>
         </div>
       </header>
-
       {loading && (<div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>)}
-
       {!loading && (
         <div className={'flex gap-3 p-3 ' + (rotacionando ? 'canvas-rotacionando' : '')}>
           <aside className="w-[180px] flex-shrink-0">
@@ -956,8 +945,6 @@ export default function LinhaPage() {
           </main>
         </div>
       )}
-
-      {/* 🎨 TOAST CONTAINER (canto inferior direito) */}
       <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
         {toasts.map((t) => {
           const corClass = t.tipo === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-300' :
@@ -971,8 +958,6 @@ export default function LinhaPage() {
           );
         })}
       </div>
-
-      {/* 🎨 MODAL DE CONFIRMAÇÃO CUSTOM */}
       {confirmModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[90] p-4"
           onClick={() => setConfirmModal(null)}>
@@ -988,8 +973,6 @@ export default function LinhaPage() {
           </div>
         </div>
       )}
-
-      {/* MODAL ROTAÇÃO */}
       {modalRotacao && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setModalRotacao(false)}>
           <div className="bg-[#1a1a1a] border border-purple-500/30 rounded-lg p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
@@ -1017,8 +1000,6 @@ export default function LinhaPage() {
           </div>
         </div>
       )}
-
-      {/* MODAL EDITAR CATEGORIA */}
       {modal && modal.bancadaExistente && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={fecharModal}>
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
