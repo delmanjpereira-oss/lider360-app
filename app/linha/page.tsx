@@ -985,11 +985,18 @@ export default function LinhaPage() {
             </div>
           </div>
         )}
-        <div className="border-2 border-dashed border-[#3a3a2a] rounded-md p-3 self-start">
+        <div
+          className="border-2 border-dashed border-[#3a3a2a] rounded-md"
+          style={{
+            padding: '14px',
+            boxSizing: 'border-box',
+            width: 'fit-content',
+          }}
+        >
           <div className="text-center mb-2">
             <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
           </div>
-          <div className="grid grid-cols-2 grid-rows-2 gap-2">
+          <div className="grid grid-cols-2 grid-rows-2" style={{ gap: '8px' }}>
             <SlotBancada linha={1} lado="centro" posicao={1} />
             <SlotBancada linha={2} lado="centro" posicao={1} />
             <SlotBancada linha={1} lado="centro" posicao={2} />
