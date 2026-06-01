@@ -1104,7 +1104,7 @@ export default function LinhaPage() {
       {loading && (<div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>)}
       {!loading && (
         <div className="flex gap-3 p-3">
-          <aside className="w-[180px] flex-shrink-0">
+          <aside className="w-[150px] flex-shrink-0">
             <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md p-2">
               <div className="flex items-center justify-between mb-2 px-1">
                 <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">Livres</span>
@@ -1118,7 +1118,7 @@ export default function LinhaPage() {
               </div>
             </div>
           </aside>
-          <main className="flex-1 flex gap-16 items-start justify-center overflow-x-auto">
+          <main className="flex-1 flex gap-8 items-start justify-around overflow-x-auto">
             <section className="flex flex-col items-center">
               <HeaderLinha linha={1} />
               <div className="flex gap-1 items-stretch">
