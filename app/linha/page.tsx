@@ -1076,7 +1076,7 @@ export default function LinhaPage() {
   const livres = colabsLivres();
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen bg-[#0a0a0a] text-white" style={{ width: '100vw', maxWidth: '100vw', position: 'relative', left: '50%', right: '50%', marginLeft: '-50vw', marginRight: '-50vw' }}>
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
 
       <header className="border-b border-[#1a1a1a] px-4 py-3 flex items-center justify-between">
@@ -1118,7 +1118,7 @@ export default function LinhaPage() {
               </div>
             </div>
           </aside>
-          <main className="flex-1 flex gap-8 items-start justify-around overflow-x-auto">
+          <main className="flex-1 flex gap-12 items-start justify-around overflow-x-auto px-4">
             <section className="flex flex-col items-center">
               <HeaderLinha linha={1} />
               <div className="flex gap-1 items-stretch">
