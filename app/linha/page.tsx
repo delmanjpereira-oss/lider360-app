@@ -376,18 +376,30 @@ export default function LinhaPage() {
 
   function getCicloLinha(linha: number, comPesca: boolean): Bancada[] {
     const ciclo: Bancada[] = [];
-    const qtdEsq = linha === 1 ? LAYOUT.L1_ESQ : LAYOUT.L2_ESQ;
-    for (let p = qtdEsq; p >= 1; p--) {
-      const b = getBancada(linha, 'esquerdo', p);
+
+    // 🔧 ROTAÇÃO ESPELHADA:
+    //   Linha 1: sobe ESQUERDA → categoria → desce DIREITA
+    //   Linha 2: sobe DIREITA  → categoria → desce ESQUERDA  (espelhado, mesma lógica física)
+    const ladoSobe = linha === 1 ? 'esquerdo' : 'direito';
+    const ladoDesce = linha === 1 ? 'direito' : 'esquerdo';
+    const qtdSobe = linha === 1 ? LAYOUT.L1_ESQ : LAYOUT.L2_DIR;
+    const qtdDesce = linha === 1 ? LAYOUT.L1_DIR : LAYOUT.L2_ESQ;
+
+    // Sobe o lado externo (do fundo pro topo)
+    for (let p = qtdSobe; p >= 1; p--) {
+      const b = getBancada(linha, ladoSobe, p);
       if (b && b.tipo_principal === 'GM') ciclo.push(b);
     }
+
+    // Passa pela zona central (pesca + categoria)
     const cat = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'CATEGORIA');
     const pesca = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'PESCA');
     if (comPesca && pesca) ciclo.push(pesca);
     if (cat) ciclo.push(cat);
-    const qtdDir = linha === 1 ? LAYOUT.L1_DIR : LAYOUT.L2_DIR;
-    for (let p = 1; p <= qtdDir; p++) {
-      const b = getBancada(linha, 'direito', p);
+
+    // Desce o lado interno (do topo pro fundo)
+    for (let p = 1; p <= qtdDesce; p++) {
+      const b = getBancada(linha, ladoDesce, p);
       if (b && b.tipo_principal === 'GM') ciclo.push(b);
     }
     return ciclo;
