@@ -986,21 +986,33 @@ export default function LinhaPage() {
           </div>
         )}
         <div
-          className="border-2 border-dashed border-[#3a3a2a] rounded-md"
           style={{
+            border: '2px dashed #3a3a2a',
+            borderRadius: '8px',
             padding: '14px',
+            width: '320px',
+            height: '202px',
             boxSizing: 'border-box',
-            width: 'fit-content',
           }}
         >
           <div className="text-center mb-2">
             <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
           </div>
-          <div className="grid grid-cols-2 grid-rows-2" style={{ gap: '8px' }}>
-            <SlotBancada linha={1} lado="centro" posicao={1} />
-            <SlotBancada linha={2} lado="centro" posicao={1} />
-            <SlotBancada linha={1} lado="centro" posicao={2} />
-            <SlotBancada linha={2} lado="centro" posicao={2} />
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '140px 140px',
+              gridTemplateRows: '78px 78px',
+              columnGap: '8px',
+              rowGap: '8px',
+              width: '288px',
+              height: '164px',
+            }}
+          >
+            <div style={{ overflow: 'hidden' }}><SlotBancada linha={1} lado="centro" posicao={1} /></div>
+            <div style={{ overflow: 'hidden' }}><SlotBancada linha={2} lado="centro" posicao={1} /></div>
+            <div style={{ overflow: 'hidden' }}><SlotBancada linha={1} lado="centro" posicao={2} /></div>
+            <div style={{ overflow: 'hidden' }}><SlotBancada linha={2} lado="centro" posicao={2} /></div>
           </div>
         </div>
       </div>
