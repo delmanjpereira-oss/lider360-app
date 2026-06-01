@@ -985,17 +985,30 @@ export default function LinhaPage() {
             </div>
           </div>
         )}
+        {/* Container da Zona Central: width fixo, altura natural, borda em camada separada */}
         <div
           style={{
-            border: '2px dashed #3a3a2a',
-            borderRadius: '8px',
-            padding: '14px',
+            position: 'relative',
             width: '320px',
-            height: '202px',
+            padding: '16px',
             boxSizing: 'border-box',
           }}
         >
-          <div className="text-center mb-2">
+          {/* Borda tracejada isolada: ocupa exatamente o retângulo do container, sem sofrer interferência interna */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              border: '2px dashed #3a3a2a',
+              borderRadius: '8px',
+              pointerEvents: 'none',
+            }}
+            aria-hidden="true"
+          />
+          <div className="text-center mb-2 relative">
             <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
           </div>
           <div
@@ -1005,8 +1018,7 @@ export default function LinhaPage() {
               gridTemplateRows: '78px 78px',
               columnGap: '8px',
               rowGap: '8px',
-              width: '288px',
-              height: '164px',
+              position: 'relative',
             }}
           >
             <div style={{ overflow: 'hidden' }}><SlotBancada linha={1} lado="centro" posicao={1} /></div>
@@ -1106,7 +1118,7 @@ export default function LinhaPage() {
               </div>
             </div>
           </aside>
-          <main className="flex-1 flex gap-4 items-start justify-center overflow-x-auto">
+          <main className="flex-1 flex gap-16 items-start justify-center overflow-x-auto">
             <section className="flex flex-col items-center">
               <HeaderLinha linha={1} />
               <div className="flex gap-1 items-stretch">
@@ -1116,7 +1128,7 @@ export default function LinhaPage() {
               </div>
               <div className="text-gray-700 text-xs mt-2">↓</div>
             </section>
-            <section className="flex flex-col items-center mt-5">
+            <section className="flex flex-col items-center mt-8">
               <ZonaCentral />
             </section>
             <section className="flex flex-col items-center">
