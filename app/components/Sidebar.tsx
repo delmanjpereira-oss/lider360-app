@@ -32,7 +32,7 @@ const MENU = [
   {
     titulo: 'CONFIGURAÇÕES',
     items: [
-      { nome: 'Configurações', href: '/configuracoes', icon: '⚙️' },
+      { nome: 'Configurações', href: '/configuracoes-app', icon: '⚙️' },
     ],
   },
 ];
