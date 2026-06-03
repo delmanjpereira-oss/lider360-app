@@ -95,7 +95,6 @@ const STYLES = `
   .ritmo-linha-pulse { animation: pulseLine 2s ease-in-out infinite; }
   .toast-in { animation: toastIn 0.3s ease-out; }
   .toast-out { animation: toastOut 0.3s ease-out forwards; }
-  /* 🔄 ANIMAÇÃO LEVE DE ROTAÇÃO (FLIP technique) */
   [data-flip-key] { will-change: transform; transition: transform 700ms cubic-bezier(0.34, 1.56, 0.64, 1); }
   .flip-animating [data-flip-key] { animation: floatPulse 700ms ease-in-out, shimmerGold 700ms ease-out; }
   .flip-flash { animation: shimmerGold 800ms ease-out; }
@@ -122,7 +121,6 @@ export default function LinhaPage() {
   const [rotacionando, setRotacionando] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
-  // 🔧 ITEM 2: menu de contexto right-click pra card em sinergia
   const [menuSinergia, setMenuSinergia] = useState<{ x: number; y: number; aloc: Alocacao } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -193,6 +191,7 @@ export default function LinhaPage() {
     setColabs(filtrados);
   }
 
+  // ✅ RITMOS continuam por dia (vêm do CSV diário) - CORRETO
   async function carregarRitmos() {
     const hoje = new Date().toISOString().split('T')[0];
     const { data } = await supabase.from('ritmo_atual').select('id_groot, ritmo_pct, unidades, horas').eq('data_referencia', hoje);
@@ -205,21 +204,32 @@ export default function LinhaPage() {
     setRitmos(map);
   }
 
+  // 🔧 FIX: BANCADAS PERMANENTES - sem filtro de data
   async function carregarBancadas() {
-    const hoje = new Date().toISOString().split('T')[0];
-    const { data } = await supabase.from('layout_bancadas').select('*').eq('zona', ZONA).eq('data_referencia', hoje).order('posicao');
+    const { data } = await supabase
+      .from('layout_bancadas')
+      .select('*')
+      .eq('zona', ZONA)
+      .order('posicao');
     setBancadas(data || []);
   }
 
+  // 🔧 FIX: ALOCAÇÕES PERMANENTES - sem filtro de data
   async function carregarAlocacoes() {
-    const hoje = new Date().toISOString().split('T')[0];
-    const { data } = await supabase.from('layout_alocacao').select('*').eq('data_referencia', hoje);
+    const { data } = await supabase
+      .from('layout_alocacao')
+      .select('*');
     setAlocacoes(data || []);
   }
 
+  // 🔧 FIX: SLOTS FIXOS - verifica se já existe (sem data), cria se faltar
   async function garantirSlotsFixos() {
-    const hoje = new Date().toISOString().split('T')[0];
-    const { data: existentes } = await supabase.from('layout_bancadas').select('id, linha, posicao').eq('zona', ZONA).eq('lado', 'centro').eq('fixo_categoria', true).eq('data_referencia', hoje);
+    const { data: existentes } = await supabase
+      .from('layout_bancadas')
+      .select('id, linha, posicao')
+      .eq('zona', ZONA)
+      .eq('lado', 'centro')
+      .eq('fixo_categoria', true);
     const jaTem = new Set((existentes || []).map((b: any) => b.linha + '-' + b.posicao));
     const slotsFixos = [
       { linha: 1, posicao: 1, tipo_principal: 'PESCA' },
@@ -229,6 +239,7 @@ export default function LinhaPage() {
     ];
     const aCriar = slotsFixos.filter((s) => !jaTem.has(s.linha + '-' + s.posicao));
     if (aCriar.length === 0) return;
+    const hoje = new Date().toISOString().split('T')[0];
     await supabase.from('layout_bancadas').insert(aCriar.map((s) => ({
       zona: ZONA, linha: s.linha, lado: 'centro', posicao: s.posicao,
       tipo_principal: s.tipo_principal, subtipo: null, fixo_categoria: true, data_referencia: hoje,
@@ -332,6 +343,7 @@ export default function LinhaPage() {
     });
   }
 
+  // 🔧 FIX: DELETE sem filtro de data (alocações são permanentes)
   async function alocarColab(idGroot: string, bancada: Bancada) {
     const hoje = new Date().toISOString().split('T')[0];
     const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
@@ -348,7 +360,8 @@ export default function LinhaPage() {
     else if (tipoEFixoAutomatico(bancada.tipo_principal)) bancadaFixaId = bancada.id;
     let tipoAlocacao = 'fixo';
     if (bancadaFixaId && bancadaFixaId !== bancada.id) tipoAlocacao = 'temporario';
-    await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot).eq('data_referencia', hoje);
+    // Remove qualquer alocação anterior desse colab (sem filtro de data)
+    await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot);
     const { error } = await supabase.from('layout_alocacao').insert({
       bancada_id: bancada.id, id_groot: idGroot,
       tipo_alocacao: tipoAlocacao, bancada_fixa_id: bancadaFixaId, data_referencia: hoje,
@@ -375,12 +388,10 @@ export default function LinhaPage() {
     await carregarAlocacoes();
   }
 
-  // 🔧 ITEM 2: volta o colab pra bancada de origem (a fixa_id dele)
   async function voltarOrigem(aloc: Alocacao) {
     if (!aloc.bancada_fixa_id) { toast('error', 'Sem origem registrada'); return; }
     const bancadaOrigem = bancadas.find((b) => b.id === aloc.bancada_fixa_id);
     if (!bancadaOrigem) { toast('error', 'Bancada de origem não encontrada'); return; }
-    // valida lotação da origem
     const ocupacaoOrigem = alocacoes.filter((a) => a.bancada_id === bancadaOrigem.id && a.id !== aloc.id).length;
     if (ocupacaoOrigem >= maxColabsPorTipo(bancadaOrigem.tipo_principal)) {
       toast('error', 'Bancada de origem está cheia');
@@ -398,7 +409,6 @@ export default function LinhaPage() {
     toast('success', '↩️ Voltou pra origem');
   }
 
-  // 🔧 ITEM 2: fixa o colab na bancada atual (perde marca de sinergia)
   async function fixarAqui(aloc: Alocacao) {
     const { error } = await supabase
       .from('layout_alocacao')
@@ -415,28 +425,18 @@ export default function LinhaPage() {
 
   function getCicloLinha(linha: number, comPesca: boolean): Bancada[] {
     const ciclo: Bancada[] = [];
-
-    // 🔧 ROTAÇÃO ESPELHADA:
-    //   Linha 1: sobe ESQUERDA → categoria → desce DIREITA
-    //   Linha 2: sobe DIREITA  → categoria → desce ESQUERDA  (espelhado, mesma lógica física)
     const ladoSobe = linha === 1 ? 'esquerdo' : 'direito';
     const ladoDesce = linha === 1 ? 'direito' : 'esquerdo';
     const qtdSobe = linha === 1 ? LAYOUT.L1_ESQ : LAYOUT.L2_DIR;
     const qtdDesce = linha === 1 ? LAYOUT.L1_DIR : LAYOUT.L2_ESQ;
-
-    // Sobe o lado externo (do fundo pro topo)
     for (let p = qtdSobe; p >= 1; p--) {
       const b = getBancada(linha, ladoSobe, p);
       if (b && b.tipo_principal === 'GM') ciclo.push(b);
     }
-
-    // Passa pela zona central (pesca + categoria)
     const cat = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'CATEGORIA');
     const pesca = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'PESCA');
     if (comPesca && pesca) ciclo.push(pesca);
     if (cat) ciclo.push(cat);
-
-    // Desce o lado interno (do topo pro fundo)
     for (let p = 1; p <= qtdDesce; p++) {
       const b = getBancada(linha, ladoDesce, p);
       if (b && b.tipo_principal === 'GM') ciclo.push(b);
@@ -455,8 +455,6 @@ export default function LinhaPage() {
     });
   }
 
-  // 🎬 FLIP Animation: captura posições, deixa React mover os cards no DOM,
-  //    e anima do "ponto onde tava" pro "ponto onde foi" com transição CSS suave.
   function capturarPosicoesCards(): Map<string, DOMRect> {
     const map = new Map<string, DOMRect>();
     document.querySelectorAll('[data-flip-key]').forEach((el) => {
@@ -477,12 +475,10 @@ export default function LinhaPage() {
         const depois = elemento.getBoundingClientRect();
         const dx = antes.left - depois.left;
         const dy = antes.top - depois.top;
-        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return; // não se mexeu
-        // Trava na posição antiga sem transição...
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
         elemento.style.transition = 'none';
         elemento.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
-        // ...força reflow e libera transição pra voltar ao 0,0 animando
-        elemento.offsetHeight; // força reflow
+        elemento.offsetHeight;
         requestAnimationFrame(() => {
           elemento.style.transition = 'transform 700ms cubic-bezier(0.34, 1.56, 0.64, 1)';
           elemento.style.transform = 'translate(0px, 0px)';
@@ -497,22 +493,18 @@ export default function LinhaPage() {
     });
   }
 
+  // 🔧 FIX: rotação sem filtro de data (alocações são permanentes)
   async function aplicarRotacao(tipo: 1 | 2 | 3) {
     setRotacionando(true);
     try {
       const posicoesAntes = capturarPosicoesCards();
       if (tipo === 3) await rotacaoNivelar();
       else await rotacaoCiclo(tipo === 2);
-
-      // 🔧 ITEM 1: rotação zera todas as sinergias.
-      // Todo mundo passa a ser fixo da bancada onde caiu após a rotação.
-      const hoje = new Date().toISOString().split('T')[0];
+      // Após rotação: todos viram fixos da bancada atual (sem sinergia)
       const { data: alocsAtuais } = await supabase
         .from('layout_alocacao')
-        .select('id, bancada_id')
-        .eq('data_referencia', hoje);
+        .select('id, bancada_id');
       if (alocsAtuais && alocsAtuais.length > 0) {
-        // atualiza cada alocação: bancada_fixa_id = bancada_id, tipo = 'fixo'
         await Promise.all(
           alocsAtuais.map((a: any) =>
             supabase
@@ -522,7 +514,6 @@ export default function LinhaPage() {
           )
         );
       }
-
       await carregarAlocacoes();
       await new Promise((r) => setTimeout(r, 50));
       animarFLIP(posicoesAntes);
@@ -595,11 +586,9 @@ export default function LinhaPage() {
       }
       const bancadasLinhaIds = ciclo.map((b) => b.id);
       const idsRemove = alocacoes.filter((a) => bancadasLinhaIds.includes(a.bancada_id)).map((a) => a.id);
-
       if (idsRemove.length > 0) {
         await supabase.from('layout_alocacao').delete().in('id', idsRemove);
       }
-
       if (novas.length > 0) {
         await supabase.from('layout_alocacao').insert(
           novas.map((n) => ({
@@ -625,10 +614,8 @@ export default function LinhaPage() {
         const bUltimo = getBancada(linha, lado, qtd);
         if (!bTopo || !bUltimo) continue;
         if (bTopo.tipo_principal !== 'GM' || bUltimo.tipo_principal !== 'GM') continue;
-
         const alocsTopo = alocacoes.filter((a) => a.bancada_id === bTopo.id);
         const alocsUltimo = alocacoes.filter((a) => a.bancada_id === bUltimo.id);
-
         for (const a of alocsTopo) {
           await supabase.from('layout_alocacao').update({
             bancada_id: bUltimo.id,
@@ -666,34 +653,26 @@ export default function LinhaPage() {
   }
 
   function calcularRitmoLinha(linha: number) {
-    // 🔧 ITEM 3b: ritmo da linha SÓ considera quem está em bancadas GM
     const bancadasGM = bancadas.filter((b) => b.linha === linha && b.tipo_principal === 'GM');
     const bancadasIds = new Set(bancadasGM.map((b) => b.id));
     const alocsLinha = alocacoes.filter((a) => bancadasIds.has(a.bancada_id));
-
     let totalUnidades = 0;
     let totalHoras = 0;
     let supera = 0, alinhado = 0, ofensor = 0, semDado = 0;
-
     alocsLinha.forEach((a) => {
       const ritmo = ritmos[a.id_groot];
       if (!ritmo) { semDado++; return; }
-
       const liq = ritmo.liquida;
-
       if (ritmo.unidades && ritmo.horas && ritmo.horas > 0) {
         totalUnidades += ritmo.unidades;
         totalHoras += ritmo.horas;
       }
-
       if (liq == null || liq === 0) { semDado++; return; }
       if (liq < metas.p2m_base) ofensor++;
       else if (liq <= metas.p2m_alinhado_max) alinhado++;
       else supera++;
     });
-
     const totalAtivos = alocsLinha.length;
-
     if (totalHoras === 0) {
       const liquidas: number[] = [];
       alocsLinha.forEach((a) => {
@@ -716,10 +695,8 @@ export default function LinhaPage() {
         totalAtivos, supera, alinhado, ofensor, semDado
       };
     }
-
     const pecasHora = totalUnidades / totalHoras;
     const pctMedio = Math.round((pecasHora / metas.p2m_base) * 100);
-
     return {
       pctMedio,
       pecasHora: Math.round(pecasHora),
@@ -772,9 +749,8 @@ export default function LinhaPage() {
       onDragStart: (e: React.DragEvent) => { e.stopPropagation(); setDraggingId(aloc.id_groot); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', aloc.id_groot); },
       onDragEnd: () => { setDraggingId(null); setHoverBancada(null); },
       onDoubleClick: (e: React.MouseEvent) => { e.stopPropagation(); setCardAtivo(isAtivo ? null : aloc.id_groot); },
-      // 🔧 ITEM 2: right-click no card temporário abre menu de sinergia
       onContextMenu: (e: React.MouseEvent) => {
-        if (!eTemporario) return; // só sinergias têm menu
+        if (!eTemporario) return;
         e.preventDefault();
         e.stopPropagation();
         setMenuSinergia({ x: e.clientX, y: e.clientY, aloc });
@@ -862,7 +838,6 @@ export default function LinhaPage() {
     const isErro = erroBancada === b.id;
     const isCategoria = b.tipo_principal === 'CATEGORIA';
     const isCompativel = (cardAtivo || draggingId) && bancadaCompativel(b);
-    // 🔧 FIX 1: altura SEMPRE fixa em 78px — sem ternário, sem min-h variável
     const classes = [
       'w-[140px] h-[78px]',
       'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200',
@@ -901,7 +876,6 @@ export default function LinhaPage() {
           </div>
         </div>
         {isCategoria ? (
-          // 🔧 FIX 2: overflow-y-auto + min-h-0 → scroll interno qd lotar, bancada continua 78px
           <div className="flex-1 flex flex-col gap-0.5 px-1 pb-1 pt-0.5 overflow-y-auto min-h-0">
             {alocs.length === 0 && sinergias.length === 0 ? (
               <div className="flex-1 flex items-center justify-center text-[9px] text-gray-700 italic">Arrasta colabs</div>
@@ -940,7 +914,6 @@ export default function LinhaPage() {
     );
   }
 
-  // 🔧 ITEM 3a: calcula ritmo médio das bancadas PESCA e CATEGORIA de uma linha
   function calcularRitmoPescaCat(linha: number, tipo: 'PESCA' | 'CATEGORIA') {
     const bancadasMatch = bancadas.filter((b) => b.linha === linha && b.tipo_principal === tipo);
     const ids = new Set(bancadasMatch.map((b) => b.id));
@@ -967,7 +940,6 @@ export default function LinhaPage() {
     const temAlgum = p1 != null || c1 != null || p2 != null || c2 != null;
     return (
       <div className="flex flex-col items-center gap-2">
-        {/* 🔧 ITEM 3a: painel minimalista de ritmo pesca/cat por linha */}
         {temAlgum && (
           <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded px-3 py-1 flex items-center gap-3 text-[10px]">
             <div className="flex items-center gap-1.5">
@@ -985,7 +957,6 @@ export default function LinhaPage() {
             </div>
           </div>
         )}
-        {/* Container da Zona Central: width fixo, altura natural, borda em camada separada */}
         <div
           style={{
             position: 'relative',
@@ -994,7 +965,6 @@ export default function LinhaPage() {
             boxSizing: 'border-box',
           }}
         >
-          {/* Borda tracejada isolada: ocupa exatamente o retângulo do container, sem sofrer interferência interna */}
           <div
             style={{
               position: 'absolute',
@@ -1078,7 +1048,6 @@ export default function LinhaPage() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
-
       <header className="border-b border-[#1a1a1a] px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-bold">
@@ -1156,7 +1125,6 @@ export default function LinhaPage() {
           );
         })}
       </div>
-      {/* 🔧 ITEM 2: Menu de contexto da sinergia (right-click) */}
       {menuSinergia && (() => {
         const c = getColab(menuSinergia.aloc.id_groot);
         const bancadaOrigem = bancadas.find((b) => b.id === menuSinergia.aloc.bancada_fixa_id);
