@@ -1,509 +1,635 @@
-/**
- * ====================================================
- * COLETOR DE CONTEXTO - VERSÃO ENRIQUECIDA
- * lib/ia/coletor-contexto.ts
- *
- * Busca TODOS os dados do colaborador em tempo real do Supabase
- * inclui PRODUÇÃO + QUALIDADE + OCUPAÇÃO + OCIOSIDADE
- * ====================================================
- */
-
-import { supabase } from '../supabase';
-
+/ ============================================
+// 🧠 COLETOR INTELIGENTE + APRENDIZADO
 // ============================================
-// TIPOS
+// Agora a IA APRENDE com suas ações passadas:
+// - O que funcionou (sucesso)
+// - O que não funcionou (falha)
+// - Padrões do seu time específico
 // ============================================
 
-export interface ContextoColaborador {
-  cadastro: any;
-  historico30dias: any[];
-  feedbacks90dias: any[];
-  dpmoEventos: any[];
-  dpmoAgregado: any[];
-  imaManual: any[];
-  ocupacao30dias: any[];
-  turnosDiarios: any[];
-  tarefas: any[];
-  metas: { metaProcesso: number; metaIma: number };
-  geradoEm: string;
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+function calcularMesesEntreDatas(dataInicio: string | null): number {
+  if (!dataInicio) return 0;
+  try {
+    const inicio = new Date(dataInicio + 'T12:00:00');
+    if (isNaN(inicio.getTime())) return 0;
+    const hoje = new Date();
+    return (hoje.getFullYear() - inicio.getFullYear()) * 12 + 
+           (hoje.getMonth() - inicio.getMonth());
+  } catch (e) {
+    return 0;
+  }
+}
+
+function analisarTendencia(valores: number[]): {
+  tendencia: 'subindo' | 'estavel' | 'caindo' | 'sem_dados';
+  variacao_pct: number;
+  forca: 'forte' | 'moderada' | 'leve';
+} {
+  if (valores.length < 3) return { tendencia: 'sem_dados', variacao_pct: 0, forca: 'leve' };
+  
+  const metade = Math.floor(valores.length / 2);
+  const inicial = valores.slice(0, metade);
+  const final = valores.slice(metade);
+  
+  const mediaInicial = inicial.reduce((s, v) => s + v, 0) / inicial.length;
+  const mediaFinal = final.reduce((s, v) => s + v, 0) / final.length;
+  
+  if (mediaInicial === 0) return { tendencia: 'sem_dados', variacao_pct: 0, forca: 'leve' };
+  
+  const variacao = ((mediaFinal - mediaInicial) / mediaInicial) * 100;
+  
+  let forca: 'forte' | 'moderada' | 'leve' = 'leve';
+  if (Math.abs(variacao) > 10) forca = 'forte';
+  else if (Math.abs(variacao) > 5) forca = 'moderada';
+  
+  let tendencia: 'subindo' | 'estavel' | 'caindo';
+  if (variacao > 2) tendencia = 'subindo';
+  else if (variacao < -2) tendencia = 'caindo';
+  else tendencia = 'estavel';
+  
+  return { tendencia, variacao_pct: Number(variacao.toFixed(1)), forca };
+}
+
+function detectarPadroes(historicoColab: any[]): {
+  cai_segunda: boolean;
+  cai_sexta: boolean;
+  consistente: boolean;
+  volatil: boolean;
+  variancia: number;
+} {
+  if (historicoColab.length < 5) {
+    return { cai_segunda: false, cai_sexta: false, consistente: false, volatil: false, variancia: 0 };
+  }
+  
+  const liquidas = historicoColab.map(h => Number(h.liquida) || 0).filter(v => v > 0);
+  
+  const media = liquidas.reduce((s, v) => s + v, 0) / liquidas.length;
+  const variancia = liquidas.reduce((s, v) => s + Math.pow(v - media, 2), 0) / liquidas.length;
+  const desvioPadrao = Math.sqrt(variancia);
+  const coefVariacao = media > 0 ? (desvioPadrao / media) * 100 : 0;
+  
+  const consistente = coefVariacao < 8;
+  const volatil = coefVariacao > 15;
+  
+  const porDia: Record<number, number[]> = {};
+  historicoColab.forEach(h => {
+    const data = new Date(h.data_referencia + 'T12:00:00');
+    const dia = data.getDay();
+    if (!porDia[dia]) porDia[dia] = [];
+    if (Number(h.liquida) > 0) porDia[dia].push(Number(h.liquida));
+  });
+  
+  const mediaSegunda = porDia[1]?.length > 0 ? porDia[1].reduce((s, v) => s + v, 0) / porDia[1].length : media;
+  const mediaSexta = porDia[5]?.length > 0 ? porDia[5].reduce((s, v) => s + v, 0) / porDia[5].length : media;
+  
+  const cai_segunda = mediaSegunda < media * 0.92;
+  const cai_sexta = mediaSexta < media * 0.92;
+  
+  return { cai_segunda, cai_sexta, consistente, volatil, variancia: Number(coefVariacao.toFixed(1)) };
 }
 
 // ============================================
-// FUNÇÃO PRINCIPAL — COLETA EM TEMPO REAL
+// 🧠 ANALISA APRENDIZADO DAS TAREFAS PASSADAS
 // ============================================
-
-export async function coletarContextoColaborador(
-  idGroot: string
-): Promise<ContextoColaborador | null> {
-  if (!idGroot || idGroot.trim() === '') return null;
-
-  const hoje = new Date();
-  const limite30 = new Date(hoje);
-  limite30.setDate(limite30.getDate() - 30);
-  const limite30Str = limite30.toISOString().split('T')[0];
-
-  const limite90 = new Date(hoje);
-  limite90.setDate(limite90.getDate() - 90);
-  const limite90Str = limite90.toISOString();
-
-  // 1. CADASTRO
-  const { data: cadastro } = await supabase
-    .from('colaboradores')
-    .select('*')
-    .eq('id_groot', idGroot)
-    .maybeSingle();
-
-  if (!cadastro) return null;
-
-  const processo = cadastro.processo as string | null;
-  const procDpmo = processo === 'Checkin' ? 'CK' : processo === 'P2M' ? 'P2M' : null;
-
-  // 2. METAS do config
-  const chaveMetaProc = processo === 'Checkin' ? 'meta_checkin_base' : 'meta_p2m_base';
-  const chaveMetaIma = processo === 'Checkin' ? 'meta_ima_checkin' : 'meta_ima_p2m';
+function analisarAprendizado(tarefasPassadas: any[]): {
+  totalTarefas: number;
+  sucessos: number;
+  falhas: number;
+  neutros: number;
+  taxaSucesso: number;
+  estrategiasEficazes: string[];
+  estrategiasIneficazes: string[];
+  historicoDetalhado: any[];
+} {
+  if (!tarefasPassadas || tarefasPassadas.length === 0) {
+    return {
+      totalTarefas: 0,
+      sucessos: 0,
+      falhas: 0,
+      neutros: 0,
+      taxaSucesso: 0,
+      estrategiasEficazes: [],
+      estrategiasIneficazes: [],
+      historicoDetalhado: [],
+    };
+  }
   
-  const [{ data: confMeta }, { data: confIma }] = await Promise.all([
-    supabase.from('config').select('valor').eq('chave', chaveMetaProc).maybeSingle(),
-    supabase.from('config').select('valor').eq('chave', chaveMetaIma).maybeSingle(),
-  ]);
+  // Conta por classificação
+  const sucessos = tarefasPassadas.filter(t => 
+    t.classificacao_aprendizado === 'sucesso_confirmado' || 
+    (t.classificacao_aprendizado === 'abordagem_funcionou' && !t.performance_depois_30d)
+  ).length;
   
-  const metaProcesso = confMeta ? Number(confMeta.valor) : (processo === 'Checkin' ? 296 : 329);
-  const metaIma = confIma ? Number(confIma.valor) : 1567;
-
-  // 3. HISTÓRICO PRODUTIVIDADE (30 dias)
-  const { data: historicoRaw } = await supabase
-    .from('historico')
-    .select('*')
-    .eq('id_groot', idGroot)
-    .gte('data_referencia', limite30Str)
-    .order('data_referencia', { ascending: true });
-
-  // 4. FEEDBACKS (90 dias)
-  const { data: feedbacksRaw } = await supabase
-    .from('feedbacks')
-    .select('*')
-    .eq('id_groot', idGroot)
-    .gte('registrado_em', limite90Str)
-    .order('registrado_em', { ascending: false });
-
-  // 5. DPMO EVENTOS (todos os eventos detalhados)
-  let dpmoEventosRaw: any[] = [];
-  if (procDpmo) {
-    const { data: porId } = await supabase
-      .from('dpmo_eventos')
-      .select('*')
-      .eq('id_groot', idGroot)
-      .eq('processo', procDpmo)
-      .order('checkin_data', { ascending: false });
-    dpmoEventosRaw = porId || [];
-  }
-
-  // 6. DPMO AGREGADO (semanas com DPMO oficial)
-  let dpmoAgregadoRaw: any[] = [];
-  if (procDpmo) {
-    const { data } = await supabase
-      .from('dpmo_agregado')
-      .select('*')
-      .eq('id_groot', idGroot)
-      .eq('processo', procDpmo)
-      .order('ano', { ascending: false })
-      .order('semana', { ascending: false });
-    dpmoAgregadoRaw = data || [];
-  }
-
-  // 7. IMA MANUAL (do print OCR)
-  let imaManualRaw: any[] = [];
-  if (processo) {
-    const { data } = await supabase
-      .from('ima_manual')
-      .select('*')
-      .eq('id_groot', idGroot)
-      .eq('processo', processo)
-      .order('ano', { ascending: false })
-      .order('mes', { ascending: false });
-    imaManualRaw = data || [];
-  }
-
-  // 8. OCUPAÇÃO P2M (só se for P2M)
-  let ocupacaoRaw: any[] = [];
-  if (processo === 'P2M') {
-    const { data } = await supabase
-      .from('ocupacao_p2m')
-      .select('*')
-      .eq('id_groot', idGroot)
-      .gte('data_referencia', limite30Str)
-      .order('data_referencia', { ascending: false });
-    ocupacaoRaw = data || [];
-  }
-
-  // 9. TURNOS DIÁRIOS (NET do time)
-  const { data: turnosRaw } = await supabase
-    .from('net_turno_diario')
-    .select('*')
-    .gte('data_referencia', limite30Str)
-    .order('data_referencia', { ascending: false });
-
-  // 10. TAREFAS pendentes
-  const { data: tarefasRaw } = await supabase
-    .from('tarefas')
-    .select('*')
-    .eq('id_groot', idGroot)
-    .order('criado_em', { ascending: false })
-    .limit(20);
-
+  const falhas = tarefasPassadas.filter(t =>
+    t.classificacao_aprendizado === 'falha_confirmada' ||
+    (t.classificacao_aprendizado === 'abordagem_falhou' && !t.performance_depois_30d)
+  ).length;
+  
+  const neutros = tarefasPassadas.filter(t =>
+    t.classificacao_aprendizado === 'efeito_neutro'
+  ).length;
+  
+  const totalAvaliadas = sucessos + falhas + neutros;
+  const taxaSucesso = totalAvaliadas > 0 ? (sucessos / totalAvaliadas) * 100 : 0;
+  
+  // Identifica estratégias eficazes (tipos que tiveram sucesso)
+  const tiposComSucesso: Record<string, number> = {};
+  const tiposComFalha: Record<string, number> = {};
+  
+  tarefasPassadas.forEach(t => {
+    if (!t.tipo) return;
+    if (t.classificacao_aprendizado === 'sucesso_confirmado' || t.classificacao_aprendizado === 'abordagem_funcionou') {
+      tiposComSucesso[t.tipo] = (tiposComSucesso[t.tipo] || 0) + 1;
+    }
+    if (t.classificacao_aprendizado === 'falha_confirmada' || t.classificacao_aprendizado === 'abordagem_falhou') {
+      tiposComFalha[t.tipo] = (tiposComFalha[t.tipo] || 0) + 1;
+    }
+  });
+  
+  const estrategiasEficazes = Object.entries(tiposComSucesso)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([tipo, count]) => `${tipo} (${count} sucessos)`);
+  
+  const estrategiasIneficazes = Object.entries(tiposComFalha)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([tipo, count]) => `${tipo} (${count} falhas)`);
+  
+  // Histórico detalhado (últimas 10 tarefas finalizadas)
+  const historicoDetalhado = tarefasPassadas
+    .filter(t => t.finalizada_em)
+    .sort((a, b) => new Date(b.finalizada_em).getTime() - new Date(a.finalizada_em).getTime())
+    .slice(0, 10)
+    .map(t => ({
+      nome: t.nome,
+      tipo: t.tipo,
+      acao_tomada: t.acao_tomada,
+      resultado: t.classificacao_aprendizado,
+      variacao_30d: t.performance_depois_30d?.variacao_pct || null,
+      observacao: t.observacao_tl,
+      diasAtras: Math.floor((Date.now() - new Date(t.finalizada_em).getTime()) / (1000 * 60 * 60 * 24)),
+    }));
+  
   return {
-    cadastro,
-    historico30dias: historicoRaw || [],
-    feedbacks90dias: feedbacksRaw || [],
-    dpmoEventos: dpmoEventosRaw,
-    dpmoAgregado: dpmoAgregadoRaw,
-    imaManual: imaManualRaw,
-    ocupacao30dias: ocupacaoRaw,
-    turnosDiarios: turnosRaw || [],
-    tarefas: tarefasRaw || [],
-    metas: { metaProcesso, metaIma },
-    geradoEm: new Date().toISOString(),
+    totalTarefas: tarefasPassadas.length,
+    sucessos,
+    falhas,
+    neutros,
+    taxaSucesso: Number(taxaSucesso.toFixed(1)),
+    estrategiasEficazes,
+    estrategiasIneficazes,
+    historicoDetalhado,
   };
 }
 
 // ============================================
-// HELPERS DE ANÁLISE
+// FUNÇÃO PRINCIPAL
 // ============================================
 
-function tempoParaSegundos(tempo: string | null): number {
-  if (!tempo) return 0;
-  const partes = String(tempo).split(':').map(Number);
-  if (partes.length === 3) return partes[0] * 3600 + partes[1] * 60 + partes[2];
-  if (partes.length === 2) return partes[0] * 3600 + partes[1] * 60;
-  return 0;
-}
-
-function segundosParaHM(seg: number): string {
-  if (seg < 0) seg = Math.abs(seg);
-  if (seg === 0) return '0min';
-  const h = Math.floor(seg / 3600);
-  const m = Math.floor((seg % 3600) / 60);
-  if (h === 0) return `${m}min`;
-  if (m === 0) return `${h}h`;
-  return `${h}h${m.toString().padStart(2, '0')}`;
-}
-
-// ============================================
-// FORMATAÇÃO PRA IA — MARKDOWN ESTRUTURADO
-// ============================================
-
-export function formatarContextoParaIA(ctx: ContextoColaborador): string {
-  const linhas: string[] = [];
+export async function coletarContextoCompleto(): Promise<{
+  colabs: any[];
+  metas: Record<string, number>;
+  metaDiariaIA: number;
+  tarefasGeradasHoje: number;
+  podeGerar: boolean;
+  vagasHoje: number;
+  saudeTime: any;
+  dataAtual: any;
+  aprendizado: any;
+}> {
+  const { data: configData } = await supabase.from('config').select('chave, valor');
   
-  const c = ctx.cadastro;
-  const metaProc = ctx.metas.metaProcesso;
-  const metaIma = ctx.metas.metaIma;
+  const metas: Record<string, number> = {};
+  (configData || []).forEach((c: any) => {
+    metas[c.chave] = Number(c.valor) || 0;
+  });
   
-  // ─────────────────────────────────────
-  // CADASTRO
-  // ─────────────────────────────────────
-  linhas.push('# 📋 DADOS DO COLABORADOR');
-  linhas.push('');
-  linhas.push('## 👤 Cadastro');
-  linhas.push(`- **Nome:** ${c.nome || '—'}`);
-  linhas.push(`- **ID Groot:** ${c.id_groot}`);
-  linhas.push(`- **Processo:** ${c.processo || '—'}`);
-  linhas.push(`- **Cargo:** ${c.cargo || '—'}`);
-  linhas.push(`- **Carreira:** ${c.carreira || '—'}`);
-  linhas.push(`- **Status:** ${c.status || '—'}`);
-  if (c.data_admissao) {
-    linhas.push(`- **Admissão:** ${formatarData(c.data_admissao)} (${mesesDesde(c.data_admissao)} meses de empresa)`);
-  }
-  linhas.push('');
-  linhas.push(`**Metas do processo:** ${metaProc} pç/h (líquida) | IMA máximo: ${metaIma}`);
-  linhas.push('');
+  const metaDiariaIA = metas['limite_tarefas_pendentes'] || 2;
   
-  // ─────────────────────────────────────
-  // PRODUÇÃO (com análise de ociosidade saudável!)
-  // ─────────────────────────────────────
-  linhas.push('## 📊 Produção (últimos 30 dias)');
-  if (ctx.historico30dias.length === 0) {
-    linhas.push('_Sem registros de produção._');
-  } else {
-    const validos = ctx.historico30dias.filter((h: any) => h.prod_liquida > 0);
-    const liquidas = validos.map((h: any) => Number(h.prod_liquida));
-    const media = liquidas.length > 0 ? liquidas.reduce((a, b) => a + b, 0) / liquidas.length : 0;
-    const max = Math.max(...liquidas, 0);
-    const min = liquidas.length > 0 ? Math.min(...liquidas) : 0;
-    
-    const bateuMeta = validos.filter((h: any) => Number(h.prod_liquida) >= metaProc).length;
-    const pctBateuMeta = validos.length > 0 ? Math.round((bateuMeta / validos.length) * 100) : 0;
-    
-    // 🎯 ANÁLISE DE OCIOSIDADE SAUDÁVEL
-    let diasSaudavel = 0;
-    let diasAcima = 0;
-    let diasApertado = 0;
-    let velocidadeEfetivaMedia = 0;
-    let validosOcio = 0;
-    
-    validos.forEach((h: any) => {
-      const procSeg = tempoParaSegundos(h.tempo_processo);
-      const efeSeg = tempoParaSegundos(h.tempo_efetivo);
-      if (procSeg > 0 && h.unidades > 0) {
-        const tempoEsperadoSeg = (Number(h.unidades) / metaProc) * 3600;
-        const ocioSaudavel = procSeg - tempoEsperadoSeg;
-        const ocioReal = procSeg - efeSeg;
-        
-        if (ocioSaudavel < 0) diasApertado++;
-        else if (ocioReal <= ocioSaudavel + 15 * 60) diasSaudavel++;
-        else diasAcima++;
-        
-        if (efeSeg > 0) {
-          velocidadeEfetivaMedia += (Number(h.unidades) / (efeSeg / 3600));
-          validosOcio++;
-        }
-      }
-    });
-    velocidadeEfetivaMedia = validosOcio > 0 ? velocidadeEfetivaMedia / validosOcio : 0;
-    
-    linhas.push(`- **Dias com registro:** ${validos.length}`);
-    linhas.push(`- **Média líquida:** ${Math.round(media)} pç/h (meta: ${metaProc})`);
-    linhas.push(`- **Pico máximo:** ${Math.round(max)} pç/h`);
-    linhas.push(`- **Mínimo:** ${Math.round(min)} pç/h`);
-    linhas.push(`- **Bateu meta:** ${bateuMeta} de ${validos.length} dias (${pctBateuMeta}%)`);
-    linhas.push(`- **Velocidade efetiva média:** ${Math.round(velocidadeEfetivaMedia)} pç/h (quando trabalha)`);
-    linhas.push('');
-    linhas.push('### ⏱️ Análise de Ociosidade Saudável');
-    linhas.push(`- ✅ Dias com ociosidade saudável: ${diasSaudavel}`);
-    linhas.push(`- 🔴 Dias com ociosidade ACIMA: ${diasAcima}`);
-    linhas.push(`- 🟠 Dias com turno apertado: ${diasApertado}`);
-    
-    if (diasAcima > diasSaudavel) {
-      linhas.push('- ⚠️ **ALERTA:** Mais dias com ociosidade acima do saudável que dentro.');
-    }
-    if (velocidadeEfetivaMedia > metaProc * 1.15 && diasAcima >= 3) {
-      linhas.push(`- 🚀 **PERFIL RUSHER:** Velocidade efetiva ${Math.round(((velocidadeEfetivaMedia / metaProc) - 1) * 100)}% acima da meta, mas perde tempo parado.`);
-    }
-    linhas.push('');
-    
-    // Últimos 7 dias detalhado
-    const ultimos7 = validos.slice(-7);
-    if (ultimos7.length > 0) {
-      linhas.push('### Últimos dias');
-      ultimos7.forEach((h: any) => {
-        linhas.push(`- ${formatarData(h.data_referencia)}: **${Number(h.prod_liquida).toFixed(0)} pç/h** (${h.unidades} pç em ${h.tempo_processo || '—'}) [${h.status_meta || '—'}]`);
-      });
-      linhas.push('');
-    }
+  const hoje = new Date().toISOString().split('T')[0];
+  
+  const { count: tarefasHoje } = await supabase
+    .from('tarefas')
+    .select('id', { count: 'exact', head: true })
+    .eq('gerado_por_ia', true)
+    .gte('criado_em', hoje + 'T00:00:00')
+    .lte('criado_em', hoje + 'T23:59:59');
+  
+  const vagasHoje = Math.max(0, metaDiariaIA - (tarefasHoje || 0));
+  const podeGerar = vagasHoje > 0;
+  
+  const dataAtualObj = new Date();
+  const diaAtual = dataAtualObj.getDate();
+  const mesAtual = dataAtualObj.getMonth() + 1;
+  const anoAtual = dataAtualObj.getFullYear();
+  const ultimoDiaMes = new Date(anoAtual, mesAtual, 0).getDate();
+  const fimQuarter = mesAtual % 3 === 0;
+  
+  let contextoTemporal: 'inicio_mes' | 'meio_mes' | 'fechamento';
+  if (diaAtual <= 7) contextoTemporal = 'inicio_mes';
+  else if (diaAtual <= 22) contextoTemporal = 'meio_mes';
+  else contextoTemporal = 'fechamento';
+  
+  const dataAtual = {
+    dia: diaAtual,
+    mes: mesAtual,
+    ano: anoAtual,
+    diasRestantesMes: ultimoDiaMes - diaAtual,
+    contextoTemporal,
+    fimQuarter,
+    diaSemana: ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'][dataAtualObj.getDay()],
+  };
+  
+  // 🧠 BUSCA APRENDIZADO - tarefas finalizadas nos últimos 90 dias
+  const dias90atras = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  
+  const { data: tarefasFinalizadasData } = await supabase
+    .from('tarefas')
+    .select('*')
+    .eq('gerado_por_ia', true)
+    .eq('status', 'Finalizada')
+    .gte('finalizada_em', dias90atras)
+    .not('classificacao_aprendizado', 'is', null);
+  
+  const aprendizado = analisarAprendizado(tarefasFinalizadasData || []);
+  
+  if (!podeGerar) {
+    return { 
+      colabs: [], 
+      metas, 
+      metaDiariaIA,
+      tarefasGeradasHoje: tarefasHoje || 0,
+      podeGerar: false,
+      vagasHoje: 0,
+      saudeTime: null,
+      dataAtual,
+      aprendizado,
+    };
   }
   
-  // ─────────────────────────────────────
-  // 🎯 QUALIDADE - DPMO/IMA (NOVO!)
-  // ─────────────────────────────────────
-  linhas.push('## 📊 QUALIDADE (DPMO/IMA)');
+  const { data: colabsData } = await supabase
+    .from('colaboradores')
+    .select('*')
+    .eq('status', 'Ativo');
   
-  if (ctx.imaManual.length > 0) {
-    const ultimoIma = ctx.imaManual[0];
-    const mediaIma = Math.round(ctx.imaManual.reduce((s, m) => s + Number(m.ima || 0), 0) / ctx.imaManual.length);
+  if (!colabsData) return { 
+    colabs: [], metas, metaDiariaIA, 
+    tarefasGeradasHoje: tarefasHoje || 0,
+    podeGerar: false, vagasHoje: 0, saudeTime: null, dataAtual, aprendizado,
+  };
+  
+  const idsGroot = colabsData.map(c => c.id_groot);
+  
+  const trimestreAtual = Math.ceil(mesAtual / 3);
+  const inicioQuarter = `${anoAtual}-${String((trimestreAtual - 1) * 3 + 1).padStart(2, '0')}-01`;
+  
+  const dias14atras = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const dias30atras = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  
+  const [
+    { data: historicoData },
+    { data: produtividadeMensalData },
+    { data: presencaData },
+    { data: imaData },
+    { data: calibracoesData },
+    { data: tarefasPendentesData },
+    { data: tarefasRecentesData },
+    { data: feedbacksRecentesData },
+    { data: feedbacksHistData },
+    { data: tarefasPorColabFinalizadas },
+  ] = await Promise.all([
+    supabase.from('historico').select('*').in('id_groot', idsGroot).gte('data_referencia', dias90atras),
+    supabase.from('produtividade_mensal').select('*').in('id_groot', idsGroot).order('ano', { ascending: false }).order('mes', { ascending: false }),
+    supabase.from('presenca').select('*').in('id_groot', idsGroot).gte('data_referencia', dias90atras).neq('status', 'descartado'),
+    supabase.from('ima_manual').select('*').in('id_groot', idsGroot).order('data_avaliacao', { ascending: false }),
+    supabase.from('calibracoes').select('*').in('id_groot', idsGroot).order('criado_em', { ascending: false }),
+    supabase.from('tarefas').select('id_groot').eq('status', 'Pendente'),
+    supabase.from('tarefas').select('id_groot, criado_em, status, tipo, diagnostico').gte('criado_em', dias14atras),
+    supabase.from('feedbacks').select('id_groot, tipo, classificacao, observacao, registrado_em').gte('registrado_em', dias30atras).order('registrado_em', { ascending: false }),
+    supabase.from('feedbacks').select('id_groot, tipo, classificacao, observacao, registrado_em').gte('registrado_em', dias90atras),
+    // 🧠 Tarefas finalizadas POR COLAB (aprendizado individual)
+    supabase.from('tarefas')
+      .select('id_groot, tipo, classificacao_aprendizado, acao_tomada, observacao_tl, performance_depois_30d, finalizada_em')
+      .in('id_groot', idsGroot)
+      .eq('status', 'Finalizada')
+      .not('classificacao_aprendizado', 'is', null)
+      .gte('finalizada_em', dias90atras),
+  ]);
+  
+  // Mapeia tudo
+  const mapaHistorico: Record<string, any[]> = {};
+  (historicoData || []).forEach((h: any) => {
+    if (!mapaHistorico[h.id_groot]) mapaHistorico[h.id_groot] = [];
+    mapaHistorico[h.id_groot].push(h);
+  });
+  
+  const mapaProdMensal: Record<string, any[]> = {};
+  (produtividadeMensalData || []).forEach((p: any) => {
+    if (!mapaProdMensal[p.id_groot]) mapaProdMensal[p.id_groot] = [];
+    mapaProdMensal[p.id_groot].push(p);
+  });
+  
+  const mapaPresenca: Record<string, any[]> = {};
+  (presencaData || []).forEach((p: any) => {
+    if (!mapaPresenca[p.id_groot]) mapaPresenca[p.id_groot] = [];
+    mapaPresenca[p.id_groot].push(p);
+  });
+  
+  const mapaCalibracoes: Record<string, any[]> = {};
+  (calibracoesData || []).forEach((c: any) => {
+    if (!mapaCalibracoes[c.id_groot]) mapaCalibracoes[c.id_groot] = [];
+    mapaCalibracoes[c.id_groot].push(c);
+  });
+  
+  const mapaTarefasPendentes: Record<string, number> = {};
+  (tarefasPendentesData || []).forEach((t: any) => {
+    mapaTarefasPendentes[t.id_groot] = (mapaTarefasPendentes[t.id_groot] || 0) + 1;
+  });
+  
+  const mapaTarefasRecentes: Record<string, any[]> = {};
+  (tarefasRecentesData || []).forEach((t: any) => {
+    if (!mapaTarefasRecentes[t.id_groot]) mapaTarefasRecentes[t.id_groot] = [];
+    mapaTarefasRecentes[t.id_groot].push(t);
+  });
+  
+  const mapaFeedbacksRecentes: Record<string, any[]> = {};
+  (feedbacksRecentesData || []).forEach((f: any) => {
+    if (!mapaFeedbacksRecentes[f.id_groot]) mapaFeedbacksRecentes[f.id_groot] = [];
+    mapaFeedbacksRecentes[f.id_groot].push(f);
+  });
+  
+  const mapaFeedbacksHist: Record<string, any[]> = {};
+  (feedbacksHistData || []).forEach((f: any) => {
+    if (!mapaFeedbacksHist[f.id_groot]) mapaFeedbacksHist[f.id_groot] = [];
+    mapaFeedbacksHist[f.id_groot].push(f);
+  });
+  
+  // 🧠 APRENDIZADO POR COLAB
+  const mapaAprendizadoColab: Record<string, any[]> = {};
+  (tarefasPorColabFinalizadas || []).forEach((t: any) => {
+    if (!mapaAprendizadoColab[t.id_groot]) mapaAprendizadoColab[t.id_groot] = [];
+    mapaAprendizadoColab[t.id_groot].push(t);
+  });
+  
+  // Constrói contexto pra CADA colab
+  const colabs = colabsData.map((c: any) => {
+    const historicoColab = mapaHistorico[c.id_groot] || [];
+    const mensaisColab = mapaProdMensal[c.id_groot] || [];
+    const presencas = mapaPresenca[c.id_groot] || [];
+    const feedbacksRec = mapaFeedbacksRecentes[c.id_groot] || [];
+    const feedbacksHist = mapaFeedbacksHist[c.id_groot] || [];
+    const tarefasRec = mapaTarefasRecentes[c.id_groot] || [];
+    const calibracoes = mapaCalibracoes[c.id_groot] || [];
+    const aprendizadoColab = mapaAprendizadoColab[c.id_groot] || [];
     
-    linhas.push(`- **IMA Total Geral (média ${ctx.imaManual.length} meses):** ${mediaIma}`);
-    linhas.push(`- **Meta IMA:** ${metaIma} (menor = melhor)`);
+    const historico7d = historicoColab.filter(h => 
+      h.data_referencia >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    );
+    const historico30d = historicoColab.filter(h => 
+      h.data_referencia >= dias30atras
+    );
     
-    if (mediaIma > metaIma) {
-      linhas.push(`- 🔴 **ACIMA DA META** em ${mediaIma - metaIma} pontos (atenção)`);
-    } else {
-      linhas.push(`- ✅ **NA META** com folga de ${metaIma - mediaIma} pontos`);
+    const liquidas7d = historico7d.map(h => Number(h.liquida) || 0).filter(v => v > 0);
+    const liquidas30d = historico30d.map(h => Number(h.liquida) || 0).filter(v => v > 0);
+    
+    const media7d = liquidas7d.length > 0 ? liquidas7d.reduce((s, v) => s + v, 0) / liquidas7d.length : 0;
+    const media30d = liquidas30d.length > 0 ? liquidas30d.reduce((s, v) => s + v, 0) / liquidas30d.length : 0;
+    
+    const tendencia7d = analisarTendencia(liquidas7d);
+    const tendencia30d = analisarTendencia(liquidas30d);
+    const padroes = detectarPadroes(historico30d);
+    
+    const mensalAtual = mensaisColab.find(p => p.mes === mesAtual && p.ano === anoAtual);
+    const historicoMensal = mensaisColab.slice(0, 3);
+    
+    const presencaStats = {
+      presencas: 0, atestados: 0, faltasInjustificadas: 0,
+      bhPlanejado: 0, bhNaoPlanejado: 0, sinergiaExterna: 0,
+      abandono: 0, pctAbs: 0,
+      tendenciaAtestados: 'estavel' as 'subindo' | 'estavel' | 'caindo',
+    };
+    
+    presencas.forEach((p: any) => {
+      const m = (p.motivo || '').toLowerCase();
+      if (m.includes('p - presente') || p.status === 'presente') presencaStats.presencas++;
+      else if (m.includes('atestado')) presencaStats.atestados++;
+      else if (m.includes('fi - falta')) presencaStats.faltasInjustificadas++;
+      else if (m.includes('bh - banco de horas n')) presencaStats.bhNaoPlanejado++;
+      else if (m.includes('bh - banco de horas plan')) presencaStats.bhPlanejado++;
+      else if (m.includes('sinergia')) presencaStats.sinergiaExterna++;
+      else if (m.includes('abandono')) presencaStats.abandono++;
+    });
+    
+    const totalContab = presencaStats.presencas + presencaStats.faltasInjustificadas + 
+                       presencaStats.bhNaoPlanejado + presencaStats.atestados;
+    presencaStats.pctAbs = totalContab > 0 
+      ? Number((((presencaStats.faltasInjustificadas + presencaStats.bhNaoPlanejado) / totalContab) * 100).toFixed(1))
+      : 0;
+    
+    const atestados30d = presencas.filter(p => 
+      p.data_referencia >= dias30atras && (p.motivo || '').toLowerCase().includes('atestado')
+    ).length;
+    const atestados60to30d = presencas.filter(p => {
+      const dias60atras = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      return p.data_referencia >= dias60atras && p.data_referencia < dias30atras && 
+             (p.motivo || '').toLowerCase().includes('atestado');
+    }).length;
+    
+    if (atestados30d > atestados60to30d * 1.5 && atestados30d >= 2) {
+      presencaStats.tendenciaAtestados = 'subindo';
+    } else if (atestados30d < atestados60to30d * 0.5) {
+      presencaStats.tendenciaAtestados = 'caindo';
     }
     
-    linhas.push('### Histórico mensal:');
-    ctx.imaManual.slice(0, 6).forEach((m: any) => {
-      const ima = Number(m.ima);
-      const nome = `${String(m.mes).padStart(2, '0')}/${m.ano}`;
-      const status = ima > metaIma ? '🔴 acima' : '✅ na meta';
-      linhas.push(`- ${nome}: IMA ${ima} ${status}`);
-    });
-    linhas.push('');
-  } else if (ctx.dpmoAgregado.length > 0) {
-    const semanas = ctx.dpmoAgregado.slice(0, 8);
-    const mediaDpmo = Math.round(semanas.reduce((s, d) => s + Number(d.dpmo || 0), 0) / semanas.length);
+    const mesesNaEmpresa = calcularMesesEntreDatas(c.data_admissao);
+    const mesesNaCarreira = calcularMesesEntreDatas(c.data_entrada_carreira);
     
-    linhas.push(`- **DPMO médio (últimas ${semanas.length} semanas):** ${mediaDpmo}`);
-    linhas.push(`- **Meta:** ${metaIma}`);
+    // Acompanhamento de feedback
+    const ultimoFeedback = feedbacksRec[0] || null;
+    let acompanhamento = null;
     
-    if (mediaDpmo > metaIma) {
-      linhas.push(`- 🔴 **ACIMA DA META** (atenção em qualidade)`);
-    } else {
-      linhas.push(`- ✅ **NA META** em qualidade`);
-    }
-    
-    linhas.push('### Por semana:');
-    semanas.forEach((d: any) => {
-      const dpmo = Number(d.dpmo);
-      const status = dpmo > metaIma ? '🔴' : '✅';
-      linhas.push(`- S${d.semana}/${d.ano}: ${dpmo} ${status}`);
-    });
-    linhas.push('');
-  } else if (ctx.dpmoEventos.length > 0) {
-    const totalDef = ctx.dpmoEventos.reduce((s, e) => s + Number(e.qtd_dif || 0), 0);
-    const datasUnicas = new Set(ctx.dpmoEventos.map((e: any) => e.checkin_data));
-    
-    linhas.push(`- **Defeitos totais:** ${totalDef} em ${datasUnicas.size} dias auditados`);
-    linhas.push(`- **Eventos:** ${ctx.dpmoEventos.length} registros de inventário`);
-    linhas.push('_Aguardando cálculo do DPMO (precisa de produtividade no mesmo período)._');
-    linhas.push('');
-  } else {
-    linhas.push('_Sem dados de DPMO/IMA registrados._');
-    linhas.push('');
-  }
-  
-  // ─────────────────────────────────────
-  // 🎯 OCUPAÇÃO P2M (NOVO!)
-  // ─────────────────────────────────────
-  if (c.processo === 'P2M') {
-    linhas.push('## 📦 Ocupação P2M (últimos 30 dias)');
-    
-    if (ctx.ocupacao30dias.length === 0) {
-      linhas.push('_Sem dados de ocupação registrados._');
-    } else {
-      const media = ctx.ocupacao30dias.reduce((s, o) => s + Number(o.ocupacao_pct), 0) / ctx.ocupacao30dias.length;
-      const totalTotes = ctx.ocupacao30dias.reduce((s, o) => s + Number(o.qtd_totes || 0), 0);
-      const naMeta = media >= 80;
+    if (ultimoFeedback) {
+      const diasDesdeFeedback = Math.floor(
+        (Date.now() - new Date(ultimoFeedback.registrado_em).getTime()) / (1000 * 60 * 60 * 24)
+      );
       
-      linhas.push(`- **Ocupação média:** ${media.toFixed(1)}% (meta: 80%)`);
-      linhas.push(`- **Total de totes:** ${totalTotes}`);
-      linhas.push(`- **Dias com registro:** ${ctx.ocupacao30dias.length}`);
+      const dataFeedback = new Date(ultimoFeedback.registrado_em).toISOString().split('T')[0];
+      const antesFeedback = historicoColab
+        .filter(h => h.data_referencia < dataFeedback)
+        .slice(-7)
+        .map(h => Number(h.liquida) || 0).filter(v => v > 0);
+      const depoisFeedback = historicoColab
+        .filter(h => h.data_referencia >= dataFeedback)
+        .map(h => Number(h.liquida) || 0).filter(v => v > 0);
       
-      if (naMeta) {
-        linhas.push(`- ✅ **NA META** de ocupação`);
-      } else {
-        linhas.push(`- 🔴 **ABAIXO DA META** de 80%`);
+      const mediaAntes = antesFeedback.length > 0 ? antesFeedback.reduce((s, v) => s + v, 0) / antesFeedback.length : 0;
+      const mediaDepois = depoisFeedback.length > 0 ? depoisFeedback.reduce((s, v) => s + v, 0) / depoisFeedback.length : 0;
+      
+      let evolucao: 'melhorou' | 'igual' | 'piorou' | 'sem_dados' = 'sem_dados';
+      if (mediaAntes > 0 && mediaDepois > 0) {
+        const variacao = ((mediaDepois - mediaAntes) / mediaAntes) * 100;
+        if (variacao > 3) evolucao = 'melhorou';
+        else if (variacao < -3) evolucao = 'piorou';
+        else evolucao = 'igual';
+      }
+      
+      acompanhamento = {
+        diasDesdeFeedback, tipoFeedback: ultimoFeedback.tipo,
+        classificacao: ultimoFeedback.classificacao,
+        observacao: ultimoFeedback.observacao?.slice(0, 200),
+        mediaAntes: Math.round(mediaAntes), mediaDepois: Math.round(mediaDepois),
+        evolucao,
+      };
+    }
+    
+    const temTarefaPendente = (mapaTarefasPendentes[c.id_groot] || 0) > 0;
+    const tarefasRecentesPessoa = tarefasRec.length;
+    const podeSerSugerido = !temTarefaPendente && tarefasRecentesPessoa === 0;
+    
+    const feedbacksUltimos90d = feedbacksHist.length;
+    const feedbacksConstrutivos = feedbacksHist.filter(f => f.tipo === 'Construtivo').length;
+    const feedbacksReconhecimento = feedbacksHist.filter(f => f.tipo === 'Reconhecimento').length;
+    
+    const recebeMuitoFeedback = feedbacksUltimos90d >= 5;
+    const nuncaReceberFeedback = feedbacksUltimos90d === 0;
+    const desbalanceadoConstrutivo = feedbacksConstrutivos >= 3 && feedbacksReconhecimento === 0;
+    
+    const calibracoesPassadas = calibracoes.slice(0, 3).map(c => ({
+      classificacao: c.classificacao, data: c.criado_em,
+    }));
+    
+    const sinaisBurnout = {
+      atestadosSubindo: presencaStats.tendenciaAtestados === 'subindo',
+      performanceCaindo: tendencia30d.tendencia === 'caindo' && tendencia30d.forca !== 'leve',
+      absAlto: presencaStats.pctAbs > 10,
+      pontuacao: 0,
+    };
+    sinaisBurnout.pontuacao = 
+      (sinaisBurnout.atestadosSubindo ? 1 : 0) +
+      (sinaisBurnout.performanceCaindo ? 1 : 0) +
+      (sinaisBurnout.absAlto ? 1 : 0);
+    
+    const consistenteSilencioso = padroes.consistente && feedbacksReconhecimento === 0 && media30d > 0;
+    
+    let evolucaoSilenciosa = false;
+    if (historicoMensal.length >= 2) {
+      const mensalRecente = Number(historicoMensal[0].prod_liquida_media) || 0;
+      const mensalAnterior = Number(historicoMensal[1].prod_liquida_media) || 0;
+      if (mensalRecente > 0 && mensalAnterior > 0) {
+        const variacao = ((mensalRecente - mensalAnterior) / mensalAnterior) * 100;
+        evolucaoSilenciosa = variacao > 5 && variacao < 15;
       }
     }
-    linhas.push('');
-  }
-  
-  // ─────────────────────────────────────
-  // 🎯 NET DO TIME (NOVO!)
-  // ─────────────────────────────────────
-  if (ctx.turnosDiarios.length > 0) {
-    linhas.push('## ⭐ NET do Time (turnos registrados)');
     
-    const netMedia = ctx.turnosDiarios.reduce((s, t) => s + Number(t.net_geral_real || 0), 0) / ctx.turnosDiarios.length;
-    const ocioMediaCt = ctx.turnosDiarios.reduce((s, t) => s + Number(t.pct_ocioso || 0), 0) / ctx.turnosDiarios.length;
+    let fonteDados: 'diario' | 'mensal' | 'nenhum' = 'nenhum';
+    if (liquidas30d.length > 0) fonteDados = 'diario';
+    else if (mensalAtual) fonteDados = 'mensal';
     
-    linhas.push(`- **NET média do CT:** ${Math.round(netMedia)} pç/h`);
-    linhas.push(`- **Ociosidade média do CT:** ${ocioMediaCt.toFixed(1)}%`);
-    linhas.push(`- **Dias com registro:** ${ctx.turnosDiarios.length}`);
-    linhas.push('');
+    // 🧠 HISTÓRICO DE APRENDIZADO INDIVIDUAL
+    const aprendizadoIndividual = aprendizadoColab.map(t => ({
+      tipo: t.tipo,
+      acao: t.acao_tomada,
+      resultado: t.classificacao_aprendizado,
+      variacao: t.performance_depois_30d?.variacao_pct || null,
+      observacao: t.observacao_tl?.slice(0, 150),
+      diasAtras: t.finalizada_em ? Math.floor((Date.now() - new Date(t.finalizada_em).getTime()) / (1000 * 60 * 60 * 24)) : null,
+    }));
     
-    // Compara colab com CT
-    const validos = ctx.historico30dias.filter((h: any) => h.prod_liquida > 0);
-    let somaImpacto = 0;
-    let qtdComTurno = 0;
-    validos.forEach((h: any) => {
-      const turno = ctx.turnosDiarios.find((t: any) => t.data_referencia === h.data_referencia);
-      if (turno) {
-        const procSeg = tempoParaSegundos(h.tempo_processo);
-        if (procSeg > 0 && h.unidades > 0) {
-          const netInd = Number(h.unidades) / (procSeg / 3600);
-          const impacto = ((netInd - Number(turno.net_geral_real)) / Number(turno.net_geral_real)) * 100;
-          somaImpacto += impacto;
-          qtdComTurno++;
-        }
-      }
-    });
-    
-    if (qtdComTurno > 0) {
-      const impactoMedio = somaImpacto / qtdComTurno;
-      linhas.push(`### Impacto real do colab no time:`);
-      linhas.push(`- **Impacto NET médio:** ${impactoMedio > 0 ? '+' : ''}${impactoMedio.toFixed(1)}% vs NET do CT`);
-      linhas.push(`- **Calculado em ${qtdComTurno} dias com turno registrado**`);
+    return {
+      id: c.id,
+      id_groot: c.id_groot,
+      nome: c.nome,
+      processo: c.processo,
+      cargo: c.cargo,
+      carreira: c.carreira,
+      proxima_carreira: c.proxima_carreira,
+      data_admissao: c.data_admissao,
+      data_entrada_carreira: c.data_entrada_carreira,
       
-      if (impactoMedio > 20) {
-        linhas.push(`- 🚀 **CARREGOU O TIME** - está puxando a média do CT pra cima`);
-      } else if (impactoMedio > 5) {
-        linhas.push(`- 🟢 Contribui POSITIVAMENTE pra média do time`);
-      } else if (impactoMedio < -20) {
-        linhas.push(`- 🚨 **PUXANDO O TIME PRA BAIXO** - ofensor da média do CT`);
-      } else if (impactoMedio < -5) {
-        linhas.push(`- 🔴 Contribui NEGATIVAMENTE pra média do time`);
-      } else {
-        linhas.push(`- ⚪ Está NO PADRÃO do time`);
-      }
-      linhas.push('');
-    }
-  }
+      performance: {
+        curto_prazo_7d: { dias: liquidas7d.length, media: Math.round(media7d), tendencia: tendencia7d },
+        medio_prazo_30d: { dias: liquidas30d.length, media: Math.round(media30d), tendencia: tendencia30d },
+        mensal_atual: mensalAtual ? {
+          mes: mensalAtual.mes, ano: mensalAtual.ano,
+          liquida: Number(mensalAtual.prod_liquida_media),
+          unidades: Number(mensalAtual.unidades_total),
+          dias: Number(mensalAtual.dias_trabalhados),
+        } : null,
+        historico_mensal: historicoMensal.map(h => ({
+          mes: h.mes, ano: h.ano, liquida: Number(h.prod_liquida_media),
+        })),
+        fonteDados,
+      },
+      
+      padroes,
+      presenca: presencaStats,
+      
+      carreira_info: {
+        mesesNaEmpresa, mesesNaCarreira,
+        podePromover: mesesNaCarreira >= 6 && !!c.proxima_carreira,
+        nuncaCalibrouComoApto: !calibracoesPassadas.some(c => c.classificacao === 'APTO'),
+      },
+      
+      acompanhamento,
+      
+      memoria: {
+        feedbacksUltimos90d, feedbacksConstrutivos, feedbacksReconhecimento,
+        calibracoesPassadas,
+        ultimoFeedback: ultimoFeedback ? {
+          tipo: ultimoFeedback.tipo, dataISO: ultimoFeedback.registrado_em,
+          diasAtras: Math.floor((Date.now() - new Date(ultimoFeedback.registrado_em).getTime()) / (1000 * 60 * 60 * 24)),
+        } : null,
+      },
+      
+      // 🧠 APRENDIZADO INDIVIDUAL
+      aprendizadoColab: aprendizadoIndividual,
+      
+      vieses: { recebeMuitoFeedback, nuncaReceberFeedback, desbalanceadoConstrutivo },
+      burnout: sinaisBurnout,
+      reconhecimentoInvisivel: { consistenteSilencioso, evolucaoSilenciosa },
+      
+      tarefasPendentes: mapaTarefasPendentes[c.id_groot] || 0,
+      podeSerSugerido,
+      tarefasRecentes14d: tarefasRecentesPessoa,
+    };
+  });
   
-  // ─────────────────────────────────────
-  // FEEDBACKS
-  // ─────────────────────────────────────
-  linhas.push('## 💬 Feedbacks (últimos 90 dias)');
-  if (ctx.feedbacks90dias.length === 0) {
-    linhas.push('_Nenhum feedback registrado nos últimos 90 dias._');
-    linhas.push('- ⚠️ **ALERTA:** Sem feedback recente — vínculo pode estar esfriando.');
-  } else {
-    linhas.push(`- **Total:** ${ctx.feedbacks90dias.length} feedback(s)`);
-    
-    const porTipo: Record<string, number> = {};
-    const porClassif: Record<string, number> = {};
-    ctx.feedbacks90dias.forEach((f: any) => {
-      porTipo[f.tipo] = (porTipo[f.tipo] || 0) + 1;
-      porClassif[f.classificacao] = (porClassif[f.classificacao] || 0) + 1;
-    });
-    
-    linhas.push(`- **Por tipo:** ${Object.entries(porTipo).map(([t, n]) => `${t}: ${n}`).join(' | ')}`);
-    linhas.push(`- **Por classificação:** ${Object.entries(porClassif).map(([c, n]) => `${c}: ${n}`).join(' | ')}`);
-    
-    linhas.push('### Mais recentes:');
-    ctx.feedbacks90dias.slice(0, 5).forEach((f: any) => {
-      const data = formatarData(f.registrado_em);
-      const obs = (f.observacao || '').substring(0, 200);
-      linhas.push(`- ${data} [${f.classificacao} / ${f.tipo}]: ${obs}`);
-    });
-  }
-  linhas.push('');
+  const saudeTime = {
+    total: colabs.length,
+    performance: {
+      acimaMetaP2M: colabs.filter(c => c.processo === 'P2M' && c.performance.medio_prazo_30d.media >= (metas['meta_liquida_p2m'] || 280)).length,
+      acimaMetaCheckin: colabs.filter(c => c.processo === 'Checkin' && c.performance.medio_prazo_30d.media >= (metas['meta_liquida_checkin'] || 100)).length,
+      caindoTodos: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo').length,
+      subindo: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'subindo').length,
+    },
+    alertas: {
+      muitasQuedasJuntas: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo').length >= 5,
+      atestadosEmAlta: colabs.filter(c => c.presenca.tendenciaAtestados === 'subindo').length >= 3,
+      burnoutColetivo: colabs.filter(c => c.burnout.pontuacao >= 2).length >= 3,
+    },
+    distribuicaoFeedback: {
+      semFeedback90d: colabs.filter(c => c.memoria.feedbacksUltimos90d === 0).length,
+      poucoConstrutivos: colabs.filter(c => c.memoria.feedbacksConstrutivos === 0 && c.performance.medio_prazo_30d.media > 0).length,
+      poucoReconhecimentos: colabs.filter(c => c.memoria.feedbacksReconhecimento === 0).length,
+    },
+    oportunidades: {
+      prontosPromocao: colabs.filter(c => c.carreira_info.podePromover).length,
+      consistentesSilenciosos: colabs.filter(c => c.reconhecimentoInvisivel.consistenteSilencioso).length,
+      evolucoesInvisiveis: colabs.filter(c => c.reconhecimentoInvisivel.evolucaoSilenciosa).length,
+    },
+  };
   
-  // ─────────────────────────────────────
-  // TAREFAS
-  // ─────────────────────────────────────
-  if (ctx.tarefas.length > 0) {
-    linhas.push('## ✅ Tarefas');
-    const abertas = ctx.tarefas.filter((t: any) => (t.status || '').toLowerCase() !== 'concluida');
-    linhas.push(`- **Total:** ${ctx.tarefas.length} • **Em aberto:** ${abertas.length}`);
-    abertas.slice(0, 5).forEach((t: any) => {
-      const desc = t.descricao || t.titulo || '(sem descrição)';
-      linhas.push(`- ${desc} [${t.status || '—'}]`);
-    });
-    linhas.push('');
-  }
-  
-  // ─────────────────────────────────────
-  // RODAPÉ
-  // ─────────────────────────────────────
-  linhas.push('---');
-  linhas.push(`_Dados coletados em tempo real do Supabase em ${new Date(ctx.geradoEm).toLocaleString('pt-BR')}._`);
-  
-  return linhas.join('\n');
-}
-
-// ============================================
-// HELPERS DE FORMATAÇÃO
-// ============================================
-
-function formatarData(data: any): string {
-  if (!data) return '—';
-  try {
-    const d = new Date(data);
-    return d.toLocaleDateString('pt-BR');
-  } catch {
-    return String(data);
-  }
-}
-
-function mesesDesde(dataStr: string): number {
-  try {
-    const inicio = new Date(dataStr);
-    const agora = new Date();
-    const meses =
-      (agora.getFullYear() - inicio.getFullYear()) * 12 +
-      (agora.getMonth() - inicio.getMonth());
-    return Math.max(0, meses);
-  } catch {
-    return 0;
-  }
+  return { 
+    colabs, metas, metaDiariaIA,
+    tarefasGeradasHoje: tarefasHoje || 0,
+    podeGerar, vagasHoje, saudeTime, dataAtual,
+    aprendizado,
+  };
 }
