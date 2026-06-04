@@ -67,7 +67,7 @@ function detectarPadroes(historicoColab: any[]): {
     return { cai_segunda: false, cai_sexta: false, consistente: false, volatil: false, variancia: 0 };
   }
   
-  const liquidas = historicoColab.map(h => Number(h.liquida) || 0).filter(v => v > 0);
+  const liquidas = historicoColab.map(h => Number(h.prod_liquida) || 0).filter(v => v > 0);
   
   const media = liquidas.reduce((s, v) => s + v, 0) / liquidas.length;
   const variancia = liquidas.reduce((s, v) => s + Math.pow(v - media, 2), 0) / liquidas.length;
@@ -82,7 +82,7 @@ function detectarPadroes(historicoColab: any[]): {
     const data = new Date(h.data_referencia + 'T12:00:00');
     const dia = data.getDay();
     if (!porDia[dia]) porDia[dia] = [];
-    if (Number(h.liquida) > 0) porDia[dia].push(Number(h.liquida));
+    if (Number(h.prod_liquida) > 0) porDia[dia].push(Number(h.prod_liquida));
   });
   
   const mediaSegunda = porDia[1]?.length > 0 ? porDia[1].reduce((s, v) => s + v, 0) / porDia[1].length : media;
@@ -396,8 +396,8 @@ export async function coletarContextoCompleto(): Promise<{
       h.data_referencia >= dias30atras
     );
     
-    const liquidas7d = historico7d.map(h => Number(h.liquida) || 0).filter(v => v > 0);
-    const liquidas30d = historico30d.map(h => Number(h.liquida) || 0).filter(v => v > 0);
+    const liquidas7d = historico7d.map(h => Number(h.prod_liquida) || 0).filter(v => v > 0);
+    const liquidas30d = historico30d.map(h => Number(h.prod_liquida) || 0).filter(v => v > 0);
     
     const media7d = liquidas7d.length > 0 ? liquidas7d.reduce((s, v) => s + v, 0) / liquidas7d.length : 0;
     const media30d = liquidas30d.length > 0 ? liquidas30d.reduce((s, v) => s + v, 0) / liquidas30d.length : 0;
@@ -464,10 +464,10 @@ export async function coletarContextoCompleto(): Promise<{
       const antesFeedback = historicoColab
         .filter(h => h.data_referencia < dataFeedback)
         .slice(-7)
-        .map(h => Number(h.liquida) || 0).filter(v => v > 0);
+        .map(h => Number(h.prod_liquida) || 0).filter(v => v > 0);
       const depoisFeedback = historicoColab
         .filter(h => h.data_referencia >= dataFeedback)
-        .map(h => Number(h.liquida) || 0).filter(v => v > 0);
+        .map(h => Number(h.prod_liquida) || 0).filter(v => v > 0);
       
       const mediaAntes = antesFeedback.length > 0 ? antesFeedback.reduce((s, v) => s + v, 0) / antesFeedback.length : 0;
       const mediaDepois = depoisFeedback.length > 0 ? depoisFeedback.reduce((s, v) => s + v, 0) / depoisFeedback.length : 0;
