@@ -147,10 +147,10 @@ export async function getPerfilComportamental(
 
   const { data: historicoRaw } = await supabase
     .from('historico')
-    .select('id_groot, data, prod_liquida, status_meta, processo')
+    .select('id_groot, data_referencia, prod_liquida, status_meta, processo')
     .eq('id_groot', idGroot)
-    .gte('data', limite30Str)
-    .order('data', { ascending: true });
+    .gte('data_referencia', limite30Str)
+    .order('data_referencia', { ascending: true });
 
   const historico = historicoRaw || [];
 
@@ -303,7 +303,7 @@ function analisarPerformance(historico: any[], processo: string) {
 
   // DATA DO MAIOR PICO
   const diaMax = historico.find((h) => Number(h.prod_liquida) === liquidaMax);
-  const dataMaiorPico = diaMax?.data ? formatarData(diaMax.data) : '';
+  const dataMaiorPico = diaMax?.data_referencia ? formatarData(diaMax.data_referencia) : '';
 
   return {
     totalDias,
