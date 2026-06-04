@@ -64,6 +64,21 @@ function corTipo(tipo: string) {
 
 function primeiroNome(nome: string) { return nome.trim().split(/\s+/)[0]; }
 
+// 🏷️ Desambigua nomes: se vários colabs compartilham o primeiro nome,
+// retorna "Victor J.P." em vez de só "Victor"
+function nomeExibido(colab: { id_groot: string; nome: string }, todos: { id_groot: string; nome: string }[]): string {
+  const primeiro = primeiroNome(colab.nome);
+  const homonimos = todos.filter((c) =>
+    c.id_groot !== colab.id_groot &&
+    primeiroNome(c.nome).toLowerCase() === primeiro.toLowerCase()
+  );
+  if (homonimos.length === 0) return primeiro;
+  const partes = colab.nome.trim().split(/\s+/);
+  if (partes.length === 1) return primeiro;
+  const iniciaisSobrenome = partes.slice(1).map((p) => p[0].toUpperCase() + '.').join('');
+  return primeiro + ' ' + iniciaisSobrenome;
+}
+
 const STYLES = `
   @keyframes pulseGold { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.9), 0 0 30px rgba(255, 215, 0, 0.6); } 50% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.8); } }
   @keyframes pulseGreen { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); border-color: rgba(34, 197, 94, 0.6) !important; } 50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); border-color: rgba(34, 197, 94, 1) !important; } }
@@ -122,6 +137,8 @@ export default function LinhaPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
   const [menuSinergia, setMenuSinergia] = useState<{ x: number; y: number; aloc: Alocacao } | null>(null);
+  const [modoPrint, setModoPrint] = useState(false);
+  const [printando, setPrintando] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function toast(tipo: 'success' | 'error' | 'info', msg: string) {
@@ -134,6 +151,45 @@ export default function LinhaPage() {
 
   function confirmar(msg: string, onConfirm: () => void) {
     setConfirmModal({ msg, onConfirm });
+  }
+
+  // 📸 Tira print do mapa (sem líquida/ritmo/cores) e baixa como PNG
+  async function printarLayout() {
+    setPrintando(true);
+    setModoPrint(true);
+    await new Promise((r) => setTimeout(r, 100));
+    try {
+      let html2canvas: any = (window as any).html2canvas;
+      if (!html2canvas) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error('falha ao carregar html2canvas'));
+          document.head.appendChild(script);
+        });
+        html2canvas = (window as any).html2canvas;
+      }
+      const alvo = document.getElementById('mapa-canvas');
+      if (!alvo) { toast('error', 'Mapa não encontrado'); return; }
+      const canvas = await html2canvas(alvo, {
+        backgroundColor: '#0a0a0a',
+        scale: 2,
+        logging: false,
+        useCORS: true,
+      });
+      const link = document.createElement('a');
+      const dataStr = new Date().toLocaleString('pt-BR').replace(/[/:\s,]/g, '-');
+      link.download = 'linha-' + dataStr + '.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      toast('success', '📸 Print baixado');
+    } catch (err: any) {
+      toast('error', 'Erro ao gerar print: ' + err.message);
+    } finally {
+      setModoPrint(false);
+      setPrintando(false);
+    }
   }
 
   useEffect(() => { carregarTudo(); }, []);
@@ -191,7 +247,7 @@ export default function LinhaPage() {
     setColabs(filtrados);
   }
 
-  // ✅ RITMOS continuam por dia (vêm do CSV diário) - CORRETO
+  // ✅ RITMOS continuam por dia (vêm do CSV diário)
   async function carregarRitmos() {
     const hoje = new Date().toISOString().split('T')[0];
     const { data } = await supabase.from('ritmo_atual').select('id_groot, ritmo_pct, unidades, horas').eq('data_referencia', hoje);
@@ -204,7 +260,7 @@ export default function LinhaPage() {
     setRitmos(map);
   }
 
-  // 🔧 FIX: BANCADAS PERMANENTES - sem filtro de data
+  // 🔑 OPÇÃO A: BANCADAS PERMANENTES - SEM filtro de data
   async function carregarBancadas() {
     const { data } = await supabase
       .from('layout_bancadas')
@@ -214,7 +270,7 @@ export default function LinhaPage() {
     setBancadas(data || []);
   }
 
-  // 🔧 FIX: ALOCAÇÕES PERMANENTES - sem filtro de data
+  // 🔑 OPÇÃO A: ALOCAÇÕES PERMANENTES - SEM filtro de data
   async function carregarAlocacoes() {
     const { data } = await supabase
       .from('layout_alocacao')
@@ -222,7 +278,8 @@ export default function LinhaPage() {
     setAlocacoes(data || []);
   }
 
-  // 🔧 FIX: SLOTS FIXOS - verifica se já existe (sem data), cria se faltar
+  // 🔑 OPÇÃO A: SLOTS FIXOS verificam existência permanente (sem data)
+  // Só cria se realmente não existir nenhum slot fixo da Zona Central
   async function garantirSlotsFixos() {
     const { data: existentes } = await supabase
       .from('layout_bancadas')
@@ -253,6 +310,16 @@ export default function LinhaPage() {
       if (error) { toast('error', 'Erro: ' + error.message); return; }
       toast('success', '✅ Ritmos limpos');
       await carregarRitmos();
+    });
+  }
+
+  // 🔑 NOVO: Limpar TODAS as alocações (botão "Limpar Time")
+  function limparTodasAlocacoes() {
+    confirmar('Tirar TODOS os colabs das bancadas? Eles voltam pra lista de livres. (Não afeta bancadas nem ritmos.)', async () => {
+      const { error } = await supabase.from('layout_alocacao').delete().neq('id', 0);
+      if (error) { toast('error', 'Erro: ' + error.message); return; }
+      toast('success', '✅ Time esvaziado');
+      await carregarAlocacoes();
     });
   }
 
@@ -343,7 +410,7 @@ export default function LinhaPage() {
     });
   }
 
-  // 🔧 FIX: DELETE sem filtro de data (alocações são permanentes)
+  // 🔑 OPÇÃO A: aloca/move colab — sempre remove qualquer alocação anterior dele
   async function alocarColab(idGroot: string, bancada: Bancada) {
     const hoje = new Date().toISOString().split('T')[0];
     const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
@@ -360,7 +427,7 @@ export default function LinhaPage() {
     else if (tipoEFixoAutomatico(bancada.tipo_principal)) bancadaFixaId = bancada.id;
     let tipoAlocacao = 'fixo';
     if (bancadaFixaId && bancadaFixaId !== bancada.id) tipoAlocacao = 'temporario';
-    // Remove qualquer alocação anterior desse colab (sem filtro de data)
+    // SEM filtro de data - garante 1 alocação só por colab
     await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot);
     const { error } = await supabase.from('layout_alocacao').insert({
       bancada_id: bancada.id, id_groot: idGroot,
@@ -493,14 +560,13 @@ export default function LinhaPage() {
     });
   }
 
-  // 🔧 FIX: rotação sem filtro de data (alocações são permanentes)
   async function aplicarRotacao(tipo: 1 | 2 | 3) {
     setRotacionando(true);
     try {
       const posicoesAntes = capturarPosicoesCards();
       if (tipo === 3) await rotacaoNivelar();
       else await rotacaoCiclo(tipo === 2);
-      // Após rotação: todos viram fixos da bancada atual (sem sinergia)
+      // Após rotação: todos viram fixos da bancada atual (sem sinergia residual)
       const { data: alocsAtuais } = await supabase
         .from('layout_alocacao')
         .select('id, bancada_id');
@@ -723,7 +789,7 @@ export default function LinhaPage() {
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[10px] font-bold ' + cor.texto + ' flex-shrink-0'}>{iniciais(c.nome)}</span>
-            <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
+            <span className="text-[10px] text-white truncate">{nomeExibido(c, colabs)}</span>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
             {ritmo?.liquida != null && ritmo.liquida > 0 && (<span className={'text-[9px] font-bold ' + cor.texto}>{ritmo.liquida}</span>)}
@@ -764,14 +830,16 @@ export default function LinhaPage() {
           className={'relative group ' + cor.borda + ' ' + cor.bg + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in cursor-grab active:cursor-grabbing card-hover flex-shrink-0' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
-            <span className="text-[10px] text-white truncate">{primeiroNome(c.nome)}</span>
-            {eFixoAqui && <span className="text-[9px] badge-fixo" title="Fixo">📍</span>}
+            <span className="text-[10px] text-white truncate">{nomeExibido(c, colabs)}</span>
+            {eFixoAqui && !modoPrint && <span className="text-[9px] badge-fixo" title="Fixo">📍</span>}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
-            {liquida != null && liquida > 0 ? (<span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>) : (<span className="text-gray-600 text-[10px]">—</span>)}
-            <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
-              className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
-              title="Remover">×</button>
+            {!modoPrint && (liquida != null && liquida > 0 ? (<span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>) : (<span className="text-gray-600 text-[10px]">—</span>))}
+            {!modoPrint && (
+              <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
+                className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
+                title="Remover">×</button>
+            )}
           </div>
         </div>
       );
@@ -779,13 +847,21 @@ export default function LinhaPage() {
     return (
       <div {...dragHandlers} title={titulo}
         data-flip-key={'colab-' + aloc.id_groot}
-        className={'relative group flex-1 h-full rounded border ' + cor.borda + ' ' + cor.bg + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
-        {eFixoAqui && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
-        {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="text-gray-600 text-sm">—</span>)}
-        <span className="text-[7px] text-gray-500 mt-0.5">{primeiroNome(c.nome)}</span>
-        <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
-          className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
-          title="Remover">×</button>
+        className={'relative group flex-1 h-full rounded border ' + (modoPrint ? 'border-gray-700 bg-[#1a1a1a]' : cor.borda + ' ' + cor.bg) + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
+        {eFixoAqui && !modoPrint && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
+        {modoPrint ? (
+          <span className="text-[11px] font-bold text-white text-center px-1 leading-tight">{nomeExibido(c, colabs)}</span>
+        ) : (
+          <>
+            {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="text-gray-600 text-sm">—</span>)}
+            <span className="text-[7px] text-gray-500 mt-0.5">{nomeExibido(c, colabs)}</span>
+          </>
+        )}
+        {!modoPrint && (
+          <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
+            className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
+            title="Remover">×</button>
+        )}
       </div>
     );
   }
@@ -804,7 +880,7 @@ export default function LinhaPage() {
           onContextMenu={handleContextMenu}>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-[9px] font-bold text-yellow-400/70">{iniciais(c.nome)}</span>
-            <span className="text-[10px] text-yellow-400/70 truncate">{primeiroNome(c.nome)}</span>
+            <span className="text-[10px] text-yellow-400/70 truncate">{nomeExibido(c, colabs)}</span>
           </div>
         </div>
       );
@@ -814,7 +890,7 @@ export default function LinhaPage() {
         title={c.nome + ' (fixo aqui · right-click pra remover)'}
         onContextMenu={handleContextMenu}>
         <span className="text-[10px] font-bold text-yellow-400/70 leading-none">{iniciais(c.nome)}</span>
-        <span className="text-[7px] text-yellow-400/50 mt-0.5">{primeiroNome(c.nome)}</span>
+        <span className="text-[7px] text-yellow-400/50 mt-0.5">{nomeExibido(c, colabs)}</span>
       </div>
     );
   }
@@ -865,11 +941,11 @@ export default function LinhaPage() {
             {isCategoria && alocs.length > 0 && (<span className="text-[8px] text-gray-500 ml-0.5">({alocs.length})</span>)}
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
-            {b.tipo_principal === 'CATEGORIA' && (
+            {b.tipo_principal === 'CATEGORIA' && !modoPrint && (
               <button onClick={(e) => { e.stopPropagation(); abrirModalEditarSubtipo(b); }}
                 className="text-gray-600 hover:text-white text-[9px] leading-none" title="Editar sub-tipo">✏️</button>
             )}
-            {!b.fixo_categoria && (
+            {!b.fixo_categoria && !modoPrint && (
               <button onClick={(e) => { e.stopPropagation(); limparBancada(b); }}
                 className="text-gray-600 hover:text-red-400 text-[10px] leading-none" title="Limpar">×</button>
             )}
@@ -940,7 +1016,7 @@ export default function LinhaPage() {
     const temAlgum = p1 != null || c1 != null || p2 != null || c2 != null;
     return (
       <div className="flex flex-col items-center gap-2">
-        {temAlgum && (
+        {temAlgum && !modoPrint && (
           <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded px-3 py-1 flex items-center gap-3 text-[10px]">
             <div className="flex items-center gap-1.5">
               <span className="text-gray-600 font-bold">L1:</span>
@@ -1016,9 +1092,9 @@ export default function LinhaPage() {
             className="nome-linha-input" />
         ) : (
           <span className="nome-linha-display text-[11px] text-gray-400 font-bold uppercase tracking-widest"
-            onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }} title="Click pra editar">{nome} 🖊️</span>
+            onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }} title="Click pra editar">{nome} {!modoPrint && '🖊️'}</span>
         )}
-        {ritmoLinha.totalAtivos > 0 ? (
+        {!modoPrint && (ritmoLinha.totalAtivos > 0 ? (
           <div className="bg-[#0f0f0f] border border-[#2a2a2a] rounded-md px-3 py-1.5 flex items-center gap-2 ritmo-linha-pulse">
             <span className="text-[10px] text-gray-500 font-bold">RITMO:</span>
             <span className={'text-base font-black ' + corLinha.texto}>{ritmoLinha.pctMedio}%</span>
@@ -1038,7 +1114,7 @@ export default function LinhaPage() {
           </div>
         ) : (
           <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md px-3 py-1 text-[9px] text-gray-600 italic">Sem colabs alocados</div>
-        )}
+        ))}
       </div>
     );
   }
@@ -1061,8 +1137,16 @@ export default function LinhaPage() {
         </div>
         <div className="flex items-center gap-2">
           <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleUploadCSV} className="hidden" />
+          <button onClick={printarLayout} disabled={printando}
+            className="bg-blue-500/10 border border-blue-500/50 text-blue-300 text-xs px-3 py-1.5 rounded hover:bg-blue-500/20 transition disabled:opacity-50"
+            title="Gera imagem do layout sem ritmos/líquidas pra reportar no grupo">
+            {printando ? '⏳ Gerando...' : '📸 Printar Layout'}
+          </button>
           <button onClick={() => setModalRotacao(true)} disabled={rotacionando}
             className="bg-purple-500/10 border border-purple-500/50 text-purple-300 text-xs px-3 py-1.5 rounded hover:bg-purple-500/20 transition disabled:opacity-50">🔄 Rotacionar</button>
+          <button onClick={limparTodasAlocacoes}
+            className="bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs px-2 py-1.5 rounded hover:bg-orange-500/20 transition"
+            title="Esvazia o time (tira todos das bancadas)">🧽 Esvaziar Time</button>
           <button onClick={limparRitmos}
             className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-2 py-1.5 rounded hover:bg-red-500/20 transition"
             title="Limpar ritmos do dia">🧹 Limpar CSV</button>
@@ -1087,7 +1171,7 @@ export default function LinhaPage() {
               </div>
             </div>
           </aside>
-          <main className="flex-1 flex gap-4 items-start justify-around">
+          <main id="mapa-canvas" className="flex-1 flex gap-4 items-start justify-around">
             <section className="flex flex-col items-center">
               <HeaderLinha linha={1} />
               <div className="flex gap-1 items-stretch">
