@@ -6,13 +6,10 @@
 // - O que não funcionou (falha)
 // - Padrões do seu time específico
 // ============================================
-
 import { createClient } from '@supabase/supabase-js';
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
-
 function calcularMesesEntreDatas(dataInicio: string | null): number {
   if (!dataInicio) return 0;
   try {
@@ -25,7 +22,6 @@ function calcularMesesEntreDatas(dataInicio: string | null): number {
     return 0;
   }
 }
-
 function analisarTendencia(valores: number[]): {
   tendencia: 'subindo' | 'estavel' | 'caindo' | 'sem_dados';
   variacao_pct: number;
@@ -55,7 +51,6 @@ function analisarTendencia(valores: number[]): {
   
   return { tendencia, variacao_pct: Number(variacao.toFixed(1)), forca };
 }
-
 function detectarPadroes(historicoColab: any[]): {
   cai_segunda: boolean;
   cai_sexta: boolean;
@@ -93,7 +88,6 @@ function detectarPadroes(historicoColab: any[]): {
   
   return { cai_segunda, cai_sexta, consistente, volatil, variancia: Number(coefVariacao.toFixed(1)) };
 }
-
 // ============================================
 // 🧠 ANALISA APRENDIZADO DAS TAREFAS PASSADAS
 // ============================================
@@ -188,11 +182,9 @@ function analisarAprendizado(tarefasPassadas: any[]): {
     historicoDetalhado,
   };
 }
-
 // ============================================
 // FUNÇÃO PRINCIPAL
 // ============================================
-
 export async function coletarContextoCompleto(): Promise<{
   colabs: any[];
   metas: Record<string, number>;
