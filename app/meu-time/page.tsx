@@ -609,7 +609,7 @@ export default function MeuTimePage() {
                     </div>
                   </div>
                 ) : (
-                  /* MODO NORMAL: link + ações Feedback */
+                  /* MODO NORMAL: link + ações Feedback/Análise */
                   <>
                     <Link href={`/meu-time/${c.id}`} className="block">
                       <div className="flex items-start gap-4 mb-4">
@@ -655,13 +655,20 @@ export default function MeuTimePage() {
                       </div>
                     </Link>
 
-                    {/* Ações */}
+                    {/* Ações - SÓ Feedback e Análise agora */}
                     <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a2a2a]">
                       <Link
                         href={`/meu-time/${c.id}/feedbacks`}
                         className="flex-1 text-center text-xs bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 font-bold py-2 rounded-lg transition-all active:scale-95"
                       >
                         💬 Feedback
+                      </Link>
+                      <Link
+                        href={`/meu-time/${c.id}/analise`}
+                        className="flex-1 text-center text-xs bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 font-bold py-2 rounded-lg transition-all active:scale-95"
+                        title="Análise Comportamental"
+                      >
+                        🧠 Análise
                       </Link>
                     </div>
                   </>
