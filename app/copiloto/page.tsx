@@ -3,7 +3,6 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 import FinalizarTarefaModal from './FinalizarTarefaModal';
-
 // ============================================
 // TIPOS
 // ============================================
@@ -73,9 +72,7 @@ type ChatMensagem = {
   conteudo: string;
   criado_em?: string;
 };
-
 type Aba = 'tarefas' | 'chat' | 'aprendizado' | 'time';
-
 // ============================================
 // HELPERS
 // ============================================
@@ -116,7 +113,6 @@ const EMOJI_TIPO: Record<string, string> = {
   'Quebra de Padrão': '🔍',
   'Reconhecimento Invisível': '💎',
 };
-
 const SUGESTOES_CHAT = [
   '🚨 Quem precisa de atenção urgente hoje?',
   '🌟 Quem merece reconhecimento essa semana?',
@@ -125,7 +121,6 @@ const SUGESTOES_CHAT = [
   '💎 Quem é o consistente silencioso do time?',
   '🔥 Estratégia pra fechar o mês bem?',
 ];
-
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
@@ -151,6 +146,10 @@ export default function CopilotoPage() {
   
   const [tarefaAberta, setTarefaAberta] = useState<TarefaCopiloto | null>(null);
   const [tarefaParaFinalizar, setTarefaParaFinalizar] = useState<TarefaCopiloto | null>(null);
+  
+  // 🗑️ Modal de confirmação de exclusão
+  const [confirmDelete, setConfirmDelete] = useState<TarefaCopiloto | null>(null);
+  const [deletando, setDeletando] = useState(false);
   
   // Chat
   const [chatMensagens, setChatMensagens] = useState<ChatMensagem[]>([]);
@@ -252,6 +251,61 @@ export default function CopilotoPage() {
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
   }, [chatMensagens]);
+
+  // 🗑️ ESC fecha modal de confirmação
+  useEffect(() => {
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setConfirmDelete(null);
+      }
+    }
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
+  
+  // ============================================
+  // 🗑️ DELETAR TAREFA
+  // ============================================
+  async function deletarTarefa(t: TarefaCopiloto) {
+    setDeletando(true);
+    try {
+      const { error } = await supabase
+        .from('tarefas')
+        .delete()
+        .eq('id', t.id);
+      
+      if (error) {
+        console.error('Erro ao deletar tarefa:', error);
+        if (typeof window !== 'undefined' && (window as any).showToast) {
+          (window as any).showToast('error', '❌ Erro ao excluir: ' + error.message);
+        }
+        return;
+      }
+      
+      // Remove do estado local (otimista)
+      setTarefas(prev => prev.filter(x => x.id !== t.id));
+      
+      // Fecha modais
+      setConfirmDelete(null);
+      if (tarefaAberta?.id === t.id) {
+        setTarefaAberta(null);
+      }
+      
+      if (typeof window !== 'undefined' && (window as any).showToast) {
+        (window as any).showToast('success', `🗑️ Tarefa "${t.nome}" excluída`);
+      }
+      
+      // Recarrega pra garantir sincronia
+      await carregarDados();
+    } catch (e: any) {
+      console.error('Erro:', e);
+      if (typeof window !== 'undefined' && (window as any).showToast) {
+        (window as any).showToast('error', '❌ Erro: ' + e.message);
+      }
+    } finally {
+      setDeletando(false);
+    }
+  }
   
   // ============================================
   // 🎯 LÓGICA CORRIGIDA - usa metas reais
@@ -694,38 +748,52 @@ export default function CopilotoPage() {
                   const cor = CORES_PRIORIDADE[t.prioridade] || CORES_PRIORIDADE.normal;
                   const emoji = EMOJI_TIPO[t.tipo] || '📋';
                   return (
-                    <button key={t.id_tarefa} onClick={() => abrirTarefa(t)} className={`w-full bg-gradient-to-br ${cor.bg} border ${cor.border} rounded-2xl p-5 transition-all hover:-translate-y-0.5 hover:shadow-xl text-left`}>
-                      <div className="flex items-start gap-4">
-                        <div className={`w-12 h-12 rounded-xl ${cor.bgIntenso} flex items-center justify-center ${cor.text} font-black text-sm flex-shrink-0`}>
-                          {iniciais(t.nome)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap mb-2">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${cor.bgIntenso} ${cor.text}`}>{emoji} {t.tipo}</span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-bold uppercase ${cor.bgIntenso} ${cor.text}`}>{t.prioridade}</span>
-                            {t.gerado_por_ia && <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-purple-500/20 text-purple-300">🤖 IA</span>}
+                    <div key={t.id_tarefa} className={`relative bg-gradient-to-br ${cor.bg} border ${cor.border} rounded-2xl p-5 transition-all hover:-translate-y-0.5 hover:shadow-xl`}>
+                      {/* 🗑️ Botão deletar - canto superior direito */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDelete(t);
+                        }}
+                        title="Excluir tarefa"
+                        className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-[#0a0a0a]/80 hover:bg-red-500/20 border border-[#2a2a2a] hover:border-red-500/50 text-gray-500 hover:text-red-400 flex items-center justify-center transition-all"
+                      >
+                        🗑️
+                      </button>
+                      
+                      <button onClick={() => abrirTarefa(t)} className="w-full text-left">
+                        <div className="flex items-start gap-4 pr-10">
+                          <div className={`w-12 h-12 rounded-xl ${cor.bgIntenso} flex items-center justify-center ${cor.text} font-black text-sm flex-shrink-0`}>
+                            {iniciais(t.nome)}
                           </div>
-                          <h3 className="text-white font-black text-lg mb-1">{t.nome}</h3>
-                          {t.processo && <p className="text-xs text-gray-400 mb-3">{t.processo}</p>}
-                          {t.diagnostico && (
-                            <div className="bg-[#0a0a0a]/60 rounded-lg p-3 mb-2 border border-[#2a2a2a]">
-                              <p className="text-xs text-gray-400 uppercase font-bold mb-1">📊 Diagnóstico</p>
-                              <p className="text-sm text-gray-200 leading-relaxed">{t.diagnostico}</p>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-2">
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${cor.bgIntenso} ${cor.text}`}>{emoji} {t.tipo}</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-bold uppercase ${cor.bgIntenso} ${cor.text}`}>{t.prioridade}</span>
+                              {t.gerado_por_ia && <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-purple-500/20 text-purple-300">🤖 IA</span>}
                             </div>
-                          )}
-                          {t.motivo && (
-                            <div className="flex items-start gap-2 mt-2">
-                              <span className="text-[#FFD700] text-base">→</span>
-                              <p className="text-sm text-[#FFD700] font-bold">{t.motivo}</p>
+                            <h3 className="text-white font-black text-lg mb-1">{t.nome}</h3>
+                            {t.processo && <p className="text-xs text-gray-400 mb-3">{t.processo}</p>}
+                            {t.diagnostico && (
+                              <div className="bg-[#0a0a0a]/60 rounded-lg p-3 mb-2 border border-[#2a2a2a]">
+                                <p className="text-xs text-gray-400 uppercase font-bold mb-1">📊 Diagnóstico</p>
+                                <p className="text-sm text-gray-200 leading-relaxed">{t.diagnostico}</p>
+                              </div>
+                            )}
+                            {t.motivo && (
+                              <div className="flex items-start gap-2 mt-2">
+                                <span className="text-[#FFD700] text-base">→</span>
+                                <p className="text-sm text-[#FFD700] font-bold">{t.motivo}</p>
+                              </div>
+                            )}
+                            <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#2a2a2a]">
+                              <span className="text-xs text-gray-500">{tempoRelativo(t.criado_em)}</span>
+                              <span className="text-xs text-[#FFD700] font-bold">Ver detalhes →</span>
                             </div>
-                          )}
-                          <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#2a2a2a]">
-                            <span className="text-xs text-gray-500">{tempoRelativo(t.criado_em)}</span>
-                            <span className="text-xs text-[#FFD700] font-bold">Ver detalhes →</span>
                           </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -1043,10 +1111,75 @@ export default function CopilotoPage() {
               })()}
             </div>
             
-            <div className="sticky bottom-0 bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border-t border-[#2a2a2a] p-5 flex gap-3">
-              <button onClick={fecharTarefa} className="flex-1 bg-[#2a2a2a] hover:bg-[#3a3a3a] text-white font-bold py-3 rounded-xl transition-all">Fechar</button>
-              <button onClick={() => abrirFinalizacao(tarefaAberta)} className="flex-1 bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-black py-3 rounded-xl shadow-lg shadow-purple-500/30 transition-all">
+            <div className="sticky bottom-0 bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border-t border-[#2a2a2a] p-5 flex gap-3 flex-wrap">
+              <button onClick={fecharTarefa} className="flex-1 bg-[#2a2a2a] hover:bg-[#3a3a3a] text-white font-bold py-3 rounded-xl transition-all min-w-[120px]">
+                Fechar
+              </button>
+              <button
+                onClick={() => setConfirmDelete(tarefaAberta)}
+                className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 text-red-400 font-bold py-3 px-4 rounded-xl transition-all flex items-center gap-2"
+                title="Excluir tarefa"
+              >
+                🗑️ Excluir
+              </button>
+              <button onClick={() => abrirFinalizacao(tarefaAberta)} className="flex-1 bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-black py-3 rounded-xl shadow-lg shadow-purple-500/30 transition-all min-w-[160px]">
                 🧠 Finalizar com IA
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 🗑️ MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-[9500] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          onClick={() => !deletando && setConfirmDelete(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border-2 border-red-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center text-2xl">
+                🗑️
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">Excluir tarefa?</h3>
+                <p className="text-xs text-gray-500">Esta ação não pode ser desfeita</p>
+              </div>
+            </div>
+            
+            <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl p-4 mb-4">
+              <p className="text-sm text-gray-300 mb-1">
+                <strong className="text-white">{confirmDelete.nome}</strong>
+              </p>
+              <p className="text-xs text-gray-500">
+                {EMOJI_TIPO[confirmDelete.tipo] || '📋'} {confirmDelete.tipo} · {confirmDelete.prioridade}
+              </p>
+              {confirmDelete.motivo && (
+                <p className="text-xs text-gray-400 mt-2 italic">"{confirmDelete.motivo}"</p>
+              )}
+            </div>
+            
+            <p className="text-xs text-gray-400 mb-5">
+              A tarefa será excluída do banco. Se a IA detectar a mesma situação na próxima análise, ela pode gerar novamente.
+            </p>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                disabled={deletando}
+                className="flex-1 bg-[#2a2a2a] hover:bg-[#3a3a3a] text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => deletarTarefa(confirmDelete)}
+                disabled={deletando}
+                className="flex-1 bg-red-500 hover:bg-red-400 text-white font-black py-3 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {deletando ? '⏳ Excluindo...' : '🗑️ Excluir'}
               </button>
             </div>
           </div>
