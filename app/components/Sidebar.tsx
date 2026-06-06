@@ -18,7 +18,7 @@ const MENU = [
     items: [
       { nome: 'Calculadora NET', href: '/calculadora', icon: '🎯' },
       { nome: 'Lista de Presença', href: '/presenca', icon: '📋' },
-      { nome: 'Mapeamento Linha', href: '/linha', icon: '🏭', destaque: true },
+      { nome: 'Mapeamento Linha', href: '/linha', icon: '🏭' },
       { nome: 'Copiloto IA', href: '/copiloto', icon: '🤖' },
     ],
   },
