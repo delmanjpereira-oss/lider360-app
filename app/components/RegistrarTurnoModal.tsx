@@ -1,9 +1,9 @@
 'use client';
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
 type TempoCalculado = {
+  data_referencia?: string;  // 🆕 Data vem da calculadora
   tempo_efetivo: string;
   tempo_ocioso: string;
   tempo_nao_sistemico: string;
@@ -30,16 +30,25 @@ function formatarTempoHHMM(t: string): string {
 }
 
 export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) {
-  const [dataRef, setDataRef] = useState(() => new Date().toISOString().split('T')[0]);
+  // 🆕 USA A DATA DA CALCULADORA (não mais hardcoded pra HOJE)
+  const [dataRef, setDataRef] = useState(() => 
+    tempos?.data_referencia || new Date().toISOString().split('T')[0]
+  );
   const [observacao, setObservacao] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
-
+  
+  // 🆕 SINCRONIZA quando a data da calculadora muda ou modal abre
+  useEffect(() => {
+    if (tempos?.data_referencia) {
+      setDataRef(tempos.data_referencia);
+    }
+  }, [tempos?.data_referencia, isOpen]);
+  
   if (!isOpen) return null;
-
+  
   async function salvar() {
     setSalvando(true);
-
     try {
       const { error } = await supabase
         .from('net_turno_diario')
@@ -61,7 +70,6 @@ export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) 
           },
           { onConflict: 'data_referencia' }
         );
-
       if (error) {
         console.error('❌ Erro ao registrar:', error);
         if (typeof window !== 'undefined' && (window as any).showToast) {
@@ -71,7 +79,8 @@ export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) 
         }
       } else {
         if (typeof window !== 'undefined' && (window as any).showToast) {
-          (window as any).showToast('success', `✅ Turno do dia ${dataRef} registrado!`);
+          const dataFormatada = new Date(dataRef + 'T12:00').toLocaleDateString('pt-BR');
+          (window as any).showToast('success', `✅ Turno de ${dataFormatada} registrado!`);
         }
         setTimeout(onClose, 800);
       }
@@ -85,7 +94,18 @@ export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) 
       setConfirmando(false);
     }
   }
-
+  
+  // 🆕 INFO SOBRE A DATA
+  const dataObj = new Date(dataRef + 'T12:00');
+  const hoje = new Date().toISOString().split('T')[0];
+  const ehHoje = dataRef === hoje;
+  const dataFormatadaLonga = dataObj.toLocaleDateString('pt-BR', { 
+    weekday: 'long', 
+    day: 'numeric', 
+    month: 'long',
+    year: 'numeric',
+  });
+  
   return (
     <div
       className="fixed inset-0 z-[9500] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
@@ -119,20 +139,35 @@ export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) 
             ✕
           </button>
         </div>
-
-        {/* Data */}
+        
+        {/* Data - com indicador colorido */}
         <div className="mb-6">
-          <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+          <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
             📅 Data do turno
+            {ehHoje ? (
+              <span className="bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full text-[10px] font-bold normal-case">
+                ✅ HOJE
+              </span>
+            ) : (
+              <span className="bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full text-[10px] font-bold normal-case">
+                📅 Turno passado
+              </span>
+            )}
           </label>
           <input
             type="date"
             value={dataRef}
+            max={hoje}
             onChange={(e) => setDataRef(e.target.value)}
-            className="w-full bg-[#0a0a0a] border border-[#2a2a2a] hover:border-[#3a3a3a] focus:border-[#FFD700] rounded-xl px-4 py-3 text-white text-lg font-bold transition-all outline-none"
+            className={`w-full bg-[#0a0a0a] border-2 hover:border-[#3a3a3a] focus:border-[#FFD700] rounded-xl px-4 py-3 text-white text-lg font-bold transition-all outline-none ${
+              ehHoje ? 'border-green-500/40' : 'border-blue-500/40'
+            }`}
           />
+          <p className="text-xs text-gray-500 mt-2 capitalize">
+            {dataFormatadaLonga}
+          </p>
         </div>
-
+        
         {/* Os 4 tempos - cards bonitos */}
         <div className="grid grid-cols-2 gap-3 mb-6">
           <TempoCard
@@ -164,7 +199,7 @@ export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) 
             cor="red"
           />
         </div>
-
+        
         {/* NET Geral Real - destaque */}
         <div className="bg-gradient-to-br from-[#FFD700]/10 to-yellow-600/5 border border-[#FFD700]/30 rounded-2xl p-5 mb-6">
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -185,7 +220,7 @@ export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) 
             </div>
           </div>
         </div>
-
+        
         {/* Observação opcional */}
         <div className="mb-6">
           <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
@@ -199,7 +234,7 @@ export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) 
             className="w-full bg-[#0a0a0a] border border-[#2a2a2a] hover:border-[#3a3a3a] focus:border-[#FFD700] rounded-xl px-4 py-3 text-white text-sm transition-all outline-none resize-none"
           />
         </div>
-
+        
         {/* Botões / Confirmação */}
         {!confirmando ? (
           <div className="flex gap-3 flex-wrap">
@@ -223,7 +258,7 @@ export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) 
               Confirmar registro?
             </p>
             <p className="text-xs text-gray-300 mb-4">
-              Vai salvar os 4 tempos + NET geral pra <strong className="text-yellow-300">{new Date(dataRef + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</strong>.
+              Vai salvar os 4 tempos + NET geral pra <strong className="text-yellow-300 capitalize">{dataFormatadaLonga}</strong>.
               <br />
               Se já existir registro pra essa data, será sobrescrito.
             </p>
@@ -252,7 +287,6 @@ export default function RegistrarTurnoModal({ isOpen, onClose, tempos }: Props) 
           </div>
         )}
       </div>
-
       <style jsx>{`
         @keyframes modalIn {
           from { opacity: 0; transform: scale(0.9) translateY(20px); }
@@ -275,7 +309,6 @@ function TempoCard({ icone, label, tempo, pct, cor }: { icone: string; label: st
     red: { bg: 'from-red-500/10 to-rose-700/5', border: 'border-red-500/30', text: 'text-red-300', accent: 'text-red-400' },
   };
   const c = cores[cor] || cores.green;
-
   return (
     <div className={`bg-gradient-to-br ${c.bg} border ${c.border} rounded-xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg`}>
       <div className="flex items-center gap-2 mb-2">
