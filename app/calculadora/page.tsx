@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import RegistrarTurnoModal from '../components/RegistrarTurnoModal';
 
 type TempoUnico = { h: number; m: number };
@@ -58,15 +58,39 @@ function somarConjuntoTempos(t1: Tempos, t2: Tempos): Tempos {
   };
 }
 
-// 🤖 Converte File → base64 (sem prefixo data:)
+// 🆕 HELPER: formata data pt-BR
+function formatarDataBr(iso: string): string {
+  if (!iso) return '';
+  const partes = iso.split('-');
+  if (partes.length !== 3) return iso;
+  return `${partes[2]}/${partes[1]}/${partes[0]}`;
+}
+
+// 🆕 HELPER: nome do dia da semana
+function nomeDiaSemana(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso + 'T12:00:00');
+  const dias = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+  return dias[d.getDay()];
+}
+
+// 🆕 HELPER: quantos dias atrás
+function diasAtras(iso: string): number {
+  if (!iso) return 0;
+  const data = new Date(iso + 'T12:00:00');
+  const hoje = new Date();
+  hoje.setHours(12, 0, 0, 0);
+  const diff = hoje.getTime() - data.getTime();
+  return Math.round(diff / (1000 * 60 * 60 * 24));
+}
+
 function fileToBase64(file: File): Promise<{ base64: string; mediaType: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      // result vem como "data:image/png;base64,XXX"
       const partes = result.split(',');
-      const meta = partes[0]; // "data:image/png;base64"
+      const meta = partes[0];
       const base64 = partes[1] || '';
       const mediaMatch = meta.match(/data:([^;]+)/);
       const mediaType = mediaMatch ? mediaMatch[1] : 'image/png';
@@ -78,6 +102,11 @@ function fileToBase64(file: File): Promise<{ base64: string; mediaType: string }
 }
 
 export default function CalculadoraNetPage() {
+  // 🆕 ESTADO DA DATA (default = HOJE)
+  const [dataReferencia, setDataReferencia] = useState<string>(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+  
   const [tempos, setTempos] = useState<Tempos>(TEMPOS_ZERADOS);
   const [volumeStr, setVolumeStr] = useState('');
   const [gerandoImagem, setGerandoImagem] = useState(false);
@@ -90,7 +119,7 @@ export default function CalculadoraNetPage() {
   const [ocrStatus, setOcrStatus] = useState('');
   const [ocrLoading, setOcrLoading] = useState<1 | 2 | false>(false);
   const areaRef = useRef<HTMLDivElement>(null);
-
+  
   const ocio = paraDecimal(tempos.ociosidade.h, tempos.ociosidade.m);
   const efe = paraDecimal(tempos.efetivo.h, tempos.efetivo.m);
   const naoSis = paraDecimal(tempos.naoSistemico.h, tempos.naoSistemico.m);
@@ -102,8 +131,10 @@ export default function CalculadoraNetPage() {
   const pctOcioso = totalHoras > 0 ? (ocio / totalHoras) * 100 : 0;
   const pctNaoSistemico = totalHoras > 0 ? (naoSis / totalHoras) * 100 : 0;
   const pctNaoDisponivel = totalHoras > 0 ? (naoDisp / totalHoras) * 100 : 0;
-
+  
+  // 🆕 Passa a data pro modal também
   const dadosTurno = {
+    data_referencia: dataReferencia, // 🆕 DATA INCLUÍDA
     tempo_efetivo: tempoParaString(tempos.efetivo.h, tempos.efetivo.m),
     tempo_ocioso: tempoParaString(tempos.ociosidade.h, tempos.ociosidade.m),
     tempo_nao_sistemico: tempoParaString(tempos.naoSistemico.h, tempos.naoSistemico.m),
@@ -115,15 +146,21 @@ export default function CalculadoraNetPage() {
     unidades_total: volume,
     net_geral_real: Number(net.toFixed(2)),
   };
-
+  
   const podeRegistrarTurno = totalHoras > 0 && volume > 0;
-
   const decimaisPorTipo: Record<keyof Tempos, number> = {
     ociosidade: ocio,
     efetivo: efe,
     naoSistemico: naoSis,
     naoDisponivel: naoDisp,
   };
+  
+  // 🆕 INFO SOBRE A DATA ESCOLHIDA
+  const diasAtrasNum = diasAtras(dataReferencia);
+  const ehHoje = diasAtrasNum === 0;
+  const ehOntem = diasAtrasNum === 1;
+  const ehFuturo = diasAtrasNum < 0;
+  const diaSemana = nomeDiaSemana(dataReferencia);
 
   function atualizar(tipo: keyof Tempos, campo: 'h' | 'm', valor: string) {
     const num = parseInt(valor, 10);
@@ -139,11 +176,20 @@ export default function CalculadoraNetPage() {
   function limpar() {
     setTempos(TEMPOS_ZERADOS);
     setVolumeStr('');
+    // 🆕 Reset da data pra HOJE
+    setDataReferencia(new Date().toISOString().split('T')[0]);
     if (typeof window !== 'undefined' && (window as any).showToast) {
       (window as any).showToast('info', 'Calculadora limpa');
     }
   }
-
+  
+  // 🆕 ATALHOS DE DATA
+  function definirDataAtalho(dias: number) {
+    const d = new Date();
+    d.setDate(d.getDate() - dias);
+    setDataReferencia(d.toISOString().split('T')[0]);
+  }
+  
   async function salvarPng() {
     if (!areaRef.current) return;
     setGerandoImagem(true);
@@ -163,7 +209,7 @@ export default function CalculadoraNetPage() {
         '-' +
         agora.getHours().toString().padStart(2, '0') +
         agora.getMinutes().toString().padStart(2, '0');
-      link.download = `calculadora-net-${ts}.png`;
+      link.download = `calculadora-net-${dataReferencia}-${ts}.png`; // 🆕 usa a data no nome
       link.href = canvas.toDataURL('image/png');
       link.click();
       if (typeof window !== 'undefined' && (window as any).showToast) {
@@ -178,13 +224,10 @@ export default function CalculadoraNetPage() {
     }
   }
 
-  // 🤖 NOVA VERSÃO: Processa imagem via IA Claude Vision
   async function processarImagem(file: File, slot: 1 | 2) {
     setOcrLoading(slot);
     setOcrStatus(`Imagem ${slot}: enviando pra IA...`);
-
     try {
-      // Preview
       const reader = new FileReader();
       reader.onload = (e) => {
         const dataUrl = e.target?.result as string;
@@ -192,38 +235,32 @@ export default function CalculadoraNetPage() {
         else setImagem2Preview(dataUrl);
       };
       reader.readAsDataURL(file);
-
-      // Converte pra base64
+      
       setOcrStatus(`Imagem ${slot}: convertendo...`);
       const { base64, mediaType } = await fileToBase64(file);
-
-      // Chama a IA
+      
       setOcrStatus(`Imagem ${slot}: 🤖 IA analisando...`);
       const res = await fetch('/api/ia/ler-tempos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imagemBase64: base64, mediaType }),
       });
-
       const data = await res.json();
-
       if (!res.ok || data.erro) {
         throw new Error(data.erro || 'Erro da IA');
       }
-
       const temposLidos: Tempos = data.tempos;
       console.log(`🤖 IA leu imagem ${slot}:`, temposLidos);
-
+      
       if (slot === 1) {
         setTempos1(temposLidos);
       } else {
         setTempos2(temposLidos);
       }
-
-      // Conta quantos campos foram lidos (não-zero)
+      
       const camposLidos = (Object.keys(temposLidos) as (keyof Tempos)[])
         .filter((k) => temposLidos[k].h > 0 || temposLidos[k].m > 0).length;
-
+      
       if (typeof window !== 'undefined' && (window as any).showToast) {
         if (camposLidos === 0) {
           (window as any).showToast('warning', `Imagem ${slot}: IA não identificou tempos. Edite manualmente.`);
@@ -236,7 +273,6 @@ export default function CalculadoraNetPage() {
       if (typeof window !== 'undefined' && (window as any).showToast) {
         (window as any).showToast('error', `Erro IA: ${e.message || 'falhou'}`);
       }
-      // Zera tempos pra permitir edição manual
       const zerado: Tempos = {
         ociosidade: { h: 0, m: 0 },
         efetivo: { h: 0, m: 0 },
@@ -313,6 +349,117 @@ export default function CalculadoraNetPage() {
           Calcule a NET com base no volume produzido e no total de horas do período
         </p>
       </div>
+      
+      {/* 🆕 CARD DE DATA */}
+      <div className={`rounded-2xl p-5 border-2 ${
+        ehHoje 
+          ? 'bg-gradient-to-br from-green-500/10 to-emerald-500/5 border-green-500/40' 
+          : ehFuturo
+          ? 'bg-gradient-to-br from-red-500/10 to-rose-500/5 border-red-500/40'
+          : 'bg-gradient-to-br from-blue-500/10 to-cyan-500/5 border-blue-500/40'
+      }`}>
+        <div className="flex items-start justify-between flex-wrap gap-4">
+          <div className="flex-1 min-w-[280px]">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">📅</span>
+              <h3 className={`font-black text-lg ${
+                ehHoje ? 'text-green-300' : ehFuturo ? 'text-red-300' : 'text-blue-300'
+              }`}>
+                Data do Turno
+              </h3>
+              {ehHoje && (
+                <span className="text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full font-bold">
+                  ✅ HOJE
+                </span>
+              )}
+              {ehOntem && (
+                <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                  📅 ONTEM
+                </span>
+              )}
+              {diasAtrasNum > 1 && (
+                <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                  🔙 {diasAtrasNum} dias atrás
+                </span>
+              )}
+              {ehFuturo && (
+                <span className="text-xs bg-red-500/20 text-red-300 px-2 py-0.5 rounded-full font-bold animate-pulse">
+                  ⚠️ FUTURO
+                </span>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-3 flex-wrap">
+              <input
+                type="date"
+                value={dataReferencia}
+                onChange={(e) => setDataReferencia(e.target.value)}
+                max={new Date().toISOString().split('T')[0]} // não deixa selecionar futuro
+                className={`bg-[#0a0a0a] border-2 rounded-lg px-4 py-2 text-white font-mono text-lg focus:outline-none ${
+                  ehHoje 
+                    ? 'border-green-500/40 focus:border-green-400' 
+                    : ehFuturo
+                    ? 'border-red-500/40 focus:border-red-400'
+                    : 'border-blue-500/40 focus:border-blue-400'
+                }`}
+              />
+              <div>
+                <p className={`font-bold text-lg ${
+                  ehHoje ? 'text-green-300' : ehFuturo ? 'text-red-300' : 'text-blue-300'
+                }`}>
+                  {formatarDataBr(dataReferencia)}
+                </p>
+                <p className="text-xs text-gray-400 capitalize">
+                  {diaSemana}
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          {/* 🆕 ATALHOS DE DATA */}
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => definirDataAtalho(0)}
+              className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+                ehHoje
+                  ? 'bg-green-500/30 border border-green-400 text-green-200'
+                  : 'bg-[#0a0a0a] border border-[#2a2a2a] text-gray-400 hover:border-green-500/50 hover:text-green-300'
+              }`}
+            >
+              ✅ Hoje
+            </button>
+            <button
+              onClick={() => definirDataAtalho(1)}
+              className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+                ehOntem
+                  ? 'bg-blue-500/30 border border-blue-400 text-blue-200'
+                  : 'bg-[#0a0a0a] border border-[#2a2a2a] text-gray-400 hover:border-blue-500/50 hover:text-blue-300'
+              }`}
+            >
+              📅 Ontem
+            </button>
+            <button
+              onClick={() => definirDataAtalho(2)}
+              className="px-3 py-2 rounded-lg text-xs font-bold transition-all bg-[#0a0a0a] border border-[#2a2a2a] text-gray-400 hover:border-blue-500/50 hover:text-blue-300"
+            >
+              🔙 Ante-ontem
+            </button>
+          </div>
+        </div>
+        
+        {ehFuturo && (
+          <div className="mt-3 bg-red-500/10 border border-red-500/30 rounded-lg p-2 text-xs text-red-300">
+            ⚠️ Você selecionou uma data FUTURA. Ajuste antes de registrar.
+          </div>
+        )}
+        
+        {diasAtrasNum > 7 && (
+          <div className="mt-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-2 text-xs text-yellow-300">
+            ⚠️ Você está registrando uma NET de {diasAtrasNum} dias atrás. Confere se é essa data mesmo!
+          </div>
+        )}
+      </div>
+      
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4" ref={areaRef}>
           <div
@@ -324,8 +471,14 @@ export default function CalculadoraNetPage() {
                 <span className="text-xl">🕐</span>
                 <h2 className="text-lg font-bold text-white">Tempos do período</h2>
               </div>
-              <div className="flex items-center gap-1.5 bg-green-500/10 text-green-300 text-xs px-3 py-1.5 rounded-full border border-green-500/30 font-bold">
-                ⚡ Cálculo instantâneo
+              <div className="flex items-center gap-2">
+                {/* 🆕 mostra a data no card também */}
+                <span className="text-xs text-gray-500">
+                  📅 {formatarDataBr(dataReferencia)}
+                </span>
+                <div className="flex items-center gap-1.5 bg-green-500/10 text-green-300 text-xs px-3 py-1.5 rounded-full border border-green-500/30 font-bold">
+                  ⚡ Cálculo instantâneo
+                </div>
               </div>
             </div>
             <div className="p-5">
@@ -412,11 +565,20 @@ export default function CalculadoraNetPage() {
             </button>
             <button
               onClick={() => setMostrarRegistrarTurno(true)}
-              disabled={!podeRegistrarTurno}
-              title={!podeRegistrarTurno ? 'Preencha os tempos e o volume primeiro' : 'Salvar como registro oficial do dia'}
+              disabled={!podeRegistrarTurno || ehFuturo}
+              title={
+                ehFuturo ? 'Data futura - ajuste antes de registrar' :
+                !podeRegistrarTurno ? 'Preencha os tempos e o volume primeiro' : 
+                'Salvar como registro oficial do dia'
+              }
               className="bg-gradient-to-br from-green-500 to-emerald-600 text-white font-bold px-6 py-3 rounded-xl hover:from-green-400 hover:to-emerald-500 transition-all shadow-lg shadow-green-500/30 hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <span>📥</span> Registrar Fim de Turno
+              {podeRegistrarTurno && !ehFuturo && (
+                <span className="text-xs bg-white/20 px-2 py-0.5 rounded ml-1">
+                  {ehHoje ? 'HOJE' : formatarDataBr(dataReferencia)}
+                </span>
+              )}
             </button>
             <button
               onClick={limpar}
@@ -436,6 +598,18 @@ export default function CalculadoraNetPage() {
                 🚀 RESULTADO INSTANTÂNEO
               </div>
             </div>
+            
+            {/* 🆕 DATA NO CARD DE RESULTADO */}
+            <div className="text-center mb-3">
+              <p className="text-[10px] text-gray-500 uppercase font-bold">📅 Data do turno</p>
+              <p className={`text-sm font-bold ${
+                ehHoje ? 'text-green-300' : ehFuturo ? 'text-red-300' : 'text-blue-300'
+              }`}>
+                {formatarDataBr(dataReferencia)}
+              </p>
+              <p className="text-xs text-gray-500 capitalize">{diaSemana}</p>
+            </div>
+            
             <div className="bg-white rounded-2xl p-6 mb-4 flex items-center justify-between gap-3 shadow-inner">
               <div className="bg-[#0a0a0a] rounded-xl px-4 py-3 flex-shrink-0">
                 <span className="text-green-400 font-black text-xl">NET</span>
@@ -476,7 +650,6 @@ export default function CalculadoraNetPage() {
           </div>
         </div>
       </div>
-      {/* MODAL DE OCR COM IA */}
       {mostrarOcr && (
         <div
           className="fixed inset-0 flex items-center justify-center p-4"
