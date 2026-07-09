@@ -1,5 +1,4 @@
 'use client';
-
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
@@ -24,9 +23,8 @@ type LinhaPrint = {
 
 type PrintInfo = {
   base64: string;
-  textoBruto: string;
+  mimeType: string;
   processando: boolean;
-  progresso: number;
   status: string;
 };
 
@@ -45,12 +43,9 @@ const MESES = [
   { num: 12, label: 'Dezembro', trim: 'Q4' },
 ];
 
-const PALAVRAS_CABECALHO = [
-  'COMPLETO', 'NOVE', 'NUMERO',
-  'CK', 'P2M', 'CHECK', 'NOME', 'REP', 'DPMO',
-  'PROCESSO', 'COLUNA', 'LIN', 'PÁGINA', 'PAGINA',
-];
-
+// ============================================
+// HELPERS DE NOME (mantidos da versão antiga)
+// ============================================
 function normalizarNome(nome: string): string {
   return String(nome || '')
     .normalize('NFD')
@@ -60,217 +55,34 @@ function normalizarNome(nome: string): string {
     .replace(/\s+/g, ' ');
 }
 
-function nomesIguais(a: string, b: string): { igual: boolean; score: number } {
-  const na = normalizarNome(a);
-  const nb = normalizarNome(b);
-  if (!na || !nb) return { igual: false, score: 0 };
-  if (na === nb) return { igual: true, score: 1 };
-
-  const limpar = (s: string) =>
-    s.split(' ').filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p));
-  const partesA = limpar(na);
-  const partesB = limpar(nb);
-  if (partesA.length === 0 || partesB.length === 0) return { igual: false, score: 0 };
-
-  let comuns = 0;
-  partesA.forEach((p) => { if (partesB.includes(p)) comuns++; });
-  const minTamanho = Math.min(partesA.length, partesB.length);
-  const score = comuns / minTamanho;
-  return { igual: score >= 0.6, score };
-}
-
 function partesNome(nome: string): string[] {
   return normalizarNome(nome)
     .split(' ')
     .filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p));
 }
 
-function detectarSemanas(texto: string): number[] {
-  const semanas: number[] = [];
-  const linhas = texto.split('\n');
-  
-  for (const linha of linhas) {
-    // 🎯 Regex flexível: "Semana 18", "Semana18", "semana 1a" (OCR ruim - "a" = 4)
-    const matches = Array.from(linha.matchAll(/[Ss]emana\s*(\d{1,2}[a-z]?)/g));
-    
-    if (matches.length >= 2) {
-      console.log(`📅 Linha de cabeçalho encontrada: "${linha}"`);
-      console.log(`📅 Matches brutos (ordem original do print):`, matches.map((m) => m[1]));
-      
-      matches.forEach((m) => {
-        let numStr = m[1].replace(/[a-z]/gi, (c) => {
-          const mapa: Record<string, string> = {
-            'a': '4', 'i': '1', 'o': '0', 'l': '1', 's': '5', 'z': '2'
-          };
-          return mapa[c.toLowerCase()] || '';
-        });
-        
-        const num = parseInt(numStr);
-        if (num >= 1 && num <= 53 && !semanas.includes(num)) {
-          semanas.push(num);
-        }
-      });
-      
-      if (semanas.length > 0) break;
-    }
-  }
-  
-  // 🎯 IMPORTANTE: NÃO ordenar! Mantém a ordem ORIGINAL do print
-  // O Looker exibe da MAIS RECENTE pra MAIS ANTIGA (ex: S20, S19, S18, S17, S16)
-  // Os valores na linha do colab seguem essa mesma ordem
-  console.log(`📅 Semanas detectadas (ordem do print - mais recente primeiro): ${semanas.join(', ')}`);
-  return semanas;
-}
-
-function extrairLinhasOcr(texto: string, semanas: number[], printNum: number): LinhaPrint[] {
-  const linhas: LinhaPrint[] = [];
-  const blocos = texto.split('\n');
-
-  blocos.forEach((linha, idx) => {
-    let limpa = linha.trim();
-    if (!limpa || limpa.length < 5) return;
-
-    const limpaUpper = limpa.toUpperCase();
-    const ehCabecalho = PALAVRAS_CABECALHO.some((p) => limpaUpper.includes(p));
-    if (ehCabecalho) return;
-    if (/SEMANA\s*\d/i.test(limpa) && limpa.length < 80) return;
-    if (/TOTAL\s*GERAL/i.test(limpa)) return;
-
-    // 🎯 NOVA LÓGICA POSICIONAL:
-    // Captura TOKENS válidos em ordem: números, "-", "o" solto (zero do OCR)
-    // Ex: "VITORIA o 10.014 - 10.578 - 25e" → tokens: [o, 10014, -, 10578, -, 25e]
-    
-    // Acha posição do PRIMEIRO número válido (1+ dígitos) pra cortar o nome
-    // SEM LIMITE de dígitos - o OCR pode ter lido qualquer coisa, app salva o que veio
-    const regexNumeroValido = /\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{1,7}\b/g;
-    const primeirosNumeros = Array.from(limpa.matchAll(regexNumeroValido));
-    if (primeirosNumeros.length === 0) return;
-    
-    const posicaoPrimeiro = primeirosNumeros[0].index || 0;
-    
-    // 🎯 Extrai o nome (tudo antes do primeiro número)
-    let nome = limpa.substring(0, posicaoPrimeiro).trim();
-    nome = nome.replace(/\.+/g, '');
-    nome = nome.replace(/[^a-zA-ZÀ-ú\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    nome = nome.replace(/\b(sm|em|eos|amo|asso)\b/gi, '').replace(/\s+/g, ' ').trim();
-    nome = nome.split(' ').filter((p) => p.length >= 2).join(' ').trim();
-    
-    if (nome.length < 3) return;
-    if (!/[a-zA-ZÀ-ú]{3,}/.test(nome)) return;
-    
-    // 🎯 Pega o RESTO da linha (depois do nome) e quebra em TOKENS posicionais
-    // ATENÇÃO: precisa incluir os '-' ou 'o' que estão ENTRE o nome e o primeiro número
-    // Ex: "TATIANE o 2138 ..." → 'o' = S20 (zero erros), 2138 = S19
-    let restoLinha = limpa.substring(posicaoPrimeiro);
-    
-    // 🎯 Procura tokens vazios SOLTOS (cercados por espaços) entre o nome e o primeiro número
-    // Padrão: " o " ou " - " ou " O " ou " — " com espaços em volta
-    const nomeOriginal = limpa.substring(0, posicaoPrimeiro);
-    const tokensVaziosAntes: string[] = [];
-    // Procura padrão: espaço + caractere de vazio + espaço (ou fim)
-    const regexVaziosSoltos = /\s+([-—oO])(?=\s|$)/g;
-    let m;
-    while ((m = regexVaziosSoltos.exec(nomeOriginal)) !== null) {
-      tokensVaziosAntes.push(m[1]);
-    }
-    
-    if (tokensVaziosAntes.length > 0) {
-      restoLinha = tokensVaziosAntes.join(' ') + ' ' + restoLinha;
-      console.log(`   ⚡ Detectado ${tokensVaziosAntes.length} token(s) vazio(s) ANTES do primeiro número: [${tokensVaziosAntes.join(', ')}]`);
-    }
-    
-    // Tokens válidos:
-    // - Número: "10.014", "1.290", "25", etc
-    // - Vazio: "-", "—", "o" (zero do OCR), "O", "0"
-    const tokens: (number | null)[] = [];
-    
-    // Quebra por espaços e tabs
-    const partes = restoLinha.split(/\s+/).filter((p) => p.length > 0);
-    
-    partes.forEach((parte) => {
-      // É um separador/vazio? (-, —, o, O, 0 — todos significam "zero erros" no Looker)
-      // No banco ficam como ausentes - na tela aparece como "-" ou "0"
-      if (parte === '-' || parte === '—' || parte === 'o' || parte === 'O' || parte === '0') {
-        tokens.push(null); // posição vazia (mantém POSIÇÃO mas não salva no banco)
-        return;
-      }
-      
-      // Tenta extrair número (aceita 1+ dígitos - sem limite)
-      const matchNum = parte.match(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{1,7}\b/);
-      if (matchNum) {
-        const num = parseInt(matchNum[0].replace(/[.,]/g, ''));
-        if (!isNaN(num) && num >= 1) {  // >= 1 (zero literal já tratado acima)
-          tokens.push(num);
-          return;
-        }
-      }
-      
-      // Caractere lixo do OCR (ex: "sm", "em", letras soltas) - IGNORA (não consome posição)
-    });
-    
-    if (tokens.length === 0) return;
-    
-    // 🔍 DEBUG: mostra o que foi capturado
-    console.log(`🔍 Linha: "${limpa.substring(0, 80)}..."`);
-    console.log(`   Nome: "${nome}"`);
-    console.log(`   Partes: ${JSON.stringify(partes)}`);
-    console.log(`   Tokens: ${JSON.stringify(tokens)}`);
-    
-    // 🎯 Total Geral = ÚLTIMO token NÃO NULO
-    let totalGeral = 0;
-    for (let i = tokens.length - 1; i >= 0; i--) {
-      if (tokens[i] !== null) {
-        totalGeral = tokens[i]!;
-        break;
-      }
-    }
-    
-    if (totalGeral === 0) return;
-    
-    // 🎯 Valores das semanas = todos os tokens EXCETO o último (que é o total)
-    // Mas precisamos achar qual é o "último" (que é o total)
-    const idxUltimoNaoNulo = (() => {
-      for (let i = tokens.length - 1; i >= 0; i--) {
-        if (tokens[i] !== null) return i;
-      }
-      return -1;
-    })();
-    
-    const valoresSemanas = tokens.slice(0, idxUltimoNaoNulo);
-    
-    // 🎯 Mapeia POSICIONALMENTE com as semanas
-    const semanasMap: Record<number, number> = {};
-    valoresSemanas.forEach((valor, i) => {
-      const semanaNum = semanas[i];
-      if (semanaNum && valor !== null && valor > 0) {
-        semanasMap[semanaNum] = valor;
-      }
-    });
-
-    console.log(`✅ Print ${printNum}: "${nome}" | Tokens: [${tokens.join(', ')}] | Sem: ${JSON.stringify(semanasMap)} | Total: ${totalGeral}`);
-    linhas.push({ nomeOcr: nome, totalGeral, semanas: semanasMap, printNum });
-  });
-
-  return linhas;
-}
-
+// ============================================
+// COMPONENTE
+// ============================================
 export default function DpmoPage() {
   const toast = useToast();
   const [montado, setMontado] = useState(false);
   const [mesSelecionado, setMesSelecionado] = useState(5);
   const [anoSelecionado, setAnoSelecionado] = useState(2026);
   const [processoSelecionado, setProcessoSelecionado] = useState<'Checkin' | 'P2M'>('Checkin');
-  
+
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
-  // 🎯 REF pra ter o valor MAIS RECENTE de colaboradores, evita closure stale
   const colaboradoresRef = useRef<Colaborador[]>([]);
   useEffect(() => {
     colaboradoresRef.current = colaboradores;
   }, [colaboradores]);
+
   const [prints, setPrints] = useState<PrintInfo[]>([]);
   const [linhas, setLinhas] = useState<LinhaPrint[]>([]);
   const [semanasDetectadas, setSemanasDetectadas] = useState<number[]>([]);
-  
+
+  const [processandoIA, setProcessandoIA] = useState(false);
+  const [tokensGastos, setTokensGastos] = useState<{ input: number; output: number } | null>(null);
   const [salvando, setSalvando] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -289,29 +101,12 @@ export default function DpmoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processoSelecionado, montado]);
 
-  // 🎯 RE-VINCULA AUTOMATICAMENTE sempre que colaboradores ou linhas mudam
+  // 🎯 RE-VINCULA quando colabs carregam
   useEffect(() => {
-    console.log(`👀 useEffect revinc: colabs=${colaboradores.length}, linhas=${linhas.length}`);
-    
-    if (colaboradores.length === 0) {
-      console.warn('⚠️ Sem colabs carregados, não revincula');
-      return;
-    }
-    
-    if (linhas.length === 0) {
-      return;
-    }
-    
+    if (colaboradores.length === 0 || linhas.length === 0) return;
     const linhasSemVinculo = linhas.filter((l) => !l.cadastroVinculado).length;
-    if (linhasSemVinculo === 0) {
-      console.log('✅ Todas as linhas já estão vinculadas');
-      return;
-    }
-    
-    console.log(`🔄 Re-vinculando ${linhas.length} linhas (${linhasSemVinculo} sem vinculo) com ${colaboradores.length} colabs`);
+    if (linhasSemVinculo === 0) return;
     const revinculadas = vincular(linhas);
-    const vincDepois = revinculadas.filter((l) => l.cadastroVinculado).length;
-    console.log(`✅ Após revinculação: ${vincDepois}/${revinculadas.length} vinculados`);
     setLinhas(revinculadas);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [colaboradores.length]);
@@ -323,7 +118,7 @@ export default function DpmoPage() {
       .eq('status', 'Ativo')
       .eq('processo', processoSelecionado)
       .order('nome');
-    
+
     if (data) {
       const vistos = new Set<string>();
       const unicos: Colaborador[] = [];
@@ -334,217 +129,166 @@ export default function DpmoPage() {
         }
       });
       setColaboradores(unicos);
-      console.log(`👥 ${unicos.length} colabs ${processoSelecionado} carregados:`, unicos.map((c) => c.nome));
+      console.log(`👥 ${unicos.length} colabs ${processoSelecionado} carregados`);
     }
   }
 
+  // ============================================
+  // ADICIONAR PRINT (só armazena, não processa ainda)
+  // ============================================
   function adicionarPrint(file: File) {
     if (prints.length >= 3) {
       toast.error('Limite atingido', 'Máximo 3 prints por upload');
       return;
     }
-    
 
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64 = e.target?.result as string;
-      const idx = prints.length;
+      const mimeType = file.type || 'image/png';
       setPrints((prev) => [...prev, {
-        base64, textoBruto: '', processando: true, progresso: 0, status: 'Iniciando...',
+        base64,
+        mimeType,
+        processando: false,
+        status: 'aguardando',
       }]);
-      processarOcr(base64, idx);
     };
     reader.readAsDataURL(file);
   }
 
-  async function processarOcr(base64: string, idx: number) {
+  // ============================================
+  // CHAMA A IA PRA LER TODOS OS PRINTS
+  // ============================================
+  async function lerComIA() {
+    if (prints.length === 0) {
+      toast.error('Sem prints', 'Adicione ao menos 1 print');
+      return;
+    }
+
+    setProcessandoIA(true);
+    setLinhas([]);
+    setSemanasDetectadas([]);
+    setTokensGastos(null);
+
+    console.log('🤖 Enviando prints pra IA...');
+    console.log(`📸 ${prints.length} imagem(ns) · ${processoSelecionado} · ${mesSelecionado}/${anoSelecionado}`);
+
     try {
-      const Tesseract = (await import('tesseract.js')).default;
-      const resultado = await Tesseract.recognize(base64, 'por', {
-        logger: (m: any) => {
-          if (m.status === 'recognizing text') {
-            setPrints((prev) => {
-              const novo = [...prev];
-              if (novo[idx]) {
-                novo[idx].progresso = Math.round(m.progress * 100);
-                novo[idx].status = m.status;
-              }
-              return novo;
-            });
-          }
-        },
+      const resp = await fetch('/api/ia/ler-dpmo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imagens: prints.map((p) => ({
+            base64: p.base64,
+            mimeType: p.mimeType,
+          })),
+          mes: mesSelecionado,
+          ano: anoSelecionado,
+          processo: processoSelecionado,
+        }),
       });
 
-      const texto = resultado.data.text;
-      console.log(`📝 OCR Print ${idx + 1}:`, texto);
+      const data = await resp.json();
 
-      setPrints((prev) => {
-        const novo = [...prev];
-        if (novo[idx]) {
-          novo[idx].textoBruto = texto;
-          novo[idx].processando = false;
-          novo[idx].progresso = 100;
-          novo[idx].status = 'concluído';
-        }
-        // Re-processa todos os prints
-        setTimeout(() => processarTodos(novo), 100);
-        return novo;
-      });
-    } catch (e: any) {
-      toast.error('Erro no OCR', e.message);
-      setPrints((prev) => {
-        const novo = [...prev];
-        if (novo[idx]) novo[idx].processando = false;
-        return novo;
-      });
-    }
-  }
-
-  function processarTodos(printsAtuais: PrintInfo[]) {
-    let semanas: number[] = [];
-    for (const p of printsAtuais) {
-      if (!p.textoBruto) continue;
-      const s = detectarSemanas(p.textoBruto);
-      if (s.length > 0) {
-        semanas = s;
-        break;
+      if (!data.sucesso) {
+        console.error('❌ IA retornou erro:', data);
+        toast.error('Erro na IA', data.erro || 'Falha desconhecida');
+        setProcessandoIA(false);
+        return;
       }
-    }
-    
-    // 🎯 FALLBACK: Se NÃO detectou semanas no cabeçalho,
-    // deduz pelo numero de colunas das linhas de colab
-    if (semanas.length === 0) {
-      console.warn('⚠️ Não detectou semanas no cabeçalho - tentando inferir pela quantidade de números nas linhas');
-      
-      // Conta quantos números cada linha tem
-      const contagens: number[] = [];
-      printsAtuais.forEach((p) => {
-        if (!p.textoBruto) return;
-        p.textoBruto.split('\n').forEach((linha) => {
-          const matches = Array.from(linha.matchAll(/\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{2,6}\b/g));
-          if (matches.length >= 2 && /[a-zA-ZÀ-ú]{3}/.test(linha)) {
-            contagens.push(matches.length);
-          }
-        });
-      });
-      
-      // Pega a quantidade MAIS COMUM de números por linha
-      if (contagens.length > 0) {
-        const freq: Record<number, number> = {};
-        contagens.forEach((c) => { freq[c] = (freq[c] || 0) + 1; });
-        const totalCols = parseInt(Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]);
-        const numSemanas = totalCols - 1; // último é Total Geral
-        
-        // 🎯 Gera semanas DECRESCENTES (mais recente primeiro, como no Looker)
-        // Ex: Maio/2026 com 5 colunas → [22, 21, 20, 19, 18]
-        const dataRef = new Date(anoSelecionado, mesSelecionado - 1, 28);
-        const utc = new Date(Date.UTC(dataRef.getFullYear(), dataRef.getMonth(), dataRef.getDate()));
-        const dow = utc.getUTCDay() || 7;
-        utc.setUTCDate(utc.getUTCDate() + 4 - dow);
-        const inicio = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
-        const semanaUltimo = Math.ceil((((utc.getTime() - inicio.getTime()) / 86400000) + 1) / 7);
-        
-        // Decrescente: começa da mais recente
-        for (let i = 0; i < numSemanas; i++) {
-          semanas.push(semanaUltimo - i);
-        }
-        console.log(`🎯 Inferido (decrescente, igual Looker): ${numSemanas} colunas → ${semanas.join(', ')}`);
+
+      console.log('✅ IA retornou:', data);
+
+      // Salva tokens gastos
+      if (data.tokens) {
+        setTokensGastos(data.tokens);
       }
-    }
-    
-    setSemanasDetectadas(semanas);
 
-    const todasLinhas: LinhaPrint[] = [];
-    printsAtuais.forEach((p, i) => {
-      if (!p.textoBruto) return;
-      const linhasPrint = extrairLinhasOcr(p.textoBruto, semanas, i + 1);
-      todasLinhas.push(...linhasPrint);
-    });
+      const semanas: number[] = data.semanas || [];
+      const colabs: any[] = data.colaboradores || [];
 
-    // 🎯 DEDUP POR NOME — Complementa valores (não duplica colab)
-    // Quando mesmo colab aparece em vários prints:
-    // - Mantém o nomeOcr da PRIMEIRA aparição (pra vinculação não quebrar)
-    // - Completa semanas faltantes com valores de outros prints
-    // - Se já tem valor numa semana, mantém (não sobrescreve)
-    const linhasUnicas: LinhaPrint[] = [];
-    const mapaUnicos = new Map<string, number>(); // chave → index no array
-    
-    todasLinhas.forEach((l) => {
-      const chave = normalizarNome(l.nomeOcr);
-      const idx = mapaUnicos.get(chave);
-      
-      if (idx === undefined) {
-        // Primeira ocorrência - adiciona normalmente
-        linhasUnicas.push({ ...l, semanas: { ...l.semanas } });
-        mapaUnicos.set(chave, linhasUnicas.length - 1);
-      } else {
-        // Já existe - COMPLEMENTA semanas faltantes (preserva nomeOcr original)
-        const existente = linhasUnicas[idx];
-        Object.entries(l.semanas).forEach(([sem, val]) => {
+      setSemanasDetectadas(semanas);
+
+      // Converte pra formato LinhaPrint
+      const linhasBrutas: LinhaPrint[] = colabs.map((c, idx) => {
+        const semanasMap: Record<number, number> = {};
+        Object.entries(c.semanas || {}).forEach(([sem, valor]) => {
           const semNum = parseInt(sem);
-          // Se essa semana não existe ainda, complementa
-          if (!existente.semanas[semNum]) {
-            existente.semanas[semNum] = val;
-            console.log(`➕ ${existente.nomeOcr} S${semNum}: complementado com ${val} (do print ${l.printNum})`);
+          const val = typeof valor === 'number' ? valor : null;
+          if (val !== null && val > 0) {
+            semanasMap[semNum] = val;
           }
         });
-        // Total Geral: completa se vazio
-        if (!existente.totalGeral && l.totalGeral) {
-          existente.totalGeral = l.totalGeral;
-        }
-      }
-    });
-    
-    console.log(`📊 ${todasLinhas.length} leituras → ${linhasUnicas.length} colabs únicos`);
 
-    const vinculadas = vincular(linhasUnicas);
-    setLinhas(vinculadas);
-    
-    const vinc = vinculadas.filter((l) => l.cadastroVinculado).length;
-    toast.info(`${vinculadas.length} colabs detectados`, `${vinc} vinculados ao cadastro`);
+        return {
+          nomeOcr: c.nome || '',
+          totalGeral: c.total_geral || 0,
+          semanas: semanasMap,
+          printNum: 1,
+        };
+      });
+
+      // Filtra linhas válidas (com nome + total)
+      const linhasValidas = linhasBrutas.filter((l) => l.nomeOcr.length >= 3);
+
+      // Faz vinculação com colabs cadastrados
+      const vinculadas = vincular(linhasValidas);
+
+      setLinhas(vinculadas);
+
+      const vinc = vinculadas.filter((l) => l.cadastroVinculado).length;
+      toast.success(
+        `${vinculadas.length} colabs lidos pela IA`,
+        `${vinc} vinculados ao cadastro`
+      );
+    } catch (e: any) {
+      console.error('❌ Erro chamando IA:', e);
+      toast.error('Erro', e.message);
+    } finally {
+      setProcessandoIA(false);
+    }
   }
 
+  // ============================================
+  // VINCULAÇÃO NOME OCR → CADASTRO
+  // (mesma lógica da versão antiga, muito boa)
+  // ============================================
   function vincular(linhasInput: LinhaPrint[]): LinhaPrint[] {
-    // 🎯 Usa REF (sempre valor atualizado) em vez do state (closure stale)
     const colabs = colaboradoresRef.current;
-    
-    console.log(`🔗 ============ INICIO VINCULAÇÃO ============`);
-    console.log(`🔗 ${linhasInput.length} linhas | ${colabs.length} colabs ${processoSelecionado}`);
-    
+
     if (colabs.length === 0) {
-      console.warn('⚠️ AVISO: Lista de colaboradores está VAZIA! Não vai vincular nada.');
-      return linhasInput.map(l => ({ ...l, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const }));
+      console.warn('⚠️ Sem colabs carregados, não vincula');
+      return linhasInput.map((l) => ({
+        ...l,
+        cadastroVinculado: undefined,
+        metodo: 'nao_vinculou' as const,
+      }));
     }
-    
-    // Lista todos os colabs disponíveis pra debug
-    console.log(`📋 Colabs disponíveis:`);
-    colabs.forEach((c, i) => {
-      console.log(`   ${i+1}. "${c.nome}" → normalizado: "${normalizarNome(c.nome)}"`);
-    });
-    
+
     return linhasInput.map((linha) => {
-      // Remove reticências e pontos do final dos nomes
       const nomeLimpo = linha.nomeOcr.replace(/\.+/g, '').trim();
       const partesOcr = partesNome(nomeLimpo);
-      
-      console.log(`\n🔍 Tentando vincular: "${linha.nomeOcr}"`);
-      console.log(`   Normalizado: "${normalizarNome(nomeLimpo)}"`);
-      console.log(`   Partes: ${JSON.stringify(partesOcr)}`);
-      
+
       if (partesOcr.length === 0) {
-        console.log(`   ❌ Sem partes válidas`);
-        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+        return {
+          ...linha,
+          cadastroVinculado: undefined,
+          metodo: 'nao_vinculou' as const,
+        };
       }
 
-      // 🎯 ETAPA 0: Match TOTAL normalizado (mais simples e robusto)
+      // Match TOTAL normalizado
       const normalOcr = normalizarNome(nomeLimpo);
       const matchTotal = colabs.find((c) => normalizarNome(c.nome) === normalOcr);
       if (matchTotal) {
-        console.log(`   ✅ TOTAL MATCH: "${linha.nomeOcr}" → ${matchTotal.nome}`);
-        return { ...linha, cadastroVinculado: matchTotal, metodo: 'exato' as const };
+        return {
+          ...linha,
+          cadastroVinculado: matchTotal,
+          metodo: 'exato' as const,
+        };
       }
 
-      // 🎯 Helper: parte do OCR "casa" com parte do cadastro (aceita prefixo, case-insensitive)
+      // Helper: parte casa (aceita prefixo)
       function parteCasa(ocr: string, cadastro: string): boolean {
         const o = String(ocr || '').toUpperCase().trim();
         const c = String(cadastro || '').toUpperCase().trim();
@@ -555,11 +299,8 @@ export default function DpmoPage() {
         return false;
       }
 
-      // 🎯 REGRA OBRIGATÓRIA: PRIMEIRO NOME do OCR TEM que bater com o PRIMEIRO do cadastro
-      // Isso evita que "GABRIEL HENRIQUE" match com "HENRIQUE SILVA"
+      // Primeiro nome tem que bater
       const primeiroOcr = partesOcr[0];
-
-      // Filtra colabs cujo PRIMEIRO nome bate com o primeiro do OCR
       const colabsComPrimeiroIgual = colabs.filter((c) => {
         const partesColab = partesNome(c.nome);
         if (partesColab.length === 0) return false;
@@ -567,11 +308,14 @@ export default function DpmoPage() {
       });
 
       if (colabsComPrimeiroIgual.length === 0) {
-        console.log(`❌ Primeiro nome "${primeiroOcr}" não existe: "${linha.nomeOcr}"`);
-        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+        return {
+          ...linha,
+          cadastroVinculado: undefined,
+          metodo: 'nao_vinculou' as const,
+        };
       }
 
-      // 🎯 ETAPA 1: Match perfeito - todas as partes do OCR batem com alguma do cadastro
+      // Match exato (todas partes)
       const matchExato = colabsComPrimeiroIgual.find((c) => {
         const partesColab = partesNome(c.nome);
         const todasOcrCasam = partesOcr.every((po) =>
@@ -582,16 +326,22 @@ export default function DpmoPage() {
         );
         return todasOcrCasam && todasCadastroCasam;
       });
-      
+
       if (matchExato) {
-        console.log(`✅ EXATO: "${linha.nomeOcr}" → ${matchExato.nome}`);
-        return { ...linha, cadastroVinculado: matchExato, metodo: 'exato' as const };
+        return {
+          ...linha,
+          cadastroVinculado: matchExato,
+          metodo: 'exato' as const,
+        };
       }
 
-      // 🎯 ETAPA 2: Nome+Sobrenome (2 primeiros batem)
+      // Nome + sobrenome
       if (partesOcr.length < 2) {
-        console.log(`❌ "${linha.nomeOcr}" só tem 1 nome - ambíguo`);
-        return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+        return {
+          ...linha,
+          cadastroVinculado: undefined,
+          metodo: 'nao_vinculou' as const,
+        };
       }
 
       const segundoOcr = partesOcr[1];
@@ -602,11 +352,14 @@ export default function DpmoPage() {
       });
 
       if (candidatos.length === 1) {
-        console.log(`✅ NOME+SOB: "${linha.nomeOcr}" → ${candidatos[0].nome}`);
-        return { ...linha, cadastroVinculado: candidatos[0], metodo: 'fuzzy' as const };
+        return {
+          ...linha,
+          cadastroVinculado: candidatos[0],
+          metodo: 'fuzzy' as const,
+        };
       }
 
-      // 🎯 ETAPA 3: Desempate pelo 3º nome
+      // Desempate 3º
       if (candidatos.length > 1 && partesOcr.length >= 3) {
         const terceiroOcr = partesOcr[2];
         const desempate = candidatos.find((c) => {
@@ -615,24 +368,19 @@ export default function DpmoPage() {
           return parteCasa(terceiroOcr, t);
         });
         if (desempate) {
-          console.log(`✅ DESEMPATE: "${linha.nomeOcr}" → ${desempate.nome}`);
-          return { ...linha, cadastroVinculado: desempate, metodo: 'fuzzy' as const };
+          return {
+            ...linha,
+            cadastroVinculado: desempate,
+            metodo: 'fuzzy' as const,
+          };
         }
       }
 
-      if (candidatos.length > 1) {
-        console.log(`⚠️ AMBÍGUO: "${linha.nomeOcr}" → ${candidatos.length} candidatos com nome+sob`);
-        console.log(`   OCR partes: ${JSON.stringify(partesOcr)}`);
-        candidatos.forEach((c) => console.log(`   Candidato: "${c.nome}" → ${JSON.stringify(partesNome(c.nome))}`));
-      } else {
-        console.log(`❌ NÃO VINCULOU: "${linha.nomeOcr}"`);
-        console.log(`   OCR partes: ${JSON.stringify(partesOcr)}`);
-        console.log(`   Colabs com primeiro nome igual: ${colabsComPrimeiroIgual.length}`);
-        colabsComPrimeiroIgual.slice(0, 3).forEach((c) => 
-          console.log(`   → "${c.nome}" → ${JSON.stringify(partesNome(c.nome))}`)
-        );
-      }
-      return { ...linha, cadastroVinculado: undefined, metodo: 'nao_vinculou' as const };
+      return {
+        ...linha,
+        cadastroVinculado: undefined,
+        metodo: 'nao_vinculou' as const,
+      };
     });
   }
 
@@ -667,18 +415,23 @@ export default function DpmoPage() {
   }
 
   function removerPrint(idx: number) {
-    const novos = prints.filter((_, i) => i !== idx);
-    setPrints(novos);
-    setTimeout(() => processarTodos(novos), 100);
+    setPrints(prints.filter((_, i) => i !== idx));
+    // Se remover print, limpa resultados (usuário precisa reprocessar)
+    setLinhas([]);
+    setSemanasDetectadas([]);
   }
 
   function descartarTudo() {
     setPrints([]);
     setLinhas([]);
     setSemanasDetectadas([]);
+    setTokensGastos(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
+  // ============================================
+  // SALVAR (mesma lógica do original)
+  // ============================================
   async function salvarTudo() {
     const vinculadas = linhas.filter((l) => l.cadastroVinculado && l.totalGeral > 0);
     if (vinculadas.length === 0) {
@@ -687,16 +440,13 @@ export default function DpmoPage() {
     }
 
     setSalvando(true);
-    
-
     console.log('💾 INICIANDO SALVAMENTO');
     console.log(`📊 ${vinculadas.length} colabs vinculados`);
-    console.log(`📅 Mês ${mesSelecionado}/${anoSelecionado} - Processo ${processoSelecionado}`);
 
     try {
       const procDpmo = processoSelecionado === 'Checkin' ? 'CK' : 'P2M';
 
-      // 1) ima_manual (Total Geral)
+      // 1) ima_manual
       const registrosIma = vinculadas.map((l) => ({
         id_groot: l.cadastroVinculado!.id_groot,
         nome: l.cadastroVinculado!.nome,
@@ -709,27 +459,22 @@ export default function DpmoPage() {
         atualizado_por: 'delman.jpereira@mercadolivre.com',
       }));
 
-      console.log(`📝 Salvando ${registrosIma.length} IMAs em ima_manual...`);
-      const { error: errIma, data: dataIma } = await supabase.from('ima_manual').upsert(registrosIma, {
-        onConflict: 'id_groot,mes,ano,processo',
-        ignoreDuplicates: false,
-      }).select();
-      
-      if (errIma) {
-        console.error('❌ Erro ima_manual:', errIma);
-        throw new Error('ima_manual: ' + errIma.message);
-      }
-      console.log(`✅ ima_manual salvo: ${dataIma?.length || 0} registros`);
+      const { error: errIma } = await supabase
+        .from('ima_manual')
+        .upsert(registrosIma, {
+          onConflict: 'id_groot,mes,ano,processo',
+          ignoreDuplicates: false,
+        })
+        .select();
 
-      // 2) dpmo_agregado (Semanas) - UPSERT por chave_unica
-      // O UPSERT abaixo já substitui valores existentes da mesma chave
+      if (errIma) throw new Error('ima_manual: ' + errIma.message);
 
+      // 2) dpmo_agregado
       const registrosDpmo: any[] = [];
       vinculadas.forEach((l) => {
         Object.entries(l.semanas).forEach(([semStr, valor]) => {
           const semana = Number(semStr);
           if (valor > 0) {
-            // 🎯 chave_unica é OBRIGATÓRIA - formato: nome|processo|semana|ano
             const chaveUnica = `${l.cadastroVinculado!.nome}|${procDpmo}|${semana}|${anoSelecionado}`;
             registrosDpmo.push({
               chave_unica: chaveUnica,
@@ -741,57 +486,49 @@ export default function DpmoPage() {
               mes: mesSelecionado,
               trimestre,
               dpmo: valor,
-              arquivo_origem: 'print_ocr',
+              arquivo_origem: 'print_ia',
             });
           }
         });
       });
 
-      console.log(`📝 Inserindo ${registrosDpmo.length} registros em dpmo_agregado...`);
-      console.log('Sample:', registrosDpmo[0]);
-      
       if (registrosDpmo.length > 0) {
-        // 🎯 UPSERT por chave_unica (substitui se já existir)
-        const { error: errDpmo, data: dataDpmo } = await supabase
+        const { error: errDpmo } = await supabase
           .from('dpmo_agregado')
           .upsert(registrosDpmo, {
             onConflict: 'chave_unica',
             ignoreDuplicates: false,
           })
           .select();
-        if (errDpmo) {
-          console.error('❌ Erro dpmo_agregado:', errDpmo);
-          throw new Error('dpmo_agregado: ' + errDpmo.message);
-        }
-        console.log(`✅ dpmo_agregado inserido: ${dataDpmo?.length || 0} registros`);
-      } else {
-        console.warn('⚠️ Nenhum registro semanal pra salvar (semanas vazias)');
+
+        if (errDpmo) throw new Error('dpmo_agregado: ' + errDpmo.message);
       }
 
-      // 🎯 Registra na tabela uploads (pra aparecer no histórico de Configurações)
+      // Uploads log
       try {
         await supabase.from('uploads').insert({
-          arquivo: `Print OCR - ${prints.length} imagem(ns) - ${MESES.find((m) => m.num === mesSelecionado)?.label}/${anoSelecionado}`,
+          arquivo: `Print IA (Claude Vision) - ${prints.length} imagem(ns) - ${MESES.find((m) => m.num === mesSelecionado)?.label}/${anoSelecionado}`,
           tabela: 'ima_manual + dpmo_agregado',
           linhas: registrosIma.length + registrosDpmo.length,
           data: new Date().toISOString(),
-          modelo_csv: 'print_ocr',
+          modelo_csv: 'print_ia',
         });
-        console.log(`📋 Upload registrado no histórico`);
-      } catch (uploadErr) {
-        console.warn('⚠️ Não conseguiu registrar upload (não crítico):', uploadErr);
-      }
+      } catch {}
 
-      toast.success(`${vinculadas.length} colabs salvos!`, `${registrosDpmo.length} registros semanais atualizados`);
+      toast.success(
+        `${vinculadas.length} colabs salvos!`,
+        `${registrosDpmo.length} registros semanais atualizados`
+      );
       descartarTudo();
     } catch (e: any) {
-      console.error('❌ Erro geral:', e);
+      console.error('❌ Erro:', e);
       toast.error('Erro ao salvar', e.message);
     } finally {
       setSalvando(false);
     }
   }
 
+  // Paste listener
   useEffect(() => {
     function handlePaste(e: ClipboardEvent) {
       const items = e.clipboardData?.items;
@@ -813,114 +550,184 @@ export default function DpmoPage() {
   }, [prints]);
 
   const totalSalvaveis = linhas.filter((l) => l.cadastroVinculado && l.totalGeral > 0).length;
-  const todosProcessados = prints.length > 0 && prints.every((p) => !p.processando);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="mb-6">
-          <Link href="/meu-time" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">← Voltar ao Meu Time</Link>
+          <Link href="/meu-time" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+            ← Voltar ao Meu Time
+          </Link>
           <h1 className="text-3xl md:text-4xl font-black mt-2">
             Upload de <span className="text-[#FFD700]">DPMO</span>
+            <span className="text-xs ml-3 bg-purple-500/20 text-purple-300 px-2 py-1 rounded-full font-normal">🤖 IA Vision</span>
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Suba até 3 prints do Looker · OCR processa automaticamente</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Suba até 3 prints do Looker · Claude Vision lê e extrai os dados
+          </p>
         </div>
 
         <ApolloBadge
           mood="info"
-          message="Como funciona"
-          detail="Cole os prints (Ctrl+V) · Eu extraio nomes, semanas e IMA · Você revisa e salva"
+          message="Nova versão com IA"
+          detail="Cole os prints (Ctrl+V) · Click em 'Ler com IA' · Claude extrai nomes, semanas e IMA · Você revisa e salva"
         />
 
+        {/* PERÍODO */}
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
           <h2 className="text-lg font-bold mb-3">📅 Período</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
             <div>
               <label className="text-xs text-gray-500 uppercase mb-1 block">Mês</label>
-              <select value={mesSelecionado} onChange={(e) => setMesSelecionado(Number(e.target.value))}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white">
-                {MESES.map((m) => <option key={m.num} value={m.num}>{m.label}</option>)}
+              <select
+                value={mesSelecionado}
+                onChange={(e) => setMesSelecionado(Number(e.target.value))}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white"
+              >
+                {MESES.map((m) => (
+                  <option key={m.num} value={m.num}>{m.label}</option>
+                ))}
               </select>
             </div>
             <div>
               <label className="text-xs text-gray-500 uppercase mb-1 block">Ano</label>
-              <select value={anoSelecionado} onChange={(e) => setAnoSelecionado(Number(e.target.value))}
-                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white">
-                {[2024, 2025, 2026, 2027].map((a) => <option key={a} value={a}>{a}</option>)}
+              <select
+                value={anoSelecionado}
+                onChange={(e) => setAnoSelecionado(Number(e.target.value))}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white"
+              >
+                {[2024, 2025, 2026, 2027].map((a) => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
               </select>
             </div>
             <div>
               <label className="text-xs text-gray-500 uppercase mb-1 block">Processo</label>
               <div className="flex gap-2">
-                <button onClick={() => setProcessoSelecionado('Checkin')}
+                <button
+                  onClick={() => setProcessoSelecionado('Checkin')}
                   className={`flex-1 py-2 rounded-lg font-bold text-sm ${
-                    processoSelecionado === 'Checkin' ? 'bg-cyan-500 text-white' : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a]'
-                  }`}>Checkin</button>
-                <button onClick={() => setProcessoSelecionado('P2M')}
+                    processoSelecionado === 'Checkin'
+                      ? 'bg-cyan-500 text-white'
+                      : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a]'
+                  }`}
+                >
+                  Checkin
+                </button>
+                <button
+                  onClick={() => setProcessoSelecionado('P2M')}
                   className={`flex-1 py-2 rounded-lg font-bold text-sm ${
-                    processoSelecionado === 'P2M' ? 'bg-orange-500 text-white' : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a]'
-                  }`}>P2M</button>
+                    processoSelecionado === 'P2M'
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a]'
+                  }`}
+                >
+                  P2M
+                </button>
               </div>
             </div>
           </div>
           <div className="text-xs text-purple-300 bg-purple-500/10 border border-purple-500/40 rounded-lg p-2">
             📊 Trimestre: <strong>{trimestre} de {anoSelecionado}</strong>
             {semanasDetectadas.length > 0 && (
-              <span className="ml-3">· Semanas: <strong>{semanasDetectadas.join(', ')}</strong></span>
+              <span className="ml-3">
+                · Semanas: <strong>{semanasDetectadas.join(', ')}</strong>
+              </span>
             )}
           </div>
         </div>
 
+        {/* PRINTS */}
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <h2 className="text-lg font-bold">📸 Prints ({prints.length}/3)</h2>
-            {prints.length > 0 && (
-              <button onClick={descartarTudo} className="text-red-400 hover:text-red-300 text-sm">🗑️ Descartar tudo</button>
-            )}
+            <div className="flex gap-2">
+              {prints.length > 0 && !processandoIA && (
+                <>
+                  <button
+                    onClick={lerComIA}
+                    disabled={processandoIA}
+                    className="bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-bold py-2 px-4 rounded-lg text-sm shadow-lg shadow-purple-500/30 transition-all disabled:opacity-50"
+                  >
+                    🧠 Ler com IA
+                  </button>
+                  <button onClick={descartarTudo} className="text-red-400 hover:text-red-300 text-sm">
+                    🗑️ Descartar
+                  </button>
+                </>
+              )}
+            </div>
           </div>
+
+          {processandoIA && (
+            <div className="bg-purple-500/10 border border-purple-500/40 rounded-lg p-4 mb-3 flex items-center gap-3">
+              <span className="text-2xl animate-pulse">🧠</span>
+              <div className="flex-1">
+                <p className="text-purple-300 font-bold text-sm">Claude Vision analisando os prints...</p>
+                <p className="text-purple-200/80 text-xs">Isso leva uns 5-10 segundos</p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {prints.map((p, i) => (
               <div key={i} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-bold text-gray-400">📸 Print {i + 1}</span>
-                  <button onClick={() => removerPrint(i)} className="text-red-400 hover:text-red-300 text-sm">🗑️</button>
+                  <button
+                    onClick={() => removerPrint(i)}
+                    disabled={processandoIA}
+                    className="text-red-400 hover:text-red-300 text-sm disabled:opacity-50"
+                  >
+                    🗑️
+                  </button>
                 </div>
-                <img src={p.base64} alt="" className="w-full h-32 object-cover rounded mb-2" />
-                {p.processando ? (
-                  <div>
-                    <p className="text-xs text-cyan-400">⏳ {p.status} ({p.progresso}%)</p>
-                    <div className="w-full bg-[#1a1a1a] rounded h-1 mt-1 overflow-hidden">
-                      <div className="h-full bg-cyan-500 transition-all" style={{ width: `${p.progresso}%` }} />
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-green-400">✅ Processado</p>
-                )}
+                <img src={p.base64} alt="" className="w-full h-32 object-cover rounded" />
               </div>
             ))}
-            
-            {prints.length < 3 && (
-              <div onClick={() => fileInputRef.current?.click()}
+
+            {prints.length < 3 && !processandoIA && (
+              <div
+                onClick={() => fileInputRef.current?.click()}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
                   const file = e.dataTransfer.files[0];
                   if (file?.type.startsWith('image/')) adicionarPrint(file);
                 }}
-                className="border-2 border-dashed border-[#2a2a2a] hover:border-pink-400/40 rounded-lg p-6 text-center cursor-pointer bg-[#0a0a0a] flex flex-col items-center justify-center min-h-[150px]">
+                className="border-2 border-dashed border-[#2a2a2a] hover:border-purple-400/40 rounded-lg p-6 text-center cursor-pointer bg-[#0a0a0a] flex flex-col items-center justify-center min-h-[150px]"
+              >
                 <div className="text-4xl mb-2">📸</div>
                 <p className="text-sm text-white font-bold">Adicionar print</p>
                 <p className="text-xs text-gray-500">ou Ctrl+V</p>
-                <input ref={fileInputRef} type="file" accept="image/*"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) adicionarPrint(f); }}
-                  className="hidden" />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) adicionarPrint(f);
+                  }}
+                  className="hidden"
+                />
               </div>
             )}
           </div>
+
+          {tokensGastos && (
+            <div className="mt-3 text-xs text-gray-500 flex items-center gap-3">
+              <span>🧠 Tokens usados:</span>
+              <span>📥 Input: {tokensGastos.input}</span>
+              <span>📤 Output: {tokensGastos.output}</span>
+              <span className="text-green-400">
+                💰 ~R$ {((tokensGastos.input * 0.000001 + tokensGastos.output * 0.000005) * 5).toFixed(3)}
+              </span>
+            </div>
+          )}
         </div>
 
-        {linhas.length > 0 && todosProcessados && (
+        {/* TABELA DE REVISÃO */}
+        {linhas.length > 0 && (
           <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 mb-4">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h2 className="text-lg font-bold">🔍 Revisar antes de salvar ({linhas.length})</h2>
@@ -946,7 +753,8 @@ export default function DpmoPage() {
                 </thead>
                 <tbody>
                   {linhas.map((linha, idx) => {
-                    const cor = linha.metodo === 'exato' ? 'bg-green-500/5' :
+                    const cor =
+                      linha.metodo === 'exato' ? 'bg-green-500/5' :
                       linha.metodo === 'fuzzy' ? 'bg-yellow-500/5' :
                       'bg-red-500/5';
                     return (
@@ -955,33 +763,49 @@ export default function DpmoPage() {
                           {linha.metodo === 'exato' ? '✅' : linha.metodo === 'fuzzy' ? '🔶' : '❌'}
                         </td>
                         <td className="py-2 px-2 min-w-[200px]">
-                          <p className="text-gray-400 text-[10px] truncate">OCR: {linha.nomeOcr}</p>
-                          <select value={linha.cadastroVinculado?.id_groot || ''}
+                          <p className="text-gray-400 text-[10px] truncate">IA leu: {linha.nomeOcr}</p>
+                          <select
+                            value={linha.cadastroVinculado?.id_groot || ''}
                             onChange={(e) => trocarVinculo(idx, e.target.value)}
                             className={`w-full bg-[#0a0a0a] border rounded px-1 py-1 text-xs ${
-                              linha.cadastroVinculado ? 'border-[#2a2a2a] text-white' : 'border-red-500/40 text-red-300'
-                            }`}>
+                              linha.cadastroVinculado
+                                ? 'border-[#2a2a2a] text-white'
+                                : 'border-red-500/40 text-red-300'
+                            }`}
+                          >
                             <option value="">— Não vinculado —</option>
-                            {colaboradores.map((c) => <option key={c.id_groot} value={c.id_groot}>{c.nome}</option>)}
+                            {colaboradores.map((c) => (
+                              <option key={c.id_groot} value={c.id_groot}>
+                                {c.nome}
+                              </option>
+                            ))}
                           </select>
                         </td>
                         {semanasDetectadas.map((s) => (
                           <td key={s} className="py-2 px-1 text-center">
-                            <input type="text" inputMode="numeric"
+                            <input
+                              type="text"
+                              inputMode="numeric"
                               value={linha.semanas[s] ? linha.semanas[s].toLocaleString('pt-BR') : ''}
                               onChange={(e) => editarSemana(idx, s, e.target.value)}
                               className="w-16 bg-[#0a0a0a] border border-[#2a2a2a] rounded px-1 py-1 text-right font-mono text-xs text-white"
-                              placeholder="-" />
+                              placeholder="-"
+                            />
                           </td>
                         ))}
                         <td className="py-2 px-2 text-center bg-green-500/10">
-                          <input type="text" inputMode="numeric"
+                          <input
+                            type="text"
+                            inputMode="numeric"
                             value={linha.totalGeral ? linha.totalGeral.toLocaleString('pt-BR') : ''}
                             onChange={(e) => editarTotal(idx, e.target.value)}
-                            className="w-20 bg-[#0a0a0a] border border-green-500/30 rounded px-1 py-1 text-right font-mono text-xs text-green-300 font-bold" />
+                            className="w-20 bg-[#0a0a0a] border border-green-500/30 rounded px-1 py-1 text-right font-mono text-xs text-green-300 font-bold"
+                          />
                         </td>
                         <td className="py-2 px-1">
-                          <button onClick={() => removerLinha(idx)} className="text-red-400 hover:text-red-300">🗑️</button>
+                          <button onClick={() => removerLinha(idx)} className="text-red-400 hover:text-red-300">
+                            🗑️
+                          </button>
                         </td>
                       </tr>
                     );
@@ -991,29 +815,21 @@ export default function DpmoPage() {
             </div>
 
             <div className="flex gap-3 flex-wrap mt-4">
-              <button onClick={salvarTudo} disabled={salvando || totalSalvaveis === 0}
-                className="bg-[#FFD700] hover:bg-yellow-400 text-black font-bold py-3 px-6 rounded-lg disabled:opacity-40">
+              <button
+                onClick={salvarTudo}
+                disabled={salvando || totalSalvaveis === 0}
+                className="bg-[#FFD700] hover:bg-yellow-400 text-black font-bold py-3 px-6 rounded-lg disabled:opacity-40"
+              >
                 {salvando ? '💾 Salvando...' : `💾 Salvar ${totalSalvaveis} colabs (Total + Semanas)`}
               </button>
-              <button onClick={descartarTudo} className="bg-[#0a0a0a] hover:bg-[#2a2a2a] border border-[#2a2a2a] text-white font-bold py-3 px-6 rounded-lg">
+              <button
+                onClick={descartarTudo}
+                className="bg-[#0a0a0a] hover:bg-[#2a2a2a] border border-[#2a2a2a] text-white font-bold py-3 px-6 rounded-lg"
+              >
                 ❌ Cancelar
               </button>
             </div>
           </div>
-        )}
-
-        {prints.some((p) => p.textoBruto) && (
-          <details className="bg-[#1a1a1a] border border-orange-500/30 rounded-xl p-4 mb-4">
-            <summary className="cursor-pointer text-orange-300 font-bold text-sm">🐛 Debug — texto bruto dos prints</summary>
-            <div className="mt-3 space-y-3">
-              {prints.map((p, i) => p.textoBruto && (
-                <div key={i}>
-                  <p className="text-xs text-orange-300 mb-1">📸 Print {i + 1}:</p>
-                  <pre className="bg-[#0a0a0a] p-2 rounded text-xs text-orange-100 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto">{p.textoBruto}</pre>
-                </div>
-              ))}
-            </div>
-          </details>
         )}
       </div>
     </div>
