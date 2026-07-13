@@ -8,8 +8,16 @@ import { supabase } from '../../lib/supabase';
 interface Atalho {
   id: number;
   slot: number;
-  nome_curto: string;
+  nome_curto: string;      // emoji
+  nome_completo?: string;  // 🆕 nome que aparece embaixo
   url: string;
+}
+
+interface StatsAtalho {
+  atalho_id: number;
+  clicks_mes: number;
+  clicks_total: number;
+  pct_uso: number;  // % em relação ao mais clicado do mês
 }
 
 const MENU = [
@@ -38,17 +46,20 @@ const MENU = [
   },
 ];
 
-const TOTAL_SLOTS = 12;
+const TOTAL_SLOTS = 16; // 🆕 aumentado de 12 pra 16 (grid 4x4)
 const STORAGE_KEY = 'lider360_sidebar_aberta';
 
 export default function Sidebar() {
   const pathname = usePathname();
   const [aberta, setAberta] = useState(true);
-  const [mounted, setMounted] = useState(false); // 🔑 garante que portal só renderiza no client
+  const [mounted, setMounted] = useState(false);
   const [atalhos, setAtalhos] = useState<Atalho[]>([]);
+  const [stats, setStats] = useState<Record<number, StatsAtalho>>({});
   const [modalSlot, setModalSlot] = useState<number | null>(null);
   const [modalEditar, setModalEditar] = useState<Atalho | null>(null);
+  const [modalStats, setModalStats] = useState(false); // 🆕
   const [formNome, setFormNome] = useState('');
+  const [formNomeCompleto, setFormNomeCompleto] = useState(''); // 🆕
   const [formUrl, setFormUrl] = useState('');
   const [emojiPreview, setEmojiPreview] = useState('🔗');
   const [gerandoEmoji, setGerandoEmoji] = useState(false);
@@ -56,10 +67,8 @@ export default function Sidebar() {
   const [toast, setToast] = useState<{ tipo: 'success' | 'error'; msg: string } | null>(null);
   const [confirmRemover, setConfirmRemover] = useState<Atalho | null>(null);
 
-  // Marca como montado pra ativar o portal só no client (evita erro SSR do Next)
   useEffect(() => { setMounted(true); }, []);
 
-  // Carrega estado da sidebar
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -71,7 +80,10 @@ export default function Sidebar() {
     localStorage.setItem(STORAGE_KEY, String(aberta));
   }, [aberta]);
 
-  useEffect(() => { carregarAtalhos(); }, []);
+  useEffect(() => { 
+    carregarAtalhos(); 
+    carregarStats();
+  }, []);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -82,6 +94,7 @@ export default function Sidebar() {
       if (e.key === 'Escape') {
         setModalSlot(null);
         setModalEditar(null);
+        setModalStats(false);
         setConfirmRemover(null);
       }
     }
@@ -89,9 +102,8 @@ export default function Sidebar() {
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
-  // 🔒 Bloqueia scroll do body quando modal aberto
   useEffect(() => {
-    const modalAberto = modalSlot !== null || modalEditar !== null || confirmRemover !== null;
+    const modalAberto = modalSlot !== null || modalEditar !== null || confirmRemover !== null || modalStats;
     if (typeof document === 'undefined') return;
     if (modalAberto) {
       document.body.style.overflow = 'hidden';
@@ -99,7 +111,7 @@ export default function Sidebar() {
       document.body.style.overflow = '';
     }
     return () => { document.body.style.overflow = ''; };
-  }, [modalSlot, modalEditar, confirmRemover]);
+  }, [modalSlot, modalEditar, confirmRemover, modalStats]);
 
   function showToast(tipo: 'success' | 'error', msg: string) {
     setToast({ tipo, msg });
@@ -109,6 +121,58 @@ export default function Sidebar() {
   async function carregarAtalhos() {
     const { data } = await supabase.from('atalhos_sidebar').select('*').order('slot');
     setAtalhos(data || []);
+  }
+  
+  // 🆕 Carrega estatísticas de uso
+  async function carregarStats() {
+    const agora = new Date();
+    const mesAtual = agora.getMonth() + 1;
+    const anoAtual = agora.getFullYear();
+    
+    try {
+      // Busca clicks do mês atual
+      const { data: clicksMes } = await supabase
+        .from('atalhos_clicks')
+        .select('atalho_id')
+        .eq('mes', mesAtual)
+        .eq('ano', anoAtual);
+      
+      // Busca total geral
+      const { data: clicksTotal } = await supabase
+        .from('atalhos_clicks')
+        .select('atalho_id');
+      
+      // Agrupa por atalho_id
+      const contagemMes: Record<number, number> = {};
+      (clicksMes || []).forEach((c: any) => {
+        contagemMes[c.atalho_id] = (contagemMes[c.atalho_id] || 0) + 1;
+      });
+      
+      const contagemTotal: Record<number, number> = {};
+      (clicksTotal || []).forEach((c: any) => {
+        contagemTotal[c.atalho_id] = (contagemTotal[c.atalho_id] || 0) + 1;
+      });
+      
+      // Acha o mais clicado do mês pra calcular %
+      const maiorMes = Math.max(...Object.values(contagemMes), 1);
+      
+      // Monta stats
+      const novoStats: Record<number, StatsAtalho> = {};
+      Object.keys(contagemMes).forEach((idStr) => {
+        const id = Number(idStr);
+        novoStats[id] = {
+          atalho_id: id,
+          clicks_mes: contagemMes[id] || 0,
+          clicks_total: contagemTotal[id] || 0,
+          pct_uso: Math.round(((contagemMes[id] || 0) / maiorMes) * 100),
+        };
+      });
+      
+      setStats(novoStats);
+      console.log('📊 Stats carregados:', novoStats);
+    } catch (e) {
+      console.warn('Erro carregando stats:', e);
+    }
   }
 
   async function gerarEmojiIA(nome: string, url: string) {
@@ -140,6 +204,7 @@ export default function Sidebar() {
   function abrirModalNovo(slot: number) {
     setModalSlot(slot);
     setFormNome('');
+    setFormNomeCompleto(''); // 🆕
     setFormUrl('');
     setEmojiPreview('🔗');
     setEmojiManual(false);
@@ -147,7 +212,8 @@ export default function Sidebar() {
 
   function abrirModalEditar(atalho: Atalho) {
     setModalEditar(atalho);
-    setFormNome(atalho.nome_curto);
+    setFormNome(atalho.nome_completo || atalho.nome_curto); // 🆕
+    setFormNomeCompleto(atalho.nome_completo || ''); // 🆕
     setFormUrl(atalho.url);
     setEmojiPreview(atalho.nome_curto);
     setEmojiManual(true);
@@ -157,6 +223,7 @@ export default function Sidebar() {
     setModalSlot(null);
     setModalEditar(null);
     setFormNome('');
+    setFormNomeCompleto('');
     setFormUrl('');
     setEmojiPreview('🔗');
     setEmojiManual(false);
@@ -175,20 +242,33 @@ export default function Sidebar() {
 
   async function salvarAtalho() {
     if (!formUrl.trim()) { showToast('error', 'Preencha a URL'); return; }
+    if (!formNome.trim()) { showToast('error', 'Preencha o nome'); return; }
+    
     let urlFinal = formUrl.trim();
     if (!urlFinal.startsWith('http://') && !urlFinal.startsWith('https://')) {
       urlFinal = 'https://' + urlFinal;
     }
-    const nomeFinal = emojiPreview.substring(0, 4);
+    
+    const emojiFinal = emojiPreview.substring(0, 4);
+    // 🆕 Nome completo pra mostrar embaixo (máximo 12 chars)
+    const nomeCompletoFinal = (formNomeCompleto.trim() || formNome.trim()).substring(0, 12);
+    
     if (modalEditar) {
       const { error } = await supabase.from('atalhos_sidebar')
-        .update({ nome_curto: nomeFinal, url: urlFinal })
+        .update({ 
+          nome_curto: emojiFinal, 
+          nome_completo: nomeCompletoFinal, // 🆕
+          url: urlFinal 
+        })
         .eq('id', modalEditar.id);
       if (error) { showToast('error', 'Erro: ' + error.message); return; }
       showToast('success', '✅ Atalho atualizado');
     } else if (modalSlot) {
       const { error } = await supabase.from('atalhos_sidebar').insert({
-        slot: modalSlot, nome_curto: nomeFinal, url: urlFinal,
+        slot: modalSlot, 
+        nome_curto: emojiFinal, 
+        nome_completo: nomeCompletoFinal, // 🆕
+        url: urlFinal,
       });
       if (error) { showToast('error', 'Erro: ' + error.message); return; }
       showToast('success', '✅ Atalho criado');
@@ -204,19 +284,45 @@ export default function Sidebar() {
     setConfirmRemover(null);
     fecharModal();
     await carregarAtalhos();
+    await carregarStats();
   }
 
-  function clickAtalho(atalho: Atalho) {
+  // 🆕 Track click no atalho
+  async function clickAtalho(atalho: Atalho) {
     window.open(atalho.url, '_blank', 'noopener,noreferrer');
+    
+    // Registra click no Supabase
+    const agora = new Date();
+    try {
+      await supabase.from('atalhos_clicks').insert({
+        atalho_id: atalho.id,
+        clicado_em: agora.toISOString(),
+        mes: agora.getMonth() + 1,
+        ano: agora.getFullYear(),
+      });
+      // Recarrega stats
+      setTimeout(() => carregarStats(), 500);
+    } catch (e) {
+      console.warn('Erro registrando click:', e);
+    }
   }
 
   function getAtalhoSlot(slot: number): Atalho | null {
     return atalhos.find((a) => a.slot === slot) || null;
   }
-
+  
+  // 🆕 Ranking dos atalhos por uso
+  function getRanking() {
+    const comStats = atalhos.map((a) => ({
+      atalho: a,
+      stats: stats[a.id] || { clicks_mes: 0, clicks_total: 0, pct_uso: 0 },
+    }));
+    return comStats.sort((a, b) => b.stats.clicks_mes - a.stats.clicks_mes);
+  }
+  
   const widthClass = aberta ? 'w-64' : 'w-14';
+  const totalClicksMes = Object.values(stats).reduce((s, x) => s + x.clicks_mes, 0);
 
-  // 🎯 MODAIS via PORTAL - renderizam no <body>, ficam na tela inteira
   const modaisJSX = (
     <>
       {/* MODAL: Criar/Editar atalho */}
@@ -246,15 +352,21 @@ export default function Sidebar() {
                 title="Fechar (ESC)"
               >×</button>
             </div>
-
-            {/* Preview do emoji/texto */}
+            
+            {/* Preview do atalho */}
             <div className="flex items-center gap-3 mb-4 p-3 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg">
-              <div className={'w-14 h-14 bg-[#1a1a1a] border border-yellow-500/30 rounded-lg flex items-center justify-center text-2xl flex-shrink-0 ' + (gerandoEmoji ? 'animate-pulse' : '')}>
-                {gerandoEmoji ? (
-                  <span className="text-yellow-400">⚡</span>
-                ) : (
-                  <span>{emojiPreview || '🔗'}</span>
-                )}
+              <div className="flex flex-col items-center flex-shrink-0">
+                <div className={'w-14 h-14 bg-[#1a1a1a] border border-yellow-500/30 rounded-lg flex items-center justify-center text-2xl ' + (gerandoEmoji ? 'animate-pulse' : '')}>
+                  {gerandoEmoji ? (
+                    <span className="text-yellow-400">⚡</span>
+                  ) : (
+                    <span>{emojiPreview || '🔗'}</span>
+                  )}
+                </div>
+                {/* 🆕 Preview do nome embaixo */}
+                <p className="text-[8px] text-yellow-300 mt-1 font-bold truncate max-w-[56px] text-center">
+                  {(formNomeCompleto || formNome || '').substring(0, 12) || '...'}
+                </p>
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] text-gray-400 mb-1">
@@ -284,7 +396,7 @@ export default function Sidebar() {
                 </div>
               </div>
             </div>
-
+            
             <div className="mb-3">
               <label className="text-[11px] text-gray-400 mb-1.5 block font-medium">
                 Nome do site
@@ -299,7 +411,25 @@ export default function Sidebar() {
               />
               <p className="text-[9px] text-gray-600 mt-1">A IA gera o emoji a partir desse nome</p>
             </div>
-
+            
+            {/* 🆕 NOVO CAMPO: Nome exibido embaixo */}
+            <div className="mb-3">
+              <label className="text-[11px] text-gray-400 mb-1.5 block font-medium">
+                Nome exibido embaixo <span className="text-gray-600 normal-case font-normal">(opcional, máx 12)</span>
+              </label>
+              <input
+                type="text"
+                value={formNomeCompleto}
+                onChange={(e) => setFormNomeCompleto(e.target.value.substring(0, 12))}
+                placeholder={formNome.substring(0, 12) || "Curto (ex: MELI)"}
+                maxLength={12}
+                className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-3 py-2 text-sm text-white focus:border-yellow-500/50 focus:outline-none transition"
+              />
+              <p className="text-[9px] text-gray-600 mt-1">
+                Se vazio, usa o nome do site (max 12 chars)
+              </p>
+            </div>
+            
             <div className="mb-5">
               <label className="text-[11px] text-gray-400 mb-1.5 block font-medium">URL do site</label>
               <input
@@ -311,7 +441,7 @@ export default function Sidebar() {
                 className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-3 py-2 text-xs text-white focus:border-yellow-500/50 focus:outline-none transition font-mono"
               />
             </div>
-
+            
             <div className="flex gap-2 justify-between items-center pt-3 border-t border-[#2a2a2a]">
               {modalEditar ? (
                 <button
@@ -334,7 +464,123 @@ export default function Sidebar() {
           </div>
         </div>
       )}
-
+      
+      {/* 🆕 MODAL: Estatísticas */}
+      {modalStats && (
+        <div
+          className="fixed inset-0 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadein"
+          style={{ zIndex: 9999 }}
+          onClick={() => setModalStats(false)}
+        >
+          <div
+            className="bg-[#1a1a1a] border border-cyan-500/40 rounded-xl p-6 max-w-lg w-full animate-slidein max-h-[85vh] overflow-y-auto"
+            style={{ boxShadow: '0 25px 80px rgba(0,0,0,0.9), 0 0 40px rgba(6,182,212,0.15)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  📊 Estatísticas de Uso
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                </p>
+              </div>
+              <button
+                onClick={() => setModalStats(false)}
+                className="text-gray-500 hover:text-white transition text-lg leading-none"
+              >×</button>
+            </div>
+            
+            {/* Card de resumo */}
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="bg-[#0a0a0a] rounded-lg p-3 text-center">
+                <p className="text-[10px] text-gray-500 uppercase font-bold">Atalhos</p>
+                <p className="text-2xl font-black text-white">{atalhos.length}</p>
+              </div>
+              <div className="bg-cyan-500/10 rounded-lg p-3 text-center">
+                <p className="text-[10px] text-cyan-400 uppercase font-bold">Clicks (mês)</p>
+                <p className="text-2xl font-black text-cyan-400">{totalClicksMes}</p>
+              </div>
+              <div className="bg-[#0a0a0a] rounded-lg p-3 text-center">
+                <p className="text-[10px] text-gray-500 uppercase font-bold">Sem uso</p>
+                <p className="text-2xl font-black text-orange-400">
+                  {atalhos.filter((a) => !stats[a.id] || stats[a.id].clicks_mes === 0).length}
+                </p>
+              </div>
+            </div>
+            
+            {/* Ranking */}
+            <div className="space-y-2">
+              <p className="text-xs text-gray-400 uppercase font-bold mb-2">🏆 Ranking do mês</p>
+              {getRanking().map((item, idx) => {
+                const semUso = item.stats.clicks_mes === 0;
+                return (
+                  <div
+                    key={item.atalho.id}
+                    className={`flex items-center gap-3 p-2 rounded-lg ${
+                      semUso 
+                        ? 'bg-orange-500/5 border border-orange-500/20' 
+                        : idx < 3 
+                        ? 'bg-yellow-500/5 border border-yellow-500/20'
+                        : 'bg-[#0a0a0a] border border-[#2a2a2a]'
+                    }`}
+                  >
+                    <span className="text-xl w-8 text-center">
+                      {idx === 0 && '🥇'}
+                      {idx === 1 && '🥈'}
+                      {idx === 2 && '🥉'}
+                      {idx > 2 && !semUso && `${idx + 1}º`}
+                      {semUso && '💤'}
+                    </span>
+                    <div className="w-10 h-10 bg-[#0a0a0a] border border-yellow-500/30 rounded flex items-center justify-center text-lg flex-shrink-0">
+                      {item.atalho.nome_curto}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-white truncate">
+                        {item.atalho.nome_completo || item.atalho.nome_curto}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1 bg-[#2a2a2a] rounded overflow-hidden">
+                          <div 
+                            className={`h-full ${semUso ? 'bg-orange-500' : 'bg-yellow-500'}`}
+                            style={{ width: `${item.stats.pct_uso}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-gray-400 font-mono">
+                          {item.stats.pct_uso}%
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-bold text-white">{item.stats.clicks_mes}</p>
+                      <p className="text-[9px] text-gray-500">clicks</p>
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {atalhos.length === 0 && (
+                <p className="text-center text-gray-500 text-sm py-4">
+                  Sem atalhos ainda. Adiciona o primeiro!
+                </p>
+              )}
+            </div>
+            
+            {/* Sugestão */}
+            {atalhos.filter((a) => !stats[a.id] || stats[a.id].clicks_mes === 0).length > 0 && (
+              <div className="mt-4 bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                <p className="text-xs text-orange-300 font-bold mb-1">💡 Sugestão</p>
+                <p className="text-[11px] text-orange-200/80">
+                  {atalhos.filter((a) => !stats[a.id] || stats[a.id].clicks_mes === 0).length} atalho(s) 
+                  sem uso esse mês. Considere removê-los pra deixar espaço pra outros mais úteis!
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
       {/* MODAL: Confirmar remoção */}
       {confirmRemover && (
         <div
@@ -348,7 +594,7 @@ export default function Sidebar() {
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-sm text-white mb-4">
-              Remover atalho <strong className="text-yellow-400">{confirmRemover.nome_curto}</strong>?
+              Remover atalho <strong className="text-yellow-400">{confirmRemover.nome_completo || confirmRemover.nome_curto}</strong>?
             </p>
             <div className="flex gap-2 justify-end">
               <button
@@ -363,7 +609,7 @@ export default function Sidebar() {
           </div>
         </div>
       )}
-
+      
       {/* TOAST */}
       {toast && (
         <div className="fixed bottom-4 right-4 animate-slidein" style={{ zIndex: 10001 }}>
@@ -377,8 +623,7 @@ export default function Sidebar() {
           </div>
         </div>
       )}
-
-      {/* Animações dos modais */}
+      
       <style>{`
         @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slidein { from { opacity: 0; transform: scale(0.95) translateY(-10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
@@ -413,7 +658,7 @@ export default function Sidebar() {
             </Link>
           )}
         </div>
-
+        
         {aberta && (
           <>
             <nav className="flex-1 overflow-y-auto py-4">
@@ -438,11 +683,6 @@ export default function Sidebar() {
                           >
                             <span className="text-lg">{item.icon}</span>
                             <span className="font-bold">{item.nome}</span>
-                            {item.destaque && !ativo && (
-                              <span className="ml-auto text-[9px] bg-gradient-to-br from-purple-500 to-pink-500 text-white px-1.5 py-0.5 rounded-full font-bold">
-                                NOVO
-                              </span>
-                            )}
                           </Link>
                         </li>
                       );
@@ -450,45 +690,91 @@ export default function Sidebar() {
                   </ul>
                 </div>
               ))}
-
-              {/* ATALHOS */}
+              
+              {/* ATALHOS - COM STATS */}
               <div className="mt-2 pt-4 border-t border-[#2a2a2a]">
                 <div className="flex items-center justify-between px-5 mb-2">
-                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Atalhos</p>
-                  <span className="text-[9px] text-gray-600">🤖 IA</span>
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                    Atalhos ({atalhos.length}/{TOTAL_SLOTS})
+                  </p>
+                  <button
+                    onClick={() => setModalStats(true)}
+                    className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold flex items-center gap-1"
+                    title="Ver estatísticas de uso"
+                  >
+                    📊 Stats
+                  </button>
                 </div>
+                
+                {/* 🆕 GRID 4x4 (16 slots) */}
                 <div className="grid grid-cols-4 gap-1.5 px-3">
                   {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
                     const slot = i + 1;
                     const atalho = getAtalhoSlot(slot);
+                    
                     if (atalho) {
+                      const s = stats[atalho.id];
+                      const pctUso = s?.pct_uso || 0;
+                      const clicksMes = s?.clicks_mes || 0;
+                      const semUso = clicksMes === 0;
+                      
                       return (
                         <button
                           key={slot}
                           onClick={() => clickAtalho(atalho)}
                           onContextMenu={(e) => { e.preventDefault(); abrirModalEditar(atalho); }}
-                          className="aspect-square bg-[#1a1a1a] border border-[#2a2a2a] rounded flex items-center justify-center text-[16px] font-bold text-yellow-300 hover:border-yellow-500/50 hover:bg-yellow-500/10 transition-all hover:scale-105"
-                          title={atalho.url + ' (Right-click pra editar)'}
+                          className={`aspect-square bg-[#1a1a1a] border rounded flex flex-col items-center justify-between p-1 transition-all hover:scale-105 hover:bg-yellow-500/10 ${
+                            semUso 
+                              ? 'border-orange-500/20 hover:border-orange-400/50' 
+                              : 'border-[#2a2a2a] hover:border-yellow-500/50'
+                          }`}
+                          title={`${atalho.nome_completo || atalho.nome_curto} · ${clicksMes} clicks esse mês · ${atalho.url}\n(Right-click pra editar)`}
+                          style={{ minHeight: '58px' }}
                         >
-                          {atalho.nome_curto}
+                          {/* 🆕 EMOJI EM CIMA */}
+                          <div className="text-[15px] leading-tight font-bold text-yellow-300 mt-0.5">
+                            {atalho.nome_curto}
+                          </div>
+                          
+                          {/* 🆕 NOME EMBAIXO */}
+                          <div className="text-[7px] text-gray-400 truncate w-full text-center leading-tight">
+                            {atalho.nome_completo || ''}
+                          </div>
+                          
+                          {/* 🆕 BARRINHA DE USO */}
+                          <div className="w-full h-0.5 bg-[#0a0a0a] rounded overflow-hidden">
+                            <div 
+                              className={semUso ? 'h-full bg-gray-700' : 'h-full bg-yellow-500'}
+                              style={{ width: `${Math.max(pctUso, semUso ? 0 : 10)}%` }}
+                            />
+                          </div>
                         </button>
                       );
                     }
+                    
                     return (
                       <button
                         key={slot}
                         onClick={() => abrirModalNovo(slot)}
                         className="aspect-square border-2 border-dashed border-[#2a2a2a] rounded flex items-center justify-center text-[14px] text-gray-700 hover:border-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/5 transition-all"
                         title="Adicionar atalho"
+                        style={{ minHeight: '58px' }}
                       >
                         +
                       </button>
                     );
                   })}
                 </div>
+                
+                {/* 🆕 Rodapé com resumo */}
+                {atalhos.length > 0 && totalClicksMes > 0 && (
+                  <div className="px-5 mt-3 text-[9px] text-gray-500 text-center">
+                    {totalClicksMes} clicks este mês
+                  </div>
+                )}
               </div>
             </nav>
-
+            
             <div className="p-4 border-t border-[#2a2a2a]">
               <div className="text-[10px] text-gray-500">
                 <p>dev. Delman J. Pereira</p>
@@ -498,8 +784,7 @@ export default function Sidebar() {
           </>
         )}
       </aside>
-
-      {/* 🎯 PORTAL: renderiza modais no <body> pra escapar do stacking context da sidebar */}
+      
       {mounted && createPortal(modaisJSX, document.body)}
     </>
   );
