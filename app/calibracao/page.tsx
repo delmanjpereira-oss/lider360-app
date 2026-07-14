@@ -139,6 +139,23 @@ function corAptidao(apt: string): string {
   return 'bg-gray-500 text-white';
 }
 
+// 🆕 CONVERTE LOGO EM BASE64 (pra html2canvas capturar sem erro de CORS)
+async function carregarLogoBase64(): Promise<string> {
+  try {
+    const res = await fetch('/logos/pngwing.com.png');
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn('Não conseguiu carregar logo:', e);
+    return '';
+  }
+}
+
 export default function CalibracaoPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
@@ -664,8 +681,9 @@ export default function CalibracaoPage() {
   }
 
   // ============================================
-  // 🎨 PRINT MELI CLARO - Pros colaboradores
-  // Fundo branco + Amarelo MELI suave + Cores pastel
+  // 🎨 PRINT DARK MINIMALISTA + LOGO MELI
+  // Fundo cinza escuro elegante + amarelo MELI em detalhes
+  // Logo MELI ao lado do título
   // Split em 2 quando >35 colabs
   // ============================================
   async function gerarPrintPublico(processo: 'Checkin' | 'P2M' | 'Sorting') {
@@ -703,37 +721,52 @@ export default function CalibracaoPage() {
     const parte1 = PRECISA_SPLIT ? linhasOrdenadas.slice(0, metade) : linhasOrdenadas;
     const parte2 = PRECISA_SPLIT ? linhasOrdenadas.slice(metade) : [];
 
-    // 🎨 PALETA MELI CLARO
+    // 🖼️ Carrega logo MELI em base64
+    const logoBase64 = await carregarLogoBase64();
+
+    // 🎨 PALETA DARK MINIMALISTA MELI
     const CORES = {
-      brancoPuro: '#ffffff',
-      brancoOff: '#fafafa',
-      cinzaClarinho: '#f8f9fa',
-      amareloMeli: '#FFF9E6',
-      douradoMeli: '#FFD700',
-      douradoEscuro: '#d4a017',
-      verdeSuave: '#e8f5e9',
-      verdeTexto: '#2e7d32',
-      vermelhoSuave: '#ffebee',
-      vermelhoTexto: '#c62828',
-      cinzaSemDados: '#f5f5f5',
-      cinzaTexto: '#9e9e9e',
-      textoPreto: '#212121',
-      textoCinza: '#616161',
-      textoCinzaClaro: '#9e9e9e',
-      bordaClara: '#e0e0e0',
-      bordaCinza: '#d4d4d4',
+      // Fundos escuros
+      fundoBase: '#0f0f0f',        // fundo principal (cinza escuro)
+      fundoCard: '#1a1a1a',        // cards internos
+      fundoLinha1: '#151515',      // linha par
+      fundoLinha2: '#1a1a1a',      // linha ímpar
+      fundoHeader: '#1f1f1f',      // header da tabela
+      
+      // MELI colors
+      amareloMeli: '#FFD700',      // amarelo forte (bordas, acentos)
+      amareloSuave: 'rgba(255, 215, 0, 0.1)', // amarelo transparente (BG)
+      amareloBorda: 'rgba(255, 215, 0, 0.4)', // amarelo pra bordas
+      
+      // Status (neon soft, não gritante)
+      verde: '#4ade80',            // verde soft (na meta)
+      verdeBg: 'rgba(74, 222, 128, 0.1)',    // fundo verde suave
+      vermelho: '#f87171',         // vermelho soft (abaixo)
+      vermelhoBg: 'rgba(248, 113, 113, 0.1)', // fundo vermelho suave
+      cinza: '#525252',            // sem dados
+      cinzaBg: 'rgba(82, 82, 82, 0.1)',       // fundo cinza suave
+      
+      // Textos
+      textoBranco: '#ffffff',      // texto principal
+      textoClaro: '#e5e5e5',       // texto normal
+      textoMedio: '#a3a3a3',       // texto secundário
+      textoEscuro: '#737373',      // texto sutil
+      
+      // Bordas
+      bordaSutil: '#2a2a2a',       // borda cinza escura
+      bordaMedia: '#3a3a3a',       // borda média
     };
 
     function corFundoStatus(valor: number, meta: number, inverso: boolean = false): string {
-      if (valor === 0) return CORES.cinzaSemDados;
-      if (inverso) return valor <= meta ? CORES.verdeSuave : CORES.vermelhoSuave;
-      return valor >= meta ? CORES.verdeSuave : CORES.vermelhoSuave;
+      if (valor === 0) return CORES.cinzaBg;
+      if (inverso) return valor <= meta ? CORES.verdeBg : CORES.vermelhoBg;
+      return valor >= meta ? CORES.verdeBg : CORES.vermelhoBg;
     }
 
     function corTextoStatus(valor: number, meta: number, inverso: boolean = false): string {
-      if (valor === 0) return CORES.cinzaTexto;
-      if (inverso) return valor <= meta ? CORES.verdeTexto : CORES.vermelhoTexto;
-      return valor >= meta ? CORES.verdeTexto : CORES.vermelhoTexto;
+      if (valor === 0) return CORES.cinza;
+      if (inverso) return valor <= meta ? CORES.verde : CORES.vermelho;
+      return valor >= meta ? CORES.verde : CORES.vermelho;
     }
 
     function gerarTabelaHtml(linhasParte: typeof linhasOrdenadas, tituloLinha: string): string {
@@ -744,21 +777,20 @@ export default function CalibracaoPage() {
       const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0);
 
       const headerMeses = mesesComDados.map((m) => `
-        <th colspan="${subColsPorMes}" style="padding: 14px 8px; text-align: center; background: ${CORES.amareloMeli}; color: ${CORES.textoPreto}; font-weight: 500; font-size: 13px; border: 1px solid ${CORES.douradoEscuro}; letter-spacing: 1px;">
+        <th colspan="${subColsPorMes}" style="padding: 14px 8px; text-align: center; background: ${CORES.amareloSuave}; color: ${CORES.amareloMeli}; font-weight: 500; font-size: 13px; border: 1px solid ${CORES.amareloBorda}; letter-spacing: 1.5px;">
           ${NOMES_MESES_FULL[m]}
         </th>
       `).join('');
 
       const subHeaders = mesesComDados.map((m) => `
-        <th style="padding: 8px 4px; text-align: center; background: ${CORES.cinzaClarinho}; color: ${CORES.textoCinza}; font-size: 11px; font-weight: 500; border-left: 1px solid ${CORES.douradoEscuro}; border-bottom: 1px solid ${CORES.bordaClara};">LÍQ</th>
-        ${temIma ? `<th style="padding: 8px 4px; text-align: center; background: ${CORES.cinzaClarinho}; color: ${CORES.textoCinza}; font-size: 11px; font-weight: 500; border-bottom: 1px solid ${CORES.bordaClara};">IMA</th>` : ''}
-        ${temOcup ? `<th style="padding: 8px 4px; text-align: center; background: ${CORES.cinzaClarinho}; color: ${CORES.textoCinza}; font-size: 11px; font-weight: 500; border-bottom: 1px solid ${CORES.bordaClara};">OCUP</th>` : ''}
+        <th style="padding: 8px 4px; text-align: center; background: ${CORES.fundoHeader}; color: ${CORES.textoMedio}; font-size: 10px; font-weight: 500; border-left: 1px solid ${CORES.amareloBorda}; border-bottom: 1px solid ${CORES.bordaSutil}; letter-spacing: 1px;">LÍQ</th>
+        ${temIma ? `<th style="padding: 8px 4px; text-align: center; background: ${CORES.fundoHeader}; color: ${CORES.textoMedio}; font-size: 10px; font-weight: 500; border-bottom: 1px solid ${CORES.bordaSutil}; letter-spacing: 1px;">IMA</th>` : ''}
+        ${temOcup ? `<th style="padding: 8px 4px; text-align: center; background: ${CORES.fundoHeader}; color: ${CORES.textoMedio}; font-size: 10px; font-weight: 500; border-bottom: 1px solid ${CORES.bordaSutil}; letter-spacing: 1px;">OCUP</th>` : ''}
       `).join('');
 
       const tbody = linhasParte.map((l, idx) => {
         const isPar = idx % 2 === 0;
-        const bgLinha = isPar ? CORES.brancoPuro : CORES.cinzaClarinho;
-        const bgIdCol = isPar ? CORES.brancoOff : '#f1f3f5';
+        const bgLinha = isPar ? CORES.fundoLinha1 : CORES.fundoLinha2;
 
         const mesesCells = mesesComDados.map((m) => {
           const liqMes = l.medMes[m]?.liq || 0;
@@ -767,21 +799,21 @@ export default function CalibracaoPage() {
 
           const bgLiq = corFundoStatus(liqMes, metaL);
           const txtLiq = corTextoStatus(liqMes, metaL);
-          const bgIma = imaMes > 0 ? corFundoStatus(imaMes, metaI, true) : CORES.cinzaSemDados;
-          const txtIma = imaMes > 0 ? corTextoStatus(imaMes, metaI, true) : CORES.cinzaTexto;
-          const bgOcup = ocupMes > 0 ? corFundoStatus(ocupMes, metaO) : CORES.cinzaSemDados;
-          const txtOcup = ocupMes > 0 ? corTextoStatus(ocupMes, metaO) : CORES.cinzaTexto;
+          const bgIma = imaMes > 0 ? corFundoStatus(imaMes, metaI, true) : CORES.cinzaBg;
+          const txtIma = imaMes > 0 ? corTextoStatus(imaMes, metaI, true) : CORES.cinza;
+          const bgOcup = ocupMes > 0 ? corFundoStatus(ocupMes, metaO) : CORES.cinzaBg;
+          const txtOcup = ocupMes > 0 ? corTextoStatus(ocupMes, metaO) : CORES.cinza;
 
           return `
-            <td style="padding: 12px 4px; text-align: center; background: ${bgLiq}; color: ${txtLiq}; font-family: monospace; font-weight: 500; font-size: 13px; border-left: 1px solid ${CORES.douradoEscuro};">${liqMes || '—'}</td>
+            <td style="padding: 12px 4px; text-align: center; background: ${bgLiq}; color: ${txtLiq}; font-family: monospace; font-weight: 500; font-size: 13px; border-left: 1px solid ${CORES.bordaSutil};">${liqMes || '—'}</td>
             ${temIma ? `<td style="padding: 12px 4px; text-align: center; background: ${bgIma}; color: ${txtIma}; font-family: monospace; font-weight: 500; font-size: 12px;">${imaMes > 0 ? imaMes.toLocaleString('pt-BR') : '—'}</td>` : ''}
             ${temOcup ? `<td style="padding: 12px 4px; text-align: center; background: ${bgOcup}; color: ${txtOcup}; font-family: monospace; font-weight: 500; font-size: 12px;">${ocupMes > 0 ? ocupMes + '%' : '—'}</td>` : ''}
           `;
         }).join('');
 
         return `
-          <tr style="background: ${bgLinha}; border-bottom: 1px solid ${CORES.bordaClara};">
-            <td style="padding: 12px; color: ${CORES.textoPreto}; font-weight: 500; font-family: monospace; font-size: 13px; text-align: center; background: ${bgIdCol}; border-right: 1px solid ${CORES.douradoEscuro};">${l.idGroot}</td>
+          <tr style="background: ${bgLinha}; border-bottom: 1px solid ${CORES.bordaSutil};">
+            <td style="padding: 12px; color: ${CORES.textoBranco}; font-weight: 500; font-family: monospace; font-size: 13px; text-align: center; background: ${CORES.fundoHeader}; border-right: 1px solid ${CORES.amareloBorda};">${l.idGroot}</td>
             ${mesesCells}
           </tr>
         `;
@@ -789,12 +821,12 @@ export default function CalibracaoPage() {
 
       return `
         ${tituloLinha ? `
-          <p style="text-align: center; color: ${CORES.textoPreto}; font-size: 12px; font-weight: 500; margin: 12px 0 6px 0; letter-spacing: 1px; background: ${CORES.amareloMeli}; padding: 6px 12px; border-radius: 6px; display: inline-block; border: 1px solid ${CORES.douradoEscuro};">${tituloLinha}</p>
+          <p style="text-align: center; color: ${CORES.amareloMeli}; font-size: 11px; font-weight: 500; margin: 12px 0 8px 0; letter-spacing: 2px; padding: 6px 16px; display: inline-block; border: 1px solid ${CORES.amareloBorda}; border-radius: 4px;">${tituloLinha}</p>
         ` : ''}
-        <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid ${CORES.bordaClara};">
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid ${CORES.bordaSutil}; border-radius: 8px; overflow: hidden;">
           <thead>
             <tr style="height: 50px;">
-              <th rowspan="2" style="padding: 14px 12px; text-align: center; background: ${CORES.amareloMeli}; color: ${CORES.textoPreto}; font-size: 13px; font-weight: 500; border: 1px solid ${CORES.douradoEscuro}; min-width: 100px; letter-spacing: 1px;">ID</th>
+              <th rowspan="2" style="padding: 14px 12px; text-align: center; background: ${CORES.amareloSuave}; color: ${CORES.amareloMeli}; font-size: 13px; font-weight: 500; border: 1px solid ${CORES.amareloBorda}; min-width: 100px; letter-spacing: 2px;">ID</th>
               ${headerMeses}
             </tr>
             <tr style="height: 30px;">
@@ -811,19 +843,36 @@ export default function CalibracaoPage() {
     const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0);
     const numColsTotal = 1 + (mesesComDados.length * subColsPorMes);
     const widthBase = Math.max(700, numColsTotal * 90);
-
     const widthTotal = PRECISA_SPLIT ? widthBase * 2 + 40 : widthBase;
 
     const div = document.createElement('div');
-    div.style.cssText = `position: fixed; top: -9999px; left: -9999px; width: ${widthTotal}px; padding: 32px; background: ${CORES.brancoPuro}; color: ${CORES.textoPreto}; font-family: -apple-system, system-ui, sans-serif; border-radius: 12px;`;
+    div.style.cssText = `position: fixed; top: -9999px; left: -9999px; width: ${widthTotal}px; padding: 40px; background: ${CORES.fundoBase}; color: ${CORES.textoBranco}; font-family: -apple-system, system-ui, sans-serif;`;
 
     div.innerHTML = `
-      <div style="text-align: center; margin-bottom: 24px; padding: 20px 16px; background: ${CORES.amareloMeli}; border-radius: 12px; border: 2px solid ${CORES.douradoMeli};">
-        <h1 style="color: ${CORES.textoPreto}; font-size: 26px; font-weight: 500; margin: 0; letter-spacing: 2px;">
-          ${procEmoji} CALIBRAÇÃO ${processo.toUpperCase()} — ${quarterSel}/${anoAtual}
-        </h1>
-        <p style="color: ${CORES.textoCinza}; font-size: 13px; margin: 8px 0 0 0; font-weight: 500;">
-          📅 Dados até ${dataMaxFormatada} · ${linhasOrdenadas.length} colaboradores ${PRECISA_SPLIT ? '· Dividido em 2 partes' : ''}
+      <!-- HEADER com Logo MELI ao lado do título -->
+      <div style="display: flex; align-items: center; gap: 24px; margin-bottom: 8px; padding-bottom: 20px; border-bottom: 2px solid ${CORES.amareloMeli};">
+        ${logoBase64 ? `
+          <img src="${logoBase64}" alt="MELI" style="height: 64px; width: auto; object-fit: contain;" />
+        ` : `
+          <div style="height: 64px; width: 100px; background: ${CORES.amareloMeli}; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: ${CORES.fundoBase}; font-weight: 900; font-size: 20px; letter-spacing: 2px;">MELI</div>
+        `}
+        <div style="flex: 1;">
+          <h1 style="color: ${CORES.textoBranco}; font-size: 28px; font-weight: 500; margin: 0; letter-spacing: 2px; line-height: 1.2;">
+            ${procEmoji} CALIBRAÇÃO ${processo.toUpperCase()}
+          </h1>
+          <p style="color: ${CORES.amareloMeli}; font-size: 16px; margin: 6px 0 0 0; font-weight: 500; letter-spacing: 3px;">
+            ${quarterSel} · ${anoAtual}
+          </p>
+        </div>
+      </div>
+
+      <!-- SUBINFO -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding: 0 4px;">
+        <p style="color: ${CORES.textoMedio}; font-size: 12px; margin: 0; letter-spacing: 1px;">
+          📅 Dados até <span style="color: ${CORES.textoClaro}; font-weight: 500;">${dataMaxFormatada}</span>
+        </p>
+        <p style="color: ${CORES.textoMedio}; font-size: 12px; margin: 0; letter-spacing: 1px;">
+          <span style="color: ${CORES.amareloMeli}; font-weight: 500;">${linhasOrdenadas.length}</span> colaboradores${PRECISA_SPLIT ? ' · Dividido em 2 partes' : ''}
         </p>
       </div>
       
@@ -840,23 +889,25 @@ export default function CalibracaoPage() {
         ${gerarTabelaHtml(linhasOrdenadas, '')}
       `}
       
-      <div style="margin-top: 20px; padding: 14px 20px; background: ${CORES.cinzaClarinho}; border-radius: 8px; display: flex; gap: 32px; justify-content: center; flex-wrap: wrap; font-size: 12px; font-weight: 500; border: 1px solid ${CORES.bordaClara};">
-        <span style="color: ${CORES.verdeTexto}; display: flex; align-items: center; gap: 6px;">
-          <span style="display: inline-block; width: 14px; height: 14px; background: ${CORES.verdeSuave}; border: 1px solid ${CORES.verdeTexto}; border-radius: 3px;"></span>
-          Na meta
+      <!-- LEGENDA -->
+      <div style="margin-top: 24px; padding: 16px 24px; background: ${CORES.fundoCard}; border-radius: 8px; border: 1px solid ${CORES.bordaSutil}; display: flex; gap: 40px; justify-content: center; flex-wrap: wrap; font-size: 12px; font-weight: 500; letter-spacing: 1px;">
+        <span style="color: ${CORES.verde}; display: flex; align-items: center; gap: 8px;">
+          <span style="display: inline-block; width: 12px; height: 12px; background: ${CORES.verdeBg}; border: 1px solid ${CORES.verde}; border-radius: 3px;"></span>
+          NA META
         </span>
-        <span style="color: ${CORES.vermelhoTexto}; display: flex; align-items: center; gap: 6px;">
-          <span style="display: inline-block; width: 14px; height: 14px; background: ${CORES.vermelhoSuave}; border: 1px solid ${CORES.vermelhoTexto}; border-radius: 3px;"></span>
-          Abaixo
+        <span style="color: ${CORES.vermelho}; display: flex; align-items: center; gap: 8px;">
+          <span style="display: inline-block; width: 12px; height: 12px; background: ${CORES.vermelhoBg}; border: 1px solid ${CORES.vermelho}; border-radius: 3px;"></span>
+          ABAIXO
         </span>
-        <span style="color: ${CORES.textoCinzaClaro}; display: flex; align-items: center; gap: 6px;">
-          <span style="display: inline-block; width: 14px; height: 14px; background: ${CORES.cinzaSemDados}; border: 1px solid ${CORES.bordaCinza}; border-radius: 3px;"></span>
-          Sem dados
+        <span style="color: ${CORES.cinza}; display: flex; align-items: center; gap: 8px;">
+          <span style="display: inline-block; width: 12px; height: 12px; background: ${CORES.cinzaBg}; border: 1px solid ${CORES.cinza}; border-radius: 3px;"></span>
+          SEM DADOS
         </span>
       </div>
       
-      <div style="margin-top: 16px; padding: 10px; font-size: 10px; color: ${CORES.textoCinzaClaro}; text-align: center; font-weight: 500;">
-        📊 LIDER 360 · Gerado em ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+      <!-- FOOTER -->
+      <div style="margin-top: 16px; padding: 12px; font-size: 10px; color: ${CORES.textoEscuro}; text-align: center; letter-spacing: 2px; font-weight: 500;">
+        LIDER 360 · GERADO EM ${new Date().toLocaleDateString('pt-BR')} · ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
       </div>
     `;
 
@@ -865,9 +916,10 @@ export default function CalibracaoPage() {
     try {
       const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(div, {
-        backgroundColor: '#ffffff',
+        backgroundColor: CORES.fundoBase,
         scale: 2,
         useCORS: true,
+        allowTaint: true,
       });
       const link = document.createElement('a');
       link.download = `Calibracao_${processo}_${quarterSel}_${anoAtual}.png`;
@@ -983,7 +1035,7 @@ export default function CalibracaoPage() {
                     </button>
                     <button
                       onClick={() => gerarPrintPublico(proc)}
-                      title="Gerar print MELI Claro (pros colaboradores)"
+                      title="Gerar print público (com logo MELI)"
                       className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-blue-500/30 transition-all flex items-center gap-1.5"
                     >
                       📸 Print público
