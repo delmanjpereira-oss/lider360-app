@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 import ApolloBadge from '../components/ApolloBadge';
+
 type Colaborador = {
   id: number;
   id_groot: string;
@@ -74,6 +75,7 @@ type LinhaCalib = {
   comoOrigem: 'auto' | 'manual';
   aptidao: string;
 };
+
 const NOMES_MESES: Record<number, string> = {
   1: 'Jan', 2: 'Fev', 3: 'Mar', 4: 'Abr', 5: 'Mai', 6: 'Jun',
   7: 'Jul', 8: 'Ago', 9: 'Set', 10: 'Out', 11: 'Nov', 12: 'Dez',
@@ -85,6 +87,7 @@ const NOMES_MESES_FULL: Record<number, string> = {
 const MESES_POR_TRIM: Record<string, number[]> = {
   Q1: [1, 2, 3], Q2: [4, 5, 6], Q3: [7, 8, 9], Q4: [10, 11, 12],
 };
+
 function normalizarProcesso(p: string | null | undefined): string {
   if (!p) return '';
   const norm = String(p).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -104,16 +107,12 @@ function nomesIguais(a: string, b: string): boolean {
   const nb = normalizarNome(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
-  
   const limpar = (s: string) => s.split(' ').filter((p) => p.length > 1 && !['DA', 'DE', 'DO', 'DOS', 'DAS', 'E'].includes(p));
   const partesA = limpar(na);
   const partesB = limpar(nb);
-  
   if (partesA.length === 0 || partesB.length === 0) return false;
-  
   let comuns = 0;
   partesA.forEach((p) => { if (partesB.includes(p)) comuns++; });
-  
   const minTamanho = Math.min(partesA.length, partesB.length);
   return (comuns / minTamanho) >= 0.6;
 }
@@ -139,6 +138,7 @@ function corAptidao(apt: string): string {
   if (apt === 'NÃO APTO') return 'bg-red-500 text-white';
   return 'bg-gray-500 text-white';
 }
+
 export default function CalibracaoPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
@@ -153,41 +153,36 @@ export default function CalibracaoPage() {
   const [metaLiq, setMetaLiq] = useState({ checkin: 296, p2m: 329 });
   const [loading, setLoading] = useState(true);
   const [trimestreSelecionado, setTrimestreSelecionado] = useState<string>('');
+
   useEffect(() => {
     carregar();
   }, []);
+
   async function fetchAll(query: any, tableName: string): Promise<any[]> {
     const todos: any[] = [];
     const PAGE_SIZE = 1000;
     let pagina = 0;
-    
     while (true) {
       const from = pagina * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
-      
       const { data, error } = await query.range(from, to);
-      
       if (error) {
         console.error(`❌ Erro paginando ${tableName} pag ${pagina}:`, error);
         return todos;
       }
-      
       if (!data || data.length === 0) break;
-      
       todos.push(...data);
-      
       if (data.length < PAGE_SIZE) break;
       pagina++;
-      
       if (pagina > 50) {
         console.warn(`⚠️ ${tableName} parou em 50 páginas`);
         break;
       }
     }
-    
     console.log(`📦 ${tableName}: ${todos.length} registros baixados em ${pagina + 1} página(s)`);
     return todos;
   }
+
   async function carregar() {
     setLoading(true);
     try {
@@ -202,40 +197,17 @@ export default function CalibracaoPage() {
         imaManualData,
         confResp,
       ] = await Promise.all([
-        fetchAll(
-          supabase.from('colaboradores').select('*').eq('status', 'Ativo'),
-          'colaboradores'
-        ),
-        fetchAll(
-          supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'),
-          'historico'
-        ),
-        fetchAll(
-          supabase.from('produtividade_mensal').select('id_groot, nome, mes, ano, trimestre, processo, prod_liquida_media, unidades_total, dias_trabalhados'),
-          'produtividade_mensal'
-        ),
-        fetchAll(
-          supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre, processo'),
-          'dpmo_eventos'
-        ),
-        fetchAll(
-          supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, mes, ano, trimestre, dpmo'),
-          'dpmo_agregado'
-        ),
-        fetchAll(
-          supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre'),
-          'ocupacao_p2m'
-        ),
-        fetchAll(
-          supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'),
-          'feedbacks'
-        ),
-        fetchAll(
-          supabase.from('ima_manual').select('id_groot, mes, ano, trimestre, processo, ima'),
-          'ima_manual'
-        ),
+        fetchAll(supabase.from('colaboradores').select('*').eq('status', 'Ativo'), 'colaboradores'),
+        fetchAll(supabase.from('historico').select('id_groot, data_referencia, processo, prod_liquida, utilizacao, unidades'), 'historico'),
+        fetchAll(supabase.from('produtividade_mensal').select('id_groot, nome, mes, ano, trimestre, processo, prod_liquida_media, unidades_total, dias_trabalhados'), 'produtividade_mensal'),
+        fetchAll(supabase.from('dpmo_eventos').select('id_groot, representante, checkin_data, qtd_dif, semana, ano, mes, trimestre, processo'), 'dpmo_eventos'),
+        fetchAll(supabase.from('dpmo_agregado').select('id_groot, representante, processo, semana, mes, ano, trimestre, dpmo'), 'dpmo_agregado'),
+        fetchAll(supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre'), 'ocupacao_p2m'),
+        fetchAll(supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'), 'feedbacks'),
+        fetchAll(supabase.from('ima_manual').select('id_groot, mes, ano, trimestre, processo, ima'), 'ima_manual'),
         supabase.from('config').select('chave, valor'),
       ]);
+
       console.log('🔍 ===== DEBUG CALIBRAÇÃO =====');
       console.log('👥 Colaboradores:', colabData.length);
       console.log('📅 Histórico diário:', histData.length);
@@ -243,7 +215,7 @@ export default function CalibracaoPage() {
       console.log('🔥 DPMO eventos TOTAL:', dpmoData.length);
       console.log('🔥 DPMO agregado TOTAL:', dpmoAggData.length);
       console.log('📷 IMA Manual TOTAL:', imaManualData.length);
-      
+
       setColaboradores(colabData);
       setHistorico(histData);
       setProdutividadeMensal(prodMensalData);
@@ -252,7 +224,7 @@ export default function CalibracaoPage() {
       setDpmoAgregado(dpmoAggData as DpmoAgregado[]);
       setOcupacaoP2M(ocupData as OcupacaoP2MTipo[]);
       setFeedbacks(fbData as FeedbackTrim[]);
-      
+
       if (confResp.data) {
         const map: Record<string, number> = {};
         confResp.data.forEach((c: { chave: string; valor: string }) => {
@@ -266,6 +238,7 @@ export default function CalibracaoPage() {
       setLoading(false);
     }
   }
+
   const trimestresDisponiveis = useMemo(() => {
     const set = new Set<string>();
     historico.forEach((h) => {
@@ -290,27 +263,27 @@ export default function CalibracaoPage() {
         set.add(`${m.ano}-${m.trimestre}`);
       }
     });
-    
     const lista = Array.from(set).sort().reverse();
     return lista;
   }, [historico, dpmoEventos, dpmoAgregado, produtividadeMensal, imaManual]);
+
   useEffect(() => {
     if (!trimestreSelecionado && trimestresDisponiveis.length > 0) {
       setTrimestreSelecionado(trimestresDisponiveis[0]);
     }
   }, [trimestresDisponiveis, trimestreSelecionado]);
+
   const [anoSel = '', quarterSel = ''] = trimestreSelecionado.split('-');
   const anoNum = parseInt(anoSel) || new Date().getFullYear();
   const mesesPossiveis = MESES_POR_TRIM[quarterSel] || [];
+
   const mesesComDados = useMemo(() => {
     if (!quarterSel) return [];
     const set = new Set<number>();
-    
     historico.forEach((h) => {
       const { ano, mes, quarter } = getTrimestreDeData(h.data_referencia);
       if (ano === anoNum && quarter === quarterSel) set.add(mes);
     });
-    
     produtividadeMensal.forEach((p) => {
       const pAno = Number(p.ano);
       const pTrim = String(p.trimestre || '').trim().toUpperCase();
@@ -319,7 +292,6 @@ export default function CalibracaoPage() {
         set.add(Number(p.mes));
       }
     });
-    
     dpmoEventos.forEach((d) => {
       const dAno = Number(d.ano);
       const dTrim = String(d.trimestre || '').trim().toUpperCase();
@@ -328,19 +300,16 @@ export default function CalibracaoPage() {
         set.add(Number(d.mes));
       }
     });
-    
     dpmoAgregado.forEach((d) => {
       const dAny = d as any;
       const dAno = Number(d.ano);
       const dTrim = String(d.trimestre || '').trim().toUpperCase();
       const trimSel = String(quarterSel || '').toUpperCase();
       if (dAno !== anoNum || dTrim !== trimSel) return;
-      
       if (dAny.mes && Number(dAny.mes) > 0) {
         set.add(Number(dAny.mes));
         return;
       }
-      
       if (d.semana) {
         const semana = Number(d.semana);
         const dataRef = new Date(dAno, 0, 4 + (semana - 1) * 7);
@@ -350,7 +319,6 @@ export default function CalibracaoPage() {
         }
       }
     });
-    
     ocupacaoP2M.forEach((o) => {
       const oAno = Number(o.ano);
       const oTrim = String(o.trimestre || '').trim().toUpperCase();
@@ -359,7 +327,6 @@ export default function CalibracaoPage() {
         set.add(Number(o.mes));
       }
     });
-    
     imaManual.forEach((m) => {
       const mAno = Number(m.ano);
       const mTrim = String(m.trimestre || '').trim().toUpperCase();
@@ -368,13 +335,13 @@ export default function CalibracaoPage() {
         set.add(Number(m.mes));
       }
     });
-    
     const meses = mesesPossiveis.filter((m) => set.has(m)).sort();
     return meses;
   }, [historico, produtividadeMensal, dpmoEventos, dpmoAgregado, ocupacaoP2M, imaManual, anoNum, quarterSel, mesesPossiveis]);
+
   const linhasCalibracao: LinhaCalib[] = useMemo(() => {
     if (!quarterSel) return [];
-    return colaboradores.map((c, idx) => {
+    return colaboradores.map((c) => {
       const histColab = historico.filter((h) => {
         if (h.id_groot !== c.id_groot) return false;
         const { quarter, ano } = getTrimestreDeData(h.data_referencia);
@@ -394,14 +361,12 @@ export default function CalibracaoPage() {
         const pProc = String(p.processo || '').trim();
         const cProc = String(c.processo || '').trim();
         const trimSelUpper = String(quarterSel || '').toUpperCase();
-        
         if (pIdGroot !== cIdGroot) return false;
         if (pAno !== anoNum) return false;
         if (pTrim !== trimSelUpper) return false;
         if (pProc !== cProc) return false;
         return true;
       });
-      
       prodMensalColab.forEach((p) => {
         const pMes = Number(p.mes);
         if (!mediasPorMes[pMes]) mediasPorMes[pMes] = { liq: [], ocup: [] };
@@ -447,13 +412,10 @@ export default function CalibracaoPage() {
         const eventosTrim = dpmoEventos.filter((d) => {
           if (d.ano !== anoNum || d.trimestre !== quarterSel) return false;
           if (d.processo !== procDpmo) return false;
-          
           if (d.id_groot) {
             return String(d.id_groot).trim() === String(c.id_groot).trim();
           }
-          
           if (nomesIguais(d.representante, c.nome)) return true;
-          
           return false;
         });
         let dataMaximaInventario = '';
@@ -484,7 +446,6 @@ export default function CalibracaoPage() {
             const pTrim = String(p.trimestre || '').trim().toUpperCase();
             if (pTrim !== quarterSel) return false;
             if (!processosIguais(p.processo, c.processo)) return false;
-            
             if (p.id_groot && c.id_groot && String(p.id_groot).trim() === String(c.id_groot).trim()) {
               return true;
             }
@@ -506,26 +467,21 @@ export default function CalibracaoPage() {
         }
         mesesPossiveis.forEach((mes) => {
           const eventosMes = eventosTrim.filter((e) => Number(e.mes) === Number(mes));
-          
           if (eventosMes.length === 0) {
             const agrColab = dpmoAgregado.filter((d) => {
               const idBate = d.id_groot && c.id_groot && String(d.id_groot).trim() === String(c.id_groot).trim();
               const nomeBate = d.representante && nomesIguais(d.representante, c.nome);
               if (!idBate && !nomeBate) return false;
-              
               if (!processosIguais(d.processo, c.processo)) return false;
               if (Number(d.ano) !== anoNum) return false;
               if (!d.semana) return false;
-              
               const dAny = d as any;
               if (dAny.mes && Number(dAny.mes) > 0) {
                 return Number(dAny.mes) === mes;
               }
-              
               const dataRef = new Date(anoNum, 0, 4 + (Number(d.semana) - 1) * 7);
               return dataRef.getMonth() + 1 === mes;
             });
-            
             if (agrColab.length > 0) {
               const somaDpmo = agrColab.reduce((s, d) => s + (Number(d.dpmo) || 0), 0);
               medMes[mes].ima = Math.round(somaDpmo / agrColab.length);
@@ -556,15 +512,12 @@ export default function CalibracaoPage() {
               if (Number(p.mes) !== mes) return false;
               if (Number(p.ano) !== anoNum) return false;
               if (!processosIguais(p.processo, c.processo)) return false;
-              
               if (p.id_groot && c.id_groot && String(p.id_groot).trim() === String(c.id_groot).trim()) {
                 return true;
               }
-              
               if (p.nome && nomesIguais(p.nome, c.nome)) {
                 return true;
               }
-              
               return false;
             });
             unidadesMensal = prodMensalMes.reduce((s, p) => s + (Number(p.unidades_total) || 0), 0);
@@ -574,7 +527,6 @@ export default function CalibracaoPage() {
             medMes[mes].ima = Math.round((defMes / unidadesMes) * 1_000_000);
           }
         });
-        
         mesesPossiveis.forEach((mes) => {
           const manual = imaManual.find((m: any) =>
             String(m.id_groot) === String(c.id_groot) &&
@@ -586,14 +538,12 @@ export default function CalibracaoPage() {
             medMes[mes].ima = Number(manual.ima);
           }
         });
-        
         const imasValidos = mesesPossiveis.map((m) => medMes[m].ima).filter((v) => v > 0);
         if (imasValidos.length > 0) {
           ima = Math.round(imasValidos.reduce((s, v) => s + v, 0) / imasValidos.length);
           imaOrigem = 'auto';
         }
       }
-      
       let que = 'Sem dados';
       if (c.processo === 'Checkin' || c.processo === 'P2M') {
         const metaL = c.processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
@@ -655,15 +605,18 @@ export default function CalibracaoPage() {
       };
     });
   }, [colaboradores, historico, produtividadeMensal, imaManual, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
+
   const porProcesso = {
     Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
     P2M: linhasCalibracao.filter((l) => l.processo === 'P2M').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
     Sorting: linhasCalibracao.filter((l) => l.processo === 'Sorting').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
   };
+
   const totalAptos = linhasCalibracao.filter((l) => l.aptidao === 'APTO').length;
   const totalObs = linhasCalibracao.filter((l) => l.aptidao === 'EM OBSERVAÇÃO').length;
   const totalNaoAptos = linhasCalibracao.filter((l) => l.aptidao === 'NÃO APTO').length;
   const totalAguardando = linhasCalibracao.filter((l) => l.imaOrigem === 'aguardando').length;
+
   function exportarCSV(processo: 'Checkin' | 'P2M' | 'Sorting') {
     const linhas = porProcesso[processo];
     if (linhas.length === 0) return;
@@ -709,204 +662,139 @@ export default function CalibracaoPage() {
     URL.revokeObjectURL(url);
     (window as any).showToast?.('success', `📥 ${processo} exportado!`);
   }
+
   // ============================================
-  // 🆕 PRINT REORGANIZADO
-  // - Colunas agrupadas por mês (Líq | IMA | Ocup)
-  // - Auto-split em 2 quando >35 colabs
+  // 🎨 PRINT MELI CLARO - Pros colaboradores
+  // Fundo branco + Amarelo MELI suave + Cores pastel
+  // Split em 2 quando >35 colabs
   // ============================================
   async function gerarPrintPublico(processo: 'Checkin' | 'P2M' | 'Sorting') {
     const linhas = porProcesso[processo];
     if (linhas.length === 0) return;
-    
+
     const procEmoji = processo === 'Checkin' ? '📦' : processo === 'P2M' ? '🚚' : '📋';
-    
+
     let dataMax = '';
     historico.forEach((h) => {
       if (h.data_referencia > dataMax) dataMax = h.data_referencia;
     });
     const dataMaxFormatada = dataMax ? new Date(dataMax + 'T12:00:00').toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR');
     const anoAtual = new Date().getFullYear();
-    
+
     const linhasComDados = linhas.filter((l) => {
       const temLiq = l.liqTrim > 0;
       const temIma = l.ima > 0;
       const temOcup = l.ocupTrim > 0;
       return temLiq || temIma || temOcup;
     });
-    
+
     if (linhasComDados.length === 0) {
       (window as any).showToast?.('error', `Nenhum colaborador de ${processo} tem dados no trimestre`);
       return;
     }
-    
+
     const linhasOrdenadas = [...linhasComDados].sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0));
-    
+
     const temIma = processo === 'Checkin' || processo === 'P2M';
     const temOcup = processo === 'P2M';
-    
-    // 🎯 SPLIT em 2 se >35 colabs
+
     const PRECISA_SPLIT = linhasOrdenadas.length > 35;
     const metade = Math.ceil(linhasOrdenadas.length / 2);
     const parte1 = PRECISA_SPLIT ? linhasOrdenadas.slice(0, metade) : linhasOrdenadas;
     const parte2 = PRECISA_SPLIT ? linhasOrdenadas.slice(metade) : [];
-    
-    function corStatus(valor: number, meta: number, inverso: boolean = false): string {
-      if (valor === 0) return '#6b7280';
-      if (inverso) return valor <= meta ? '#10b981' : '#ef4444';
-      return valor >= meta ? '#10b981' : '#ef4444';
+
+    // 🎨 PALETA MELI CLARO
+    const CORES = {
+      brancoPuro: '#ffffff',
+      brancoOff: '#fafafa',
+      cinzaClarinho: '#f8f9fa',
+      amareloMeli: '#FFF9E6',
+      douradoMeli: '#FFD700',
+      douradoEscuro: '#d4a017',
+      verdeSuave: '#e8f5e9',
+      verdeTexto: '#2e7d32',
+      vermelhoSuave: '#ffebee',
+      vermelhoTexto: '#c62828',
+      cinzaSemDados: '#f5f5f5',
+      cinzaTexto: '#9e9e9e',
+      textoPreto: '#212121',
+      textoCinza: '#616161',
+      textoCinzaClaro: '#9e9e9e',
+      bordaClara: '#e0e0e0',
+      bordaCinza: '#d4d4d4',
+    };
+
+    function corFundoStatus(valor: number, meta: number, inverso: boolean = false): string {
+      if (valor === 0) return CORES.cinzaSemDados;
+      if (inverso) return valor <= meta ? CORES.verdeSuave : CORES.vermelhoSuave;
+      return valor >= meta ? CORES.verdeSuave : CORES.vermelhoSuave;
     }
-    
-    // ============================================
-    // FUNÇÃO QUE GERA UMA TABELA (reutilizada pra parte1 e parte2)
-    // ============================================
+
+    function corTextoStatus(valor: number, meta: number, inverso: boolean = false): string {
+      if (valor === 0) return CORES.cinzaTexto;
+      if (inverso) return valor <= meta ? CORES.verdeTexto : CORES.vermelhoTexto;
+      return valor >= meta ? CORES.verdeTexto : CORES.vermelhoTexto;
+    }
+
     function gerarTabelaHtml(linhasParte: typeof linhasOrdenadas, tituloLinha: string): string {
       const metaL = processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
       const metaI = processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
       const metaO = metaOcup.p2m;
-      
-      const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0); // Líq + IMA + Ocup
-      
-      // Header agrupado por mês
+
+      const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0);
+
       const headerMeses = mesesComDados.map((m) => `
-        <th colspan="${subColsPorMes}" style="
-          padding: 14px 8px;
-          text-align: center;
-          background: linear-gradient(135deg, #d4a017 0%, #b8860b 100%);
-          color: #000;
-          font-weight: 900;
-          font-size: 13px;
-          border: 2px solid #FFD700;
-          letter-spacing: 1px;
-        ">
+        <th colspan="${subColsPorMes}" style="padding: 14px 8px; text-align: center; background: ${CORES.amareloMeli}; color: ${CORES.textoPreto}; font-weight: 500; font-size: 13px; border: 1px solid ${CORES.douradoEscuro}; letter-spacing: 1px;">
           ${NOMES_MESES_FULL[m]}
         </th>
       `).join('');
-      
-      // Sub-headers (Líq, IMA, Ocup)
+
       const subHeaders = mesesComDados.map((m) => `
-        <th style="
-          padding: 8px 4px;
-          text-align: center;
-          background: #1a1a1a;
-          color: #FFD700;
-          font-size: 10px;
-          font-weight: bold;
-          border-left: 2px solid #FFD700;
-          border-bottom: 1px solid #2a2a2a;
-        ">LÍQ</th>
-        ${temIma ? `
-          <th style="
-            padding: 8px 4px;
-            text-align: center;
-            background: #1a1a1a;
-            color: #c084fc;
-            font-size: 10px;
-            font-weight: bold;
-            border-bottom: 1px solid #2a2a2a;
-          ">IMA</th>
-        ` : ''}
-        ${temOcup ? `
-          <th style="
-            padding: 8px 4px;
-            text-align: center;
-            background: #1a1a1a;
-            color: #34d399;
-            font-size: 10px;
-            font-weight: bold;
-            border-bottom: 1px solid #2a2a2a;
-          ">OCUP</th>
-        ` : ''}
+        <th style="padding: 8px 4px; text-align: center; background: ${CORES.cinzaClarinho}; color: ${CORES.textoCinza}; font-size: 11px; font-weight: 500; border-left: 1px solid ${CORES.douradoEscuro}; border-bottom: 1px solid ${CORES.bordaClara};">LÍQ</th>
+        ${temIma ? `<th style="padding: 8px 4px; text-align: center; background: ${CORES.cinzaClarinho}; color: ${CORES.textoCinza}; font-size: 11px; font-weight: 500; border-bottom: 1px solid ${CORES.bordaClara};">IMA</th>` : ''}
+        ${temOcup ? `<th style="padding: 8px 4px; text-align: center; background: ${CORES.cinzaClarinho}; color: ${CORES.textoCinza}; font-size: 11px; font-weight: 500; border-bottom: 1px solid ${CORES.bordaClara};">OCUP</th>` : ''}
       `).join('');
-      
-      // Linhas
+
       const tbody = linhasParte.map((l, idx) => {
         const isPar = idx % 2 === 0;
-        const bg = isPar ? '#141414' : '#0f0f0f';
-        
-        const mesesCells = mesesComDados.map((m, mIdx) => {
+        const bgLinha = isPar ? CORES.brancoPuro : CORES.cinzaClarinho;
+        const bgIdCol = isPar ? CORES.brancoOff : '#f1f3f5';
+
+        const mesesCells = mesesComDados.map((m) => {
           const liqMes = l.medMes[m]?.liq || 0;
           const imaMes = l.medMes[m]?.ima || 0;
           const ocupMes = l.medMes[m]?.ocup || 0;
-          
-          const corMesLiq = corStatus(liqMes, metaL);
-          const corMesIma = imaMes > 0 ? corStatus(imaMes, metaI, true) : '#6b7280';
-          const corMesOcup = ocupMes > 0 ? corStatus(ocupMes, metaO) : '#6b7280';
-          
+
+          const bgLiq = corFundoStatus(liqMes, metaL);
+          const txtLiq = corTextoStatus(liqMes, metaL);
+          const bgIma = imaMes > 0 ? corFundoStatus(imaMes, metaI, true) : CORES.cinzaSemDados;
+          const txtIma = imaMes > 0 ? corTextoStatus(imaMes, metaI, true) : CORES.cinzaTexto;
+          const bgOcup = ocupMes > 0 ? corFundoStatus(ocupMes, metaO) : CORES.cinzaSemDados;
+          const txtOcup = ocupMes > 0 ? corTextoStatus(ocupMes, metaO) : CORES.cinzaTexto;
+
           return `
-            <td style="
-              padding: 10px 4px;
-              text-align: center;
-              color: ${corMesLiq};
-              font-family: monospace;
-              font-weight: bold;
-              font-size: 13px;
-              border-left: 2px solid #FFD700;
-            ">${liqMes || '-'}</td>
-            ${temIma ? `
-              <td style="
-                padding: 10px 4px;
-                text-align: center;
-                color: ${corMesIma};
-                font-family: monospace;
-                font-weight: bold;
-                font-size: 12px;
-              ">${imaMes > 0 ? imaMes.toLocaleString('pt-BR') : '-'}</td>
-            ` : ''}
-            ${temOcup ? `
-              <td style="
-                padding: 10px 4px;
-                text-align: center;
-                color: ${corMesOcup};
-                font-family: monospace;
-                font-weight: bold;
-                font-size: 12px;
-              ">${ocupMes > 0 ? ocupMes + '%' : '-'}</td>
-            ` : ''}
+            <td style="padding: 12px 4px; text-align: center; background: ${bgLiq}; color: ${txtLiq}; font-family: monospace; font-weight: 500; font-size: 13px; border-left: 1px solid ${CORES.douradoEscuro};">${liqMes || '—'}</td>
+            ${temIma ? `<td style="padding: 12px 4px; text-align: center; background: ${bgIma}; color: ${txtIma}; font-family: monospace; font-weight: 500; font-size: 12px;">${imaMes > 0 ? imaMes.toLocaleString('pt-BR') : '—'}</td>` : ''}
+            ${temOcup ? `<td style="padding: 12px 4px; text-align: center; background: ${bgOcup}; color: ${txtOcup}; font-family: monospace; font-weight: 500; font-size: 12px;">${ocupMes > 0 ? ocupMes + '%' : '—'}</td>` : ''}
           `;
         }).join('');
-        
+
         return `
-          <tr style="background: ${bg}; border-bottom: 1px solid #2a2a2a;">
-            <td style="
-              padding: 10px 12px;
-              color: white;
-              font-weight: bold;
-              font-family: monospace;
-              font-size: 13px;
-              text-align: center;
-              background: #0a0a0a;
-              border-right: 2px solid #FFD700;
-            ">${l.idGroot}</td>
+          <tr style="background: ${bgLinha}; border-bottom: 1px solid ${CORES.bordaClara};">
+            <td style="padding: 12px; color: ${CORES.textoPreto}; font-weight: 500; font-family: monospace; font-size: 13px; text-align: center; background: ${bgIdCol}; border-right: 1px solid ${CORES.douradoEscuro};">${l.idGroot}</td>
             ${mesesCells}
           </tr>
         `;
       }).join('');
-      
+
       return `
         ${tituloLinha ? `
-          <p style="
-            text-align: center;
-            color: #FFD700;
-            font-size: 12px;
-            font-weight: bold;
-            margin: 12px 0 6px 0;
-            letter-spacing: 1px;
-          ">${tituloLinha}</p>
+          <p style="text-align: center; color: ${CORES.textoPreto}; font-size: 12px; font-weight: 500; margin: 12px 0 6px 0; letter-spacing: 1px; background: ${CORES.amareloMeli}; padding: 6px 12px; border-radius: 6px; display: inline-block; border: 1px solid ${CORES.douradoEscuro};">${tituloLinha}</p>
         ` : ''}
-        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid ${CORES.bordaClara};">
           <thead>
             <tr style="height: 50px;">
-              <th rowspan="2" style="
-                padding: 14px 12px;
-                text-align: center;
-                background: #2a2a2a;
-                color: #FFD700;
-                font-size: 13px;
-                font-weight: 900;
-                border: 2px solid #FFD700;
-                min-width: 100px;
-                letter-spacing: 1px;
-              ">ID</th>
+              <th rowspan="2" style="padding: 14px 12px; text-align: center; background: ${CORES.amareloMeli}; color: ${CORES.textoPreto}; font-size: 13px; font-weight: 500; border: 1px solid ${CORES.douradoEscuro}; min-width: 100px; letter-spacing: 1px;">ID</th>
               ${headerMeses}
             </tr>
             <tr style="height: 30px;">
@@ -919,29 +807,22 @@ export default function CalibracaoPage() {
         </table>
       `;
     }
-    
-    // ============================================
-    // MONTA O CONTAINER
-    // ============================================
+
     const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0);
     const numColsTotal = 1 + (mesesComDados.length * subColsPorMes);
     const widthBase = Math.max(700, numColsTotal * 90);
-    
+
     const widthTotal = PRECISA_SPLIT ? widthBase * 2 + 40 : widthBase;
-    
+
     const div = document.createElement('div');
-    div.style.cssText = `
-      position: fixed; top: -9999px; left: -9999px;
-      width: ${widthTotal}px; padding: 24px; background: #0a0a0a; color: white;
-      font-family: -apple-system, system-ui, sans-serif;
-    `;
-    
+    div.style.cssText = `position: fixed; top: -9999px; left: -9999px; width: ${widthTotal}px; padding: 32px; background: ${CORES.brancoPuro}; color: ${CORES.textoPreto}; font-family: -apple-system, system-ui, sans-serif; border-radius: 12px;`;
+
     div.innerHTML = `
-      <div style="text-align: center; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 3px solid #FFD700;">
-        <h1 style="color: #FFD700; font-size: 26px; font-weight: 900; margin: 0; letter-spacing: 2px;">
+      <div style="text-align: center; margin-bottom: 24px; padding: 20px 16px; background: ${CORES.amareloMeli}; border-radius: 12px; border: 2px solid ${CORES.douradoMeli};">
+        <h1 style="color: ${CORES.textoPreto}; font-size: 26px; font-weight: 500; margin: 0; letter-spacing: 2px;">
           ${procEmoji} CALIBRAÇÃO ${processo.toUpperCase()} — ${quarterSel}/${anoAtual}
         </h1>
-        <p style="color: #aaa; font-size: 13px; margin: 8px 0 0 0;">
+        <p style="color: ${CORES.textoCinza}; font-size: 13px; margin: 8px 0 0 0; font-weight: 500;">
           📅 Dados até ${dataMaxFormatada} · ${linhasOrdenadas.length} colaboradores ${PRECISA_SPLIT ? '· Dividido em 2 partes' : ''}
         </p>
       </div>
@@ -959,23 +840,32 @@ export default function CalibracaoPage() {
         ${gerarTabelaHtml(linhasOrdenadas, '')}
       `}
       
-      <div style="margin-top: 18px; padding: 12px 18px; background: #1a1a1a; border-radius: 8px; display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; font-size: 12px; font-weight: bold;">
-        <span style="color: #10b981;">🟢 NA META</span>
-        <span style="color: #ef4444;">🔴 ABAIXO</span>
-        <span style="color: #6b7280;">⚪ SEM DADOS</span>
+      <div style="margin-top: 20px; padding: 14px 20px; background: ${CORES.cinzaClarinho}; border-radius: 8px; display: flex; gap: 32px; justify-content: center; flex-wrap: wrap; font-size: 12px; font-weight: 500; border: 1px solid ${CORES.bordaClara};">
+        <span style="color: ${CORES.verdeTexto}; display: flex; align-items: center; gap: 6px;">
+          <span style="display: inline-block; width: 14px; height: 14px; background: ${CORES.verdeSuave}; border: 1px solid ${CORES.verdeTexto}; border-radius: 3px;"></span>
+          Na meta
+        </span>
+        <span style="color: ${CORES.vermelhoTexto}; display: flex; align-items: center; gap: 6px;">
+          <span style="display: inline-block; width: 14px; height: 14px; background: ${CORES.vermelhoSuave}; border: 1px solid ${CORES.vermelhoTexto}; border-radius: 3px;"></span>
+          Abaixo
+        </span>
+        <span style="color: ${CORES.textoCinzaClaro}; display: flex; align-items: center; gap: 6px;">
+          <span style="display: inline-block; width: 14px; height: 14px; background: ${CORES.cinzaSemDados}; border: 1px solid ${CORES.bordaCinza}; border-radius: 3px;"></span>
+          Sem dados
+        </span>
       </div>
       
-      <div style="margin-top: 12px; padding: 8px; font-size: 10px; color: #666; text-align: center;">
+      <div style="margin-top: 16px; padding: 10px; font-size: 10px; color: ${CORES.textoCinzaClaro}; text-align: center; font-weight: 500;">
         📊 LIDER 360 · Gerado em ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
       </div>
     `;
-    
+
     document.body.appendChild(div);
-    
+
     try {
       const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(div, {
-        backgroundColor: '#0a0a0a',
+        backgroundColor: '#ffffff',
         scale: 2,
         useCORS: true,
       });
@@ -991,6 +881,7 @@ export default function CalibracaoPage() {
       document.body.removeChild(div);
     }
   }
+
   if (loading) {
     return (
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
@@ -999,6 +890,7 @@ export default function CalibracaoPage() {
       </div>
     );
   }
+
   return (
     <div className="space-y-6">
       <div>
@@ -1010,12 +902,13 @@ export default function CalibracaoPage() {
         </h1>
         <p className="text-sm text-gray-500 mt-1">Análise de desempenho · QUE + COMO + Aptidão</p>
       </div>
-      
+
       <ApolloBadge
         mood="info"
         message="IMA do Print OCR puxado em tempo real"
         detail="Print OCR (prioridade) + CSV Looker · Bate 100% com Looker"
       />
+
       {trimestresDisponiveis.length === 0 ? (
         <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center">
           <span className="text-6xl block mb-4">📭</span>
@@ -1061,6 +954,7 @@ export default function CalibracaoPage() {
               )}
             </div>
           </div>
+
           {totalAguardando > 0 && (
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-sm">
               <p className="text-blue-300">
@@ -1068,6 +962,7 @@ export default function CalibracaoPage() {
               </p>
             </div>
           )}
+
           {(['Checkin', 'P2M', 'Sorting'] as const).map((proc) => {
             const linhas = porProcesso[proc];
             if (linhas.length === 0) return null;
@@ -1088,7 +983,7 @@ export default function CalibracaoPage() {
                     </button>
                     <button
                       onClick={() => gerarPrintPublico(proc)}
-                      title="Gerar print público (sem nome/QUE/COMO)"
+                      title="Gerar print MELI Claro (pros colaboradores)"
                       className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-blue-500/30 transition-all flex items-center gap-1.5"
                     >
                       📸 Print público
@@ -1160,6 +1055,7 @@ export default function CalibracaoPage() {
               </div>
             );
           })}
+
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
             <p className="font-bold mb-2">💡 Cálculo:</p>
             <ul className="space-y-1 list-disc pl-5 text-xs">
