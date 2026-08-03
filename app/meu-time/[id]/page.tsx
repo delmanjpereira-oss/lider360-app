@@ -205,6 +205,15 @@ function getSemanaIso(dataStr: string): { semana: number; ano: number } {
   const semana = Math.ceil((((utc.getTime() - inicioAno.getTime()) / 86400000) + 1) / 7);
   return { semana, ano: utc.getUTCFullYear() };
 }
+// 🆕 Converte ano + semana ISO na data da quinta-feira daquela semana
+// (usada pra saber a qual MÊS a semana pertence).
+function semanaIsoParaData(ano: number, semana: number): Date {
+  const simple = new Date(Date.UTC(ano, 0, 1 + (semana - 1) * 7));
+  const diaSemana = simple.getUTCDay() || 7;
+  // ajusta pra quinta-feira (dia 4 ISO), que define o mês/ano da semana
+  simple.setUTCDate(simple.getUTCDate() + (4 - diaSemana));
+  return simple;
+}
 function calcularNetIndividual(unidades: number, tempoProcesso: string | null): number {
   const seg = tempoParaSegundos(tempoProcesso);
   if (seg <= 0 || unidades <= 0) return 0;
@@ -722,18 +731,42 @@ export default function DetalheColaboradorPage() {
     };
   })();
   const dpmoPorSemana = calcularDpmoPorSemana();
-  const semanasCompletas = dpmoPorSemana.filter((s) => s.statusCalculo === 'completo');
+  // 🆕 só semanas completas E do mês selecionado
+  const semanasCompletas = (() => {
+    const [anoSel, mesSel] = mesSelecionado.split('-').map(Number);
+    return dpmoPorSemana.filter((s) => {
+      if (s.statusCalculo !== 'completo') return false;
+      const dataMeio = semanaIsoParaData(s.ano, s.semana);
+      return dataMeio.getMonth() + 1 === mesSel && dataMeio.getFullYear() === anoSel;
+    });
+  })();
   const dpmoTotal = (() => {
-    if (imaManual.length > 0) {
-      const totalIma = imaManual.reduce((s, m) => s + (Number(m.ima) || 0), 0);
-      const mediaIma = Math.round(totalIma / imaManual.length);
-      const totalDef = dpmoEventos.reduce((s, e) => s + (e.qtd_dif || 0), 0);
-      const totalUnid = historico.reduce((s, h) => s + (h.unidades || 0), 0);
+    const [anoSel, mesSel] = mesSelecionado.split('-').map(Number);
+    // 🆕 IMA manual do MÊS SELECIONADO (antes somava todos os meses)
+    const imaDoMes = imaManual.filter(
+      (m) => Number(m.mes) === mesSel && Number(m.ano) === anoSel
+    );
+    if (imaDoMes.length > 0) {
+      const totalIma = imaDoMes.reduce((s, m) => s + (Number(m.ima) || 0), 0);
+      const mediaIma = Math.round(totalIma / imaDoMes.length);
+      const totalDef = dpmoEventos
+        .filter((e) => {
+          const d = new Date((e.checkin_data || '') + 'T12:00:00');
+          return d.getMonth() + 1 === mesSel && d.getFullYear() === anoSel;
+        })
+        .reduce((s, e) => s + (e.qtd_dif || 0), 0);
+      const totalUnid = historicoFiltrado.reduce((s, h) => s + (h.unidades || 0), 0);
       return { defeitos: totalDef, unidades: totalUnid, dpmo: mediaIma };
     }
+    // 🆕 DPMO agregado do MÊS SELECIONADO (usa as semanas cujo grosso cai no mês)
     if (dpmoAgregado.length > 0) {
       const procPrincipal = colaborador?.processo === 'Checkin' ? 'CK' : colaborador?.processo === 'P2M' ? 'P2M' : null;
-      const agrPrincipal = dpmoAgregado.filter((d) => d.processo === procPrincipal);
+      const agrPrincipal = dpmoAgregado.filter((d) => {
+        if (d.processo !== procPrincipal || Number(d.ano) !== anoSel) return false;
+        // pega semanas ISO que pertencem ao mês selecionado
+        const dataMeioSemana = semanaIsoParaData(Number(d.ano), Number(d.semana));
+        return dataMeioSemana.getMonth() + 1 === mesSel;
+      });
       if (agrPrincipal.length > 0) {
         const somaDpmo = agrPrincipal.reduce((s, d) => s + (d.dpmo || 0), 0);
         const mediaDpmo = Math.round(somaDpmo / agrPrincipal.length);
@@ -1354,7 +1387,7 @@ export default function DetalheColaboradorPage() {
         )}
       </div>
       )}
-      {(colaborador.processo === 'Checkin' || colaborador.processo === 'P2M') && dpmoPorSemana.length > 0 && (
+      {(colaborador.processo === 'Checkin' || colaborador.processo === 'P2M') && dpmoTotal !== null && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-lg font-bold text-purple-400 flex items-center gap-2">📊 DPMO (Qualidade)</h2>
@@ -1610,6 +1643,19 @@ export default function DetalheColaboradorPage() {
                   const netIndividual = calcularNetIndividual(h.unidades, h.tempo_processo);
                   const impactoReal = turnoDoDia ? calcularImpactoReal(netIndividual, turnoDoDia.net_geral_real) : null;
                   const analiseOcio = analisarOciosidade(h, metaProcesso);
+
+                  // 🆕 Prioriza o que foi salvo no upload (impacto_net / net_time da própria linha).
+                  // Se não tiver (registro antigo), cai no turno_diario antigo.
+                  const impactoMostrar =
+                    h.impacto_net != null && Number(h.impacto_net) !== 0
+                      ? Number(h.impacto_net)
+                      : impactoReal;
+                  const netTimeMostrar =
+                    h.net_time != null && Number(h.net_time) > 0
+                      ? Number(h.net_time)
+                      : turnoDoDia
+                      ? turnoDoDia.net_geral_real
+                      : null;
                   
                   return (
                     <tr key={h.id} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a] transition-colors">
@@ -1623,11 +1669,11 @@ export default function DetalheColaboradorPage() {
                       </td>
                       <td className="py-3 pr-3 text-right text-orange-400 font-mono text-xs font-bold">{ociosidadeCalc}</td>
                       <td className={`py-3 pr-3 text-right font-mono font-bold ${
-                        impactoReal === null ? 'text-gray-500' :
-                        impactoReal > 0 ? 'text-green-400' : 
-                        impactoReal < 0 ? 'text-red-400' : 'text-gray-400'
+                        impactoMostrar === null ? 'text-gray-500' :
+                        impactoMostrar > 0 ? 'text-green-400' : 
+                        impactoMostrar < 0 ? 'text-red-400' : 'text-gray-400'
                       }`}>
-                        {impactoReal === null ? '—' : `${impactoReal > 0 ? '+' : ''}${impactoReal.toFixed(1)}%`}
+                        {impactoMostrar === null ? '—' : `${impactoMostrar > 0 ? '+' : ''}${impactoMostrar.toFixed(1)}%`}
                       </td>
                       {/* 🆕 Contribuição NET do dia (salva no upload) */}
                       <td className={`py-3 pr-3 text-right font-mono font-bold ${
@@ -1662,9 +1708,9 @@ export default function DetalheColaboradorPage() {
                         <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(h.status_meta)}`}>{h.status_meta}</span>
                       </td>
                       <td className="py-3 pr-3 text-right">
-                        {turnoDoDia ? (
+                        {netTimeMostrar !== null ? (
                           <span className="text-[#FFD700] font-mono font-bold text-sm">
-                            {Math.round(turnoDoDia.net_geral_real)}
+                            {Math.round(netTimeMostrar)}
                           </span>
                         ) : (
                           <span className="text-gray-600 text-xs">—</span>
