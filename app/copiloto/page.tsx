@@ -66,6 +66,9 @@ type MonitorItem = {
   diasAbaixo: number;
   fonte: 'diario' | 'mensal';
   diasMes?: number;
+  tendencia?: 'subindo' | 'caindo' | 'estavel' | 'sem_base';
+  variacaoPct?: number;
+  mediaAnterior?: number;
 };
 type ChatMensagem = {
   papel: 'user' | 'assistant';
@@ -345,48 +348,87 @@ export default function CopilotoPage() {
     return 'Supera'; // > alinhadoMax
   }
   
+  // ============================================
+  // 🎯 MONITOR — JANELA MÓVEL (não segue o mês do calendário)
+  // O painel é um placar de EVOLUÇÃO contínua, não um relatório mensal.
+  // - Classificação: média dos ÚLTIMOS 30 DIAS corridos (rolando, nunca zera no dia 1º)
+  // - Tendência: últimos 15 dias vs os 15 anteriores (pra onde a pessoa está indo)
+  // Nenhuma tabela nova — tudo recalculado do histórico diário que já existe.
+  // ============================================
+  const JANELA_DIAS = 30;
+  const META_TENDENCIA_DIAS = 15;
+
+  const hojeMs = Date.now();
+  const umDiaMs = 24 * 60 * 60 * 1000;
+
+  // Índice: histórico por colaborador, com a data já em ms (uma vez só)
+  const histPorColab: Record<string, { ms: number; liquida: number }[]> = {};
+  historico.forEach((h) => {
+    if (!h.prod_liquida || h.prod_liquida <= 0) return;
+    const ms = new Date(h.data_referencia + 'T12:00:00').getTime();
+    if (isNaN(ms)) return;
+    if (!histPorColab[h.id_groot]) histPorColab[h.id_groot] = [];
+    histPorColab[h.id_groot].push({ ms, liquida: h.prod_liquida });
+  });
+
+  function mediaEntre(registros: { ms: number; liquida: number }[], deMs: number, ateMs: number): { media: number; dias: number } {
+    const dentro = registros.filter((r) => r.ms >= deMs && r.ms < ateMs);
+    if (dentro.length === 0) return { media: 0, dias: 0 };
+    const soma = dentro.reduce((s, r) => s + r.liquida, 0);
+    return { media: Math.round(soma / dentro.length), dias: dentro.length };
+  }
+
+  // Calcula, por colaborador: média da janela (30d) + tendência (15 vs 15)
+  const janelaPorId: Record<string, {
+    media: number;
+    dias: number;
+    tendencia: 'subindo' | 'caindo' | 'estavel' | 'sem_base';
+    variacaoPct: number;
+    mediaAnterior: number;
+  }> = {};
+
+  Object.entries(histPorColab).forEach(([idGroot, registros]) => {
+    // Janela principal: últimos 30 dias
+    const inicioJanela = hojeMs - JANELA_DIAS * umDiaMs;
+    const janela = mediaEntre(registros, inicioJanela, hojeMs + umDiaMs);
+    if (janela.dias === 0) return; // sem dado recente, não entra no painel
+
+    // Tendência: últimos 15d vs os 15d anteriores
+    const inicioRecente = hojeMs - META_TENDENCIA_DIAS * umDiaMs;
+    const recente = mediaEntre(registros, inicioRecente, hojeMs + umDiaMs);
+    const inicioAnterior = hojeMs - 2 * META_TENDENCIA_DIAS * umDiaMs;
+    const anterior = mediaEntre(registros, inicioAnterior, inicioRecente);
+
+    let tendencia: 'subindo' | 'caindo' | 'estavel' | 'sem_base' = 'sem_base';
+    let variacaoPct = 0;
+    if (recente.dias >= 2 && anterior.dias >= 2 && anterior.media > 0) {
+      variacaoPct = Number((((recente.media - anterior.media) / anterior.media) * 100).toFixed(1));
+      if (variacaoPct > 3) tendencia = 'subindo';
+      else if (variacaoPct < -3) tendencia = 'caindo';
+      else tendencia = 'estavel';
+    }
+
+    janelaPorId[idGroot] = {
+      media: janela.media,
+      dias: janela.dias,
+      tendencia,
+      variacaoPct,
+      mediaAnterior: anterior.media,
+    };
+  });
+
   const ultimoStatusPorId: Record<string, HistoricoSimples> = {};
   historico.forEach((h) => {
     if (!ultimoStatusPorId[h.id_groot]) ultimoStatusPorId[h.id_groot] = h;
   });
-  
-  // ✅ MONITOR: calcula média do historico diário agrupado por mês
-  // Mesmo approach da Calibração — mais confiável que produtividade_mensal
-  // Pega o mês mais recente com >= 5 dias; fallback: mês mais recente disponível
-  const grupoHist: Record<string, Record<string, number[]>> = {};
-  historico.forEach((h) => {
-    if (!h.prod_liquida || h.prod_liquida <= 0) return;
-    const d = new Date(h.data_referencia + 'T12:00:00');
-    const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
-    if (!grupoHist[h.id_groot]) grupoHist[h.id_groot] = {};
-    if (!grupoHist[h.id_groot][key]) grupoHist[h.id_groot][key] = [];
-    grupoHist[h.id_groot][key].push(h.prod_liquida);
-  });
-
-  const mediaHistPorId: Record<string, { media: number; dias: number }> = {};
-  Object.entries(grupoHist).forEach(([idGroot, meses]) => {
-    const sorted = Object.entries(meses)
-      .map(([key, vals]) => {
-        const [ano, mes] = key.split('-').map(Number);
-        return { ano, mes, vals };
-      })
-      .sort((a, b) => a.ano !== b.ano ? b.ano - a.ano : b.mes - a.mes);
-    // prefere mês mais recente com >= 5 dias; fallback: qualquer mês
-    const preferido = sorted.find(m => m.vals.length >= 5) || sorted[0];
-    if (preferido && preferido.vals.length > 0) {
-      const media = Math.round(preferido.vals.reduce((s, v) => s + v, 0) / preferido.vals.length);
-      mediaHistPorId[idGroot] = { media, dias: preferido.vals.length };
-    }
-  });
 
   const monitor = { ofensores: [] as MonitorItem[], alinhados: [] as MonitorItem[], superas: [] as MonitorItem[] };
-
   colaboradores.forEach((c) => {
-    const mediaHist = mediaHistPorId[c.id_groot];
+    const janela = janelaPorId[c.id_groot];
     const ultimoDiario = ultimoStatusPorId[c.id_groot];
 
-    if (mediaHist) {
-      const liquida = mediaHist.media;
+    if (janela) {
+      const liquida = janela.media;
       const status = determinarStatusPorMeta(liquida, c.processo || '');
       const item: MonitorItem = {
         idGroot: c.id_groot,
@@ -397,13 +439,17 @@ export default function CopilotoPage() {
         ultimaLiquida: liquida,
         ultimoImpacto: 0,
         diasAbaixo: calcularStreak(c.id_groot),
-        fonte: 'mensal',
-        diasMes: mediaHist.dias,
+        fonte: 'mensal', // janela móvel (mantém o campo por compatibilidade)
+        diasMes: janela.dias,
+        tendencia: janela.tendencia,
+        variacaoPct: janela.variacaoPct,
+        mediaAnterior: janela.mediaAnterior,
       };
       if (status === 'Abaixo') monitor.ofensores.push(item);
       else if (status === 'Alinhado') monitor.alinhados.push(item);
       else if (status === 'Supera') monitor.superas.push(item);
     } else if (ultimoDiario) {
+      // fallback: sem dado na janela de 30d, usa o último registro disponível
       const liquida = Number(ultimoDiario.prod_liquida) || 0;
       const status = determinarStatusPorMeta(liquida, c.processo || '');
       const item: MonitorItem = {
@@ -416,16 +462,57 @@ export default function CopilotoPage() {
         ultimoImpacto: ultimoDiario.impacto_net,
         diasAbaixo: calcularStreak(c.id_groot),
         fonte: 'diario',
+        tendencia: 'sem_base',
       };
       if (status === 'Abaixo') monitor.ofensores.push(item);
       else if (status === 'Alinhado') monitor.alinhados.push(item);
       else if (status === 'Supera') monitor.superas.push(item);
     }
   });
-  
-  monitor.ofensores.sort((a, b) => b.diasAbaixo - a.diasAbaixo);
-  monitor.alinhados.sort((a, b) => b.ultimoImpacto - a.ultimoImpacto);
-  monitor.superas.sort((a, b) => b.ultimoImpacto - a.ultimoImpacto);
+
+  // Ofensores: prioriza quem está CAINDO (urgente) e com mais dias abaixo
+  const pesoTendencia = (t?: string) => (t === 'caindo' ? 0 : t === 'estavel' ? 1 : t === 'subindo' ? 2 : 1);
+  monitor.ofensores.sort((a, b) => {
+    const pa = pesoTendencia(a.tendencia);
+    const pb = pesoTendencia(b.tendencia);
+    if (pa !== pb) return pa - pb; // caindo primeiro
+    return b.diasAbaixo - a.diasAbaixo;
+  });
+  monitor.alinhados.sort((a, b) => (b.variacaoPct || 0) - (a.variacaoPct || 0));
+  monitor.superas.sort((a, b) => (b.variacaoPct || 0) - (a.variacaoPct || 0));
+
+  // ============================================
+  // 🫀 PLACAR DE EVOLUÇÃO DO TIME (o "coração")
+  // Compara ofensores de AGORA (janela atual) vs ~30 dias atrás.
+  // Precisa de histórico de ~60 dias; se não tiver, mostra "aguardando".
+  // ============================================
+  const placarEvolucao = (() => {
+    // classificação de 30 dias atrás: janela [hoje-60d, hoje-30d]
+    const fimAntigo = hojeMs - JANELA_DIAS * umDiaMs;
+    const inicioAntigo = hojeMs - 2 * JANELA_DIAS * umDiaMs;
+
+    let ofensoresAntes = 0;
+    let temBaseAntiga = false;
+
+    colaboradores.forEach((c) => {
+      const registros = histPorColab[c.id_groot];
+      if (!registros) return;
+      const janelaAntiga = mediaEntre(registros, inicioAntigo, fimAntigo);
+      if (janelaAntiga.dias >= 3) {
+        temBaseAntiga = true;
+        const status = determinarStatusPorMeta(janelaAntiga.media, c.processo || '');
+        if (status === 'Abaixo') ofensoresAntes++;
+      }
+    });
+
+    const ofensoresAgora = monitor.ofensores.length;
+    return {
+      temBase: temBaseAntiga,
+      antes: ofensoresAntes,
+      agora: ofensoresAgora,
+      delta: ofensoresAgora - ofensoresAntes, // negativo = melhorou (menos ofensores)
+    };
+  })();
   
   const ordemPrio: Record<string, number> = { critica: 1, alta: 2, media: 3, baixa: 4, normal: 5 };
   const tarefasOrdenadas = [...tarefas].sort((a, b) => {
@@ -523,6 +610,32 @@ export default function CopilotoPage() {
   
   function abrirTarefa(t: TarefaCopiloto) { setTarefaAberta(t); }
   function fecharTarefa() { setTarefaAberta(null); }
+
+  // 🆕 Badge visual de tendência (seta + variação) pra usar nos cards
+  function badgeTendencia(item: MonitorItem) {
+    const t = item.tendencia;
+    if (!t || t === 'sem_base') return null;
+    if (t === 'subindo') {
+      return (
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-green-500/20 text-green-300 flex items-center gap-0.5" title={`Subindo: ${item.mediaAnterior} → ${item.ultimaLiquida} pç/h`}>
+          ↗ +{Math.abs(item.variacaoPct || 0)}%
+        </span>
+      );
+    }
+    if (t === 'caindo') {
+      return (
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-red-500/20 text-red-300 flex items-center gap-0.5" title={`Caindo: ${item.mediaAnterior} → ${item.ultimaLiquida} pç/h`}>
+          ↘ {item.variacaoPct}%
+        </span>
+      );
+    }
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-gray-500/20 text-gray-400" title="Estável">
+        → estável
+      </span>
+    );
+  }
+
   function abrirFinalizacao(t: TarefaCopiloto) {
     setTarefaAberta(null);
     setTarefaParaFinalizar(t);
@@ -612,10 +725,55 @@ export default function CopilotoPage() {
         <div className="space-y-6">
           {!loading && colaboradores.length > 0 && (
             <div>
+              {/* 🫀 PLACAR DE EVOLUÇÃO — o coração do painel (menos ofensor com o tempo) */}
+              <div className="bg-gradient-to-br from-[#151b2e] to-[#0f1420] border-2 border-[#FFD700]/25 rounded-2xl p-5 mb-4">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl">🫀</span>
+                    <div>
+                      <p className="text-sm font-black text-white">Evolução do time</p>
+                      <p className="text-xs text-gray-400">Placar contínuo dos últimos 30 dias — o objetivo é menos ofensor com o tempo</p>
+                    </div>
+                  </div>
+                  {placarEvolucao.temBase ? (
+                    <div className="flex items-center gap-4">
+                      <div className="text-center">
+                        <p className="text-[10px] text-gray-500 uppercase font-bold">30d atrás</p>
+                        <p className="text-2xl font-black text-gray-400">{placarEvolucao.antes}</p>
+                        <p className="text-[10px] text-gray-500">ofensores</p>
+                      </div>
+                      <span className="text-2xl text-gray-600">→</span>
+                      <div className="text-center">
+                        <p className="text-[10px] text-gray-500 uppercase font-bold">Agora</p>
+                        <p className={`text-2xl font-black ${placarEvolucao.agora <= placarEvolucao.antes ? 'text-green-400' : 'text-red-400'}`}>
+                          {placarEvolucao.agora}
+                        </p>
+                        <p className="text-[10px] text-gray-500">ofensores</p>
+                      </div>
+                      <div className={`px-3 py-2 rounded-xl font-black text-sm ${
+                        placarEvolucao.delta < 0 ? 'bg-green-500/20 text-green-300' :
+                        placarEvolucao.delta > 0 ? 'bg-red-500/20 text-red-300' :
+                        'bg-gray-500/20 text-gray-400'
+                      }`}>
+                        {placarEvolucao.delta < 0
+                          ? `↘ ${Math.abs(placarEvolucao.delta)} a menos 🎉`
+                          : placarEvolucao.delta > 0
+                          ? `↗ ${placarEvolucao.delta} a mais`
+                          : '→ estável'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-500 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 max-w-xs">
+                      ⏳ Aguardando histórico — o placar de evolução aparece quando houver ~60 dias de dados acumulados pra comparar.
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                 📊 Monitoramento Operacional
                 <span className="text-xs text-gray-500 font-normal">
-                  · P2M {metasConfig.p2mBase}-{metasConfig.p2mAlinhadoMax} · Checkin {metasConfig.checkinBase}-{metasConfig.checkinAlinhadoMax}
+                  · janela móvel 30d · P2M {metasConfig.p2mBase}-{metasConfig.p2mAlinhadoMax} · Checkin {metasConfig.checkinBase}-{metasConfig.checkinAlinhadoMax}
                 </span>
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -637,12 +795,15 @@ export default function CopilotoPage() {
                               <p className="text-sm font-bold text-white truncate">{o.nome}</p>
                               <p className="text-xs text-gray-500">
                                 {o.processo} • {o.ultimaLiquida} pç/h
-                                {o.fonte === 'mensal' && <span className="ml-1 text-cyan-400">· mensal ({o.diasMes}d)</span>}
+                                {o.fonte === 'mensal' && o.diasMes && <span className="ml-1 text-gray-600">· {o.diasMes}d</span>}
                               </p>
                             </div>
-                            {o.diasAbaixo >= 3 && (
-                              <span className="text-xs px-2 py-0.5 bg-red-500/30 text-red-300 rounded-full font-bold">{o.diasAbaixo}d</span>
-                            )}
+                            <div className="flex flex-col items-end gap-1">
+                              {badgeTendencia(o)}
+                              {o.diasAbaixo >= 3 && (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-red-500/30 text-red-300 rounded-full font-bold">{o.diasAbaixo}d abaixo</span>
+                              )}
+                            </div>
                           </div>
                         </Link>
                       ))
@@ -668,14 +829,10 @@ export default function CopilotoPage() {
                               <p className="text-sm font-bold text-white truncate">{a.nome}</p>
                               <p className="text-xs text-gray-500">
                                 {a.processo} • {a.ultimaLiquida} pç/h
-                                {a.fonte === 'mensal' && <span className="ml-1 text-cyan-400">· mensal ({a.diasMes}d)</span>}
+                                {a.fonte === 'mensal' && a.diasMes && <span className="ml-1 text-gray-600">· {a.diasMes}d</span>}
                               </p>
                             </div>
-                            {a.fonte === 'diario' && (
-                              <span className={`text-xs font-mono font-bold ${a.ultimoImpacto > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                {a.ultimoImpacto > 0 ? '+' : ''}{a.ultimoImpacto.toFixed(1)}%
-                              </span>
-                            )}
+                            {badgeTendencia(a)}
                           </div>
                         </Link>
                       ))
@@ -701,12 +858,10 @@ export default function CopilotoPage() {
                               <p className="text-sm font-bold text-white truncate">{s.nome}</p>
                               <p className="text-xs text-gray-500">
                                 {s.processo} • {s.ultimaLiquida} pç/h
-                                {s.fonte === 'mensal' && <span className="ml-1 text-cyan-400">· mensal ({s.diasMes}d)</span>}
+                                {s.fonte === 'mensal' && s.diasMes && <span className="ml-1 text-gray-600">· {s.diasMes}d</span>}
                               </p>
                             </div>
-                            {s.fonte === 'diario' && (
-                              <span className="text-xs font-mono font-bold text-green-400">+{s.ultimoImpacto.toFixed(1)}%</span>
-                            )}
+                            {badgeTendencia(s)}
                           </div>
                         </Link>
                       ))
