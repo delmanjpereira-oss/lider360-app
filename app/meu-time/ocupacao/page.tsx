@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Papa from 'papaparse';
 import { supabase } from '../../../lib/supabase';
+import LoadingOverlay, { Fase } from '../../components/LoadingOverlay';
 
 type Colaborador = {
   id_groot: string;
@@ -131,6 +132,7 @@ export default function UploadOcupacaoPage() {
   const [nomeArquivo, setNomeArquivo] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [carregandoCsv, setCarregandoCsv] = useState(false);
+  const [fase, setFase] = useState<Fase>(null);
 
   // 🆕 Estados de filtro
   const [modoFiltro, setModoFiltro] = useState<'tudo' | 'especifico' | 'range'>('tudo');
@@ -169,6 +171,7 @@ export default function UploadOcupacaoPage() {
 
     setNomeArquivo(arq.name);
     setCarregandoCsv(true);
+    setFase('lendo');
     setErro(null);
     setSucesso(null);
     setModoFiltro('tudo');
@@ -218,11 +221,13 @@ export default function UploadOcupacaoPage() {
 
         setRegistros(novos);
         setCarregandoCsv(false);
+        setFase(null);
         // 🆕 Depois de ler, checa no banco quais dias já existem
         checarDuplicata(novos);
       },
       error: (err) => {
         setCarregandoCsv(false);
+        setFase(null);
         setErro('Erro lendo CSV: ' + err.message);
       },
     });
@@ -294,6 +299,7 @@ export default function UploadOcupacaoPage() {
     }
 
     setEnviando(true);
+    setFase('salvando');
     setErro(null);
     setSucesso(null);
 
@@ -330,6 +336,7 @@ export default function UploadOcupacaoPage() {
             (window as any).showToast('error', 'Erro: ' + error.message);
           }
           setEnviando(false);
+          setFase(null);
           return;
         }
         totalEnviado += batch.length;
@@ -338,7 +345,9 @@ export default function UploadOcupacaoPage() {
       const msgSobrescrito = temConflito
         ? ` (${diasConflitantes.length} dia(s) atualizado(s))`
         : '';
+      setFase('sucesso');
       setSucesso(`✅ ${totalEnviado} registros enviados com sucesso!${msgSobrescrito}`);
+      setTimeout(() => setFase(null), 2200);
       if (typeof window !== 'undefined' && (window as any).showToast) {
         (window as any).showToast('success', `✅ ${totalEnviado} registros enviados!`);
       }
@@ -363,6 +372,15 @@ export default function UploadOcupacaoPage() {
 
   return (
     <div className="space-y-6">
+      <LoadingOverlay
+        fase={fase}
+        lendoTitulo="Lendo arquivo..."
+        lendoSub="Processando a ocupação P2M"
+        salvandoTitulo="Salvando ocupação..."
+        salvandoSub="Gravando no banco de dados"
+        sucessoTitulo="Salvo!"
+        sucessoSub="Ocupação P2M atualizada"
+      />
       <Link href="/meu-time" className="text-gray-400 hover:text-white inline-flex items-center gap-2">
         ← Voltar para MEU TIME
       </Link>
@@ -389,27 +407,21 @@ export default function UploadOcupacaoPage() {
       )}
 
       {/* SELEÇÃO DE ARQUIVO */}
-      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-dashed border-[#FFD700]/30 rounded-2xl p-8">
-        <div className="text-center">
-          <span className="text-6xl block mb-3">📊</span>
-          <h3 className="text-xl font-bold text-white mb-2">CSV de Ocupação P2M</h3>
+      <label className="group block cursor-pointer">
+        <div className="relative bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-dashed border-[#FFD700]/30 rounded-2xl p-8 text-center overflow-hidden transition-all duration-300 group-hover:border-[#FFD700]/70 group-hover:from-[#1f1f1f] group-hover:to-[#161616] group-hover:shadow-[0_0_30px_rgba(255,215,0,0.15)] group-active:scale-[0.99]">
+          <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-[#FFD700]/5 to-transparent pointer-events-none"></div>
+          <span className="text-6xl block mb-3 transition-transform duration-300 group-hover:scale-110 group-hover:-translate-y-1">📊</span>
+          <h3 className="text-xl font-bold text-white mb-2 transition-colors group-hover:text-[#FFD700]">CSV de Ocupação P2M</h3>
           <p className="text-gray-400 text-sm mb-4">
             Formato: USER_ID, Data, Supervisor, Team Leader, Rep, Qtd Totes, Ocupação (%)
           </p>
-          <label className="inline-block bg-[#FFD700] text-black font-bold px-6 py-3 rounded-lg hover:bg-yellow-300 cursor-pointer transition-colors">
+          <span className="inline-block bg-[#FFD700] text-black font-bold px-6 py-3 rounded-lg group-hover:bg-yellow-300 transition-all group-hover:scale-105">
             📂 Escolher arquivo
-            <input type="file" accept=".csv" onChange={onArquivoChange} className="hidden" />
-          </label>
+          </span>
           {nomeArquivo && <p className="mt-3 text-sm text-gray-300">📄 {nomeArquivo}</p>}
+          <input type="file" accept=".csv" onChange={onArquivoChange} className="hidden" />
         </div>
-      </div>
-
-      {carregandoCsv && (
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 text-center">
-          <span className="text-4xl block mb-2">⏳</span>
-          <p className="text-gray-400">Lendo CSV...</p>
-        </div>
-      )}
+      </label>
 
       {/* 🆕 CARD DE PERÍODO DETECTADO */}
       {periodoInfo && !carregandoCsv && (
@@ -696,13 +708,18 @@ export default function UploadOcupacaoPage() {
           <button
             onClick={enviar}
             disabled={enviando || registrosFiltrados.length === 0 || (temConflito && !confirmouSobrescrever)}
-            className="w-full bg-gradient-to-r from-[#FFD700] to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-black font-bold py-4 rounded-2xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-lg"
+            className="w-full bg-gradient-to-r from-[#FFD700] to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-black font-black py-4 rounded-2xl transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed text-lg shadow-lg shadow-yellow-500/20 hover:shadow-yellow-500/40 hover:-translate-y-0.5 active:scale-[0.99] flex items-center justify-center gap-3"
           >
-            {enviando
-              ? '⏳ Enviando...'
-              : temConflito && !confirmouSobrescrever
-              ? '🔒 Confirme a sobrescrita acima pra continuar'
-              : `✅ Enviar ${registrosFiltrados.length} ${registrosFiltrados.length === 1 ? 'registro' : 'registros'}`}
+            {enviando ? (
+              <>
+                <span className="inline-block w-5 h-5 border-[3px] border-black/30 border-t-black rounded-full animate-spin"></span>
+                Enviando...
+              </>
+            ) : temConflito && !confirmouSobrescrever ? (
+              '🔒 Confirme a sobrescrita acima pra continuar'
+            ) : (
+              `✅ Enviar ${registrosFiltrados.length} ${registrosFiltrados.length === 1 ? 'registro' : 'registros'}`
+            )}
           </button>
         </>
       )}
