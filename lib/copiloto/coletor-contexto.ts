@@ -406,13 +406,20 @@ export async function coletarContextoCompleto(): Promise<{
     const tendencia30d = analisarTendencia(liquidas30d);
     const padroes = detectarPadroes(historico30d);
     
-    const mensalAtual = mensaisColab.find(p => p.mes === mesAtual && p.ano === anoAtual);
+    // mensaisColab já vem ordenado por ano desc, mes desc.
+    // Prefere o mês corrente; se ainda não lançou, usa o mês mais recente com >=5 dias;
+    // por último, o registro mais recente que existir (evita cair em "nenhum" à toa).
+    const mensalDoMesCorrente = mensaisColab.find(p => p.mes === mesAtual && p.ano === anoAtual);
+    const mensalRepresentativo = mensaisColab.find(p => (Number(p.dias_trabalhados) || 0) >= 5);
+    const mensalAtual = mensalDoMesCorrente || mensalRepresentativo || mensaisColab[0] || null;
     const historicoMensal = mensaisColab.slice(0, 3);
     
     const presencaStats = {
       presencas: 0, atestados: 0, faltasInjustificadas: 0,
       bhPlanejado: 0, bhNaoPlanejado: 0, sinergiaExterna: 0,
       abandono: 0, pctAbs: 0,
+      // 🆕 contexto: dias fora da operação (não conta como falta, mas explica produção baixa)
+      ferias: 0, afastado: 0, desligado: 0, diasForaOperacao: 0,
       tendenciaAtestados: 'estavel' as 'subindo' | 'estavel' | 'caindo',
     };
     
@@ -425,7 +432,11 @@ export async function coletarContextoCompleto(): Promise<{
       else if (m.includes('bh - banco de horas plan')) presencaStats.bhPlanejado++;
       else if (m.includes('sinergia')) presencaStats.sinergiaExterna++;
       else if (m.includes('abandono')) presencaStats.abandono++;
+      else if (m.includes('férias') || m.includes('ferias')) presencaStats.ferias++;
+      else if (m.includes('afasta')) presencaStats.afastado++;
+      else if (m.includes('desligado')) presencaStats.desligado++;
     });
+    presencaStats.diasForaOperacao = presencaStats.ferias + presencaStats.afastado + presencaStats.desligado;
     
     const totalContab = presencaStats.presencas + presencaStats.faltasInjustificadas + 
                        presencaStats.bhNaoPlanejado + presencaStats.atestados;
@@ -604,8 +615,8 @@ export async function coletarContextoCompleto(): Promise<{
   const saudeTime = {
     total: colabs.length,
     performance: {
-      acimaMetaP2M: colabs.filter(c => c.processo === 'P2M' && c.performance.medio_prazo_30d.media >= (metas['meta_liquida_p2m'] || 280)).length,
-      acimaMetaCheckin: colabs.filter(c => c.processo === 'Checkin' && c.performance.medio_prazo_30d.media >= (metas['meta_liquida_checkin'] || 100)).length,
+      acimaMetaP2M: colabs.filter(c => c.processo === 'P2M' && c.performance.medio_prazo_30d.media >= (metas['meta_p2m_base'] || 329)).length,
+      acimaMetaCheckin: colabs.filter(c => c.processo === 'Checkin' && c.performance.medio_prazo_30d.media >= (metas['meta_checkin_base'] || 296)).length,
       caindoTodos: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo').length,
       subindo: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'subindo').length,
     },
