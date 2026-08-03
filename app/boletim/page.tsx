@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
+import LoadingOverlay, { Fase } from '../../components/LoadingOverlay';
 
 type LinhaColab = {
   id: string;
@@ -98,10 +99,14 @@ export default function BoletimPage() {
   const [metas, setMetas] = useState<Metas>(METAS_PADRAO);
   const [dataRef, setDataRef] = useState(new Date().toLocaleDateString('pt-BR'));
   const [montou, setMontou] = useState(false);
-  
+
   const [netRealizadoManual, setNetRealizadoManual] = useState<number | null>(null);
   const [pecasRealizadoManual, setPecasRealizadoManual] = useState<number | null>(null);
-  
+
+  // 🆕 overlay de carregamento (lendo CSV / gerando imagem / sucesso)
+  const [fase, setFase] = useState<Fase>(null);
+  const [overlayTxt, setOverlayTxt] = useState({ titulo: '', sub: '' });
+
   const boletimRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -120,6 +125,10 @@ export default function BoletimPage() {
   }
 
   function processarCSV(arquivo: File, tipo: 'checkin' | 'p2m' | 'ocupacao') {
+    const nomeTipo = tipo === 'checkin' ? 'Check-in' : tipo === 'p2m' ? 'P2M' : 'Ocupação';
+    setFase('lendo');
+    setOverlayTxt({ titulo: `Lendo CSV de ${nomeTipo}...`, sub: 'Processando os dados do arquivo' });
+
     Papa.parse(arquivo, {
       header: true,
       skipEmptyLines: true,
@@ -166,11 +175,19 @@ export default function BoletimPage() {
         });
 
         if (linhas.length === 0) {
+          setFase(null);
           alert(`❌ Nenhum dado encontrado no CSV!\n\nHeaders detectados:\n${Object.keys(result.data[0] || {}).join(', ')}\n\nVerifique no console (F12) os headers.`);
           return;
         }
 
         setDados((prev) => ({ ...prev, [tipo]: linhas }));
+        // pisca sucesso rápido
+        setFase('sucesso');
+        setOverlayTxt({ titulo: `${nomeTipo} carregado!`, sub: `${linhas.length} registros lidos` });
+        setTimeout(() => setFase(null), 1200);
+      },
+      error: () => {
+        setFase(null);
       },
     });
   }
@@ -261,7 +278,7 @@ export default function BoletimPage() {
     checkins.length > 0 && 'CK',
     p2ms.length > 0 && 'P2M',
   ].filter(Boolean);
-  
+
   // 🎯 DIVIDIR EM 2 COLUNAS: só 1 setor + mais de 15 pessoas
   const apenas1Setor = setoresAtivos.length === 1;
   const dividirEm2Colunas = apenas1Setor && (
@@ -271,6 +288,8 @@ export default function BoletimPage() {
 
   async function salvarPNG() {
     if (!boletimRef.current) return;
+    setFase('salvando');
+    setOverlayTxt({ titulo: 'Gerando imagem...', sub: 'Montando o PNG do boletim' });
     try {
       const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(boletimRef.current, {
@@ -282,13 +301,19 @@ export default function BoletimPage() {
       link.download = `Boletim_${dataRef.replace(/\//g, '-')}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
+      setFase('sucesso');
+      setOverlayTxt({ titulo: 'PNG gerado!', sub: 'Download iniciado' });
+      setTimeout(() => setFase(null), 1400);
     } catch (e) {
       console.error(e);
+      setFase(null);
     }
   }
 
   async function copiarImagem() {
     if (!boletimRef.current) return;
+    setFase('salvando');
+    setOverlayTxt({ titulo: 'Copiando imagem...', sub: 'Preparando pra colar no WhatsApp' });
     try {
       const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(boletimRef.current, {
@@ -297,18 +322,25 @@ export default function BoletimPage() {
         useCORS: true,
       });
       canvas.toBlob(async (blob) => {
-        if (!blob) return;
+        if (!blob) {
+          setFase(null);
+          return;
+        }
         try {
           await navigator.clipboard.write([
             new ClipboardItem({ 'image/png': blob }),
           ]);
-          alert('✅ Imagem copiada! Cola no WhatsApp (Ctrl+V)');
+          setFase('sucesso');
+          setOverlayTxt({ titulo: 'Imagem copiada!', sub: 'Cola no WhatsApp (Ctrl+V)' });
+          setTimeout(() => setFase(null), 1600);
         } catch {
+          setFase(null);
           alert('❌ Não foi possível copiar. Use "Salvar PNG"');
         }
       });
     } catch (e) {
       console.error(e);
+      setFase(null);
     }
   }
 
@@ -397,6 +429,15 @@ export default function BoletimPage() {
 
   return (
     <div className="p-6 space-y-6 min-h-screen bg-[#0a0a0a]">
+      <LoadingOverlay
+        fase={fase}
+        lendoTitulo={overlayTxt.titulo || 'Lendo arquivo...'}
+        lendoSub={overlayTxt.sub || 'Processando'}
+        salvandoTitulo={overlayTxt.titulo || 'Gerando imagem...'}
+        salvandoSub={overlayTxt.sub || 'Aguarde'}
+        sucessoTitulo={overlayTxt.titulo || 'Pronto!'}
+        sucessoSub={overlayTxt.sub || 'Concluído'}
+      />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-black text-[#FFD700]">📊 Boletim Diário</h1>
         <input
@@ -433,8 +474,8 @@ export default function BoletimPage() {
                 </div>
               </div>
             </div>
-            <label className="cursor-pointer w-12 h-12 flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-blue-600/10 hover:from-blue-500/40 hover:to-blue-600/30 text-blue-300 rounded-xl transition-all text-2xl border border-blue-500/30 hover:border-blue-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-500/20 active:translate-y-0" title="Upload CSV Check-in">
-              📤
+            <label className="group cursor-pointer w-12 h-12 flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-blue-600/10 hover:from-blue-500/40 hover:to-blue-600/30 text-blue-300 rounded-xl transition-all duration-200 text-2xl border border-blue-500/30 hover:border-blue-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-500/20 active:translate-y-0 active:scale-90" title="Upload CSV Check-in">
+              <span className="group-hover:scale-110 transition-transform">📤</span>
               <input
                 type="file"
                 accept=".csv"
@@ -482,8 +523,8 @@ export default function BoletimPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <label className="cursor-pointer w-12 h-12 flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-orange-600/10 hover:from-orange-500/40 hover:to-orange-600/30 text-orange-300 rounded-xl transition-all text-2xl border border-orange-500/30 hover:border-orange-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-orange-500/20 active:translate-y-0" title="Upload Produtividade P2M">
-                📤
+              <label className="group cursor-pointer w-12 h-12 flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-orange-600/10 hover:from-orange-500/40 hover:to-orange-600/30 text-orange-300 rounded-xl transition-all duration-200 text-2xl border border-orange-500/30 hover:border-orange-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-orange-500/20 active:translate-y-0 active:scale-90" title="Upload Produtividade P2M">
+                <span className="group-hover:scale-110 transition-transform">📤</span>
                 <input
                   type="file"
                   accept=".csv"
@@ -494,8 +535,8 @@ export default function BoletimPage() {
                   }}
                 />
               </label>
-              <label className="cursor-pointer w-12 h-12 flex items-center justify-center bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 hover:from-emerald-500/40 hover:to-emerald-600/30 text-emerald-300 rounded-xl transition-all text-2xl border border-emerald-500/30 hover:border-emerald-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20 active:translate-y-0" title="Upload Ocupação P2M (Totefullness)">
-                📦
+              <label className="group cursor-pointer w-12 h-12 flex items-center justify-center bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 hover:from-emerald-500/40 hover:to-emerald-600/30 text-emerald-300 rounded-xl transition-all duration-200 text-2xl border border-emerald-500/30 hover:border-emerald-400 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20 active:translate-y-0 active:scale-90" title="Upload Ocupação P2M (Totefullness)">
+                <span className="group-hover:scale-110 transition-transform">📦</span>
                 <input
                   type="file"
                   accept=".csv"
@@ -576,20 +617,20 @@ export default function BoletimPage() {
         <button
           onClick={salvarPNG}
           disabled={linhasUnificadas.length === 0}
-          className="bg-[#FFD700] hover:bg-yellow-400 disabled:opacity-30 disabled:cursor-not-allowed text-black font-bold px-4 py-2 rounded-lg text-sm transition-colors"
+          className="group bg-[#FFD700] hover:bg-yellow-400 disabled:opacity-30 disabled:cursor-not-allowed text-black font-black px-4 py-2 rounded-lg text-sm transition-all duration-150 shadow-lg shadow-yellow-500/20 hover:shadow-yellow-500/40 hover:-translate-y-0.5 active:scale-95 flex items-center gap-2"
         >
-          🖼️ Salvar PNG
+          <span className="group-hover:scale-110 transition-transform">🖼️</span> Salvar PNG
         </button>
         <button
           onClick={copiarImagem}
           disabled={linhasUnificadas.length === 0}
-          className="bg-[#1a1a1a] hover:bg-[#2a2a2a] disabled:opacity-30 disabled:cursor-not-allowed border border-[#2a2a2a] text-white font-bold px-4 py-2 rounded-lg text-sm transition-colors"
+          className="group bg-[#1a1a1a] hover:bg-[#2a2a2a] disabled:opacity-30 disabled:cursor-not-allowed border border-[#2a2a2a] hover:border-[#3a3a3a] text-white font-bold px-4 py-2 rounded-lg text-sm transition-all duration-150 hover:-translate-y-0.5 active:scale-95 flex items-center gap-2"
         >
-          📋 Copiar imagem
+          <span className="group-hover:scale-110 transition-transform">📋</span> Copiar imagem
         </button>
         <button
           onClick={limpar}
-          className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 font-bold px-4 py-2 rounded-lg text-sm transition-colors"
+          className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 font-bold px-4 py-2 rounded-lg text-sm transition-all duration-150 active:scale-95"
         >
           🗑️ Limpar tudo
         </button>
