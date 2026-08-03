@@ -251,7 +251,6 @@ export default function CopilotoPage() {
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
   }, [chatMensagens]);
-
   // 🗑️ ESC fecha modal de confirmação
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
@@ -364,47 +363,47 @@ export default function CopilotoPage() {
   
   const monitor = { ofensores: [] as MonitorItem[], alinhados: [] as MonitorItem[], superas: [] as MonitorItem[] };
   
+  // ✅ ALTERADO: prioridade agora é o acumulado mensal; diário só entra como fallback
   colaboradores.forEach((c) => {
     const ultimoDiario = ultimoStatusPorId[c.id_groot];
     const mensal = mensalPorId[c.id_groot];
-    
-    if (ultimoDiario) {
-      // 🆕 USA A FUNÇÃO CORRIGIDA EM VEZ DE CONFIAR NO status_meta
-      const liquida = Number(ultimoDiario.prod_liquida) || 0;
+
+    if (mensal) {
+      const liquida = Number(mensal.prod_liquida_media) || 0;
       const status = determinarStatusPorMeta(liquida, c.processo || '');
-      
+
       const item: MonitorItem = {
-        idGroot: c.id_groot, 
-        id: c.id, 
-        nome: c.nome, 
+        idGroot: c.id_groot,
+        id: c.id,
+        nome: c.nome,
         processo: c.processo || '-',
-        ultimoStatus: status, 
+        ultimoStatus: status,
         ultimaLiquida: liquida,
-        ultimoImpacto: ultimoDiario.impacto_net, 
+        ultimoImpacto: 0,
         diasAbaixo: calcularStreak(c.id_groot),
-        fonte: 'diario',
+        fonte: 'mensal',
+        diasMes: mensal.dias_trabalhados,
       };
-      
+
       if (status === 'Abaixo') monitor.ofensores.push(item);
       else if (status === 'Alinhado') monitor.alinhados.push(item);
       else if (status === 'Supera') monitor.superas.push(item);
-    } else if (mensal) {
-      const liquida = Number(mensal.prod_liquida_media) || 0;
+    } else if (ultimoDiario) {
+      const liquida = Number(ultimoDiario.prod_liquida) || 0;
       const status = determinarStatusPorMeta(liquida, c.processo || '');
-      
+
       const item: MonitorItem = {
-        idGroot: c.id_groot, 
-        id: c.id, 
-        nome: c.nome, 
+        idGroot: c.id_groot,
+        id: c.id,
+        nome: c.nome,
         processo: c.processo || '-',
-        ultimoStatus: status, 
-        ultimaLiquida: liquida, 
-        ultimoImpacto: 0,
-        diasAbaixo: 0, 
-        fonte: 'mensal', 
-        diasMes: mensal.dias_trabalhados,
+        ultimoStatus: status,
+        ultimaLiquida: liquida,
+        ultimoImpacto: ultimoDiario.impacto_net,
+        diasAbaixo: calcularStreak(c.id_groot),
+        fonte: 'diario',
       };
-      
+
       if (status === 'Abaixo') monitor.ofensores.push(item);
       else if (status === 'Alinhado') monitor.alinhados.push(item);
       else if (status === 'Supera') monitor.superas.push(item);
@@ -628,7 +627,7 @@ export default function CopilotoPage() {
                                 {o.fonte === 'mensal' && <span className="ml-1 text-cyan-400">· mensal ({o.diasMes}d)</span>}
                               </p>
                             </div>
-                            {o.fonte === 'diario' && o.diasAbaixo >= 3 && (
+                            {o.diasAbaixo >= 3 && (
                               <span className="text-xs px-2 py-0.5 bg-red-500/30 text-red-300 rounded-full font-bold">{o.diasAbaixo}d</span>
                             )}
                           </div>
