@@ -411,6 +411,7 @@ export default function ImportarPresencaPage() {
         @keyframes presFadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes presPopIn { 0% { transform: scale(0); } 70% { transform: scale(1.2); } 100% { transform: scale(1); } }
         @keyframes presSlide { 0% { transform: translateX(-120%); } 100% { transform: translateX(420%); } }
+        @keyframes ovBounce { 0%,100% { transform: scale(1.1) translateY(-4px); } 50% { transform: scale(1.15) translateY(-8px); } }
       ` }} />
 
       <Link href="/presenca" className="text-gray-400 hover:text-white inline-flex items-center gap-2">
@@ -449,23 +450,29 @@ export default function ImportarPresencaPage() {
       </div>
 
       {/* UPLOAD */}
-      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-dashed border-[#FFD700]/30 rounded-2xl p-8">
-        <label className="block text-center cursor-pointer">
-          <span className="text-6xl block mb-3">📂</span>
+      <label className="group block cursor-pointer">
+        <div className="relative bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-dashed border-[#FFD700]/30 rounded-2xl p-8 text-center overflow-hidden transition-all duration-300 group-hover:border-[#FFD700]/70 group-hover:from-[#1f1f1f] group-hover:to-[#161616] group-hover:shadow-[0_0_30px_rgba(255,215,0,0.15)] group-active:scale-[0.99]">
+          {/* brilho que passa no hover */}
+          <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-[#FFD700]/5 to-transparent pointer-events-none"></div>
+
+          <span className="text-6xl block mb-3 transition-transform duration-300 group-hover:scale-110 group-hover:-translate-y-1 [animation:none] group-hover:[animation:ovBounce_0.6s_ease-in-out]">
+            📂
+          </span>
           {nomeArquivo ? (
             <>
-              <p className="text-lg font-bold text-white">{nomeArquivo}</p>
+              <p className="text-lg font-bold text-white transition-colors group-hover:text-[#FFD700]">{nomeArquivo}</p>
               <p className="text-xs text-gray-500 mt-1">clique pra trocar</p>
             </>
           ) : (
             <>
-              <p className="text-lg font-bold text-white">Escolher CSV Checkpoint</p>
+              <p className="text-lg font-bold text-white transition-colors group-hover:text-[#FFD700]">Escolher CSV Checkpoint</p>
               <p className="text-xs text-gray-500 mt-1">Absenteísmo — Painel de Gestão RC</p>
+              <p className="text-[11px] text-[#FFD700]/0 group-hover:text-[#FFD700]/70 transition-all mt-2 font-bold">↑ clique ou arraste o arquivo aqui</p>
             </>
           )}
           <input type="file" accept=".csv" onChange={onArquivoChange} className="hidden" />
-        </label>
-      </div>
+        </div>
+      </label>
 
       {/* PERÍODO + RESUMO */}
       {registros.length > 0 && !carregandoCsv && (
