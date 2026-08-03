@@ -25,6 +25,11 @@ type RegistroProcessado = {
   statusMeta: string;
   vinculado: boolean;
   nomeOficial: string;
+  // 🆕 novos indicadores
+  contribuicaoNet: number;   // NET_com_ele − NET_sem_ele (pç/h) — peso no time
+  pctEsperado: number;       // unidades ÷ (meta × horas) × 100 — rendimento vs esperado
+  netTime: number;           // NET do time daquele processo/dia
+  horasProcesso: number;     // horas de processo em decimal
 };
 function hmsToSeconds(value: string): number {
   if (!value) return 0;
@@ -98,20 +103,22 @@ function classificar(
   }
   return 'Sem dados';
 }
+// 🆕 Meta de líquida (pç/h) por processo, lida da config
+function metaLiquidaDoProcesso(processo: string, metas: Record<string, number>): number {
+  if (processo === 'P2M') return Number(metas.meta_p2m_base) || 0;
+  if (processo === 'Checkin') return Number(metas.meta_checkin_base) || 0;
+  return 0; // Sorting não tem meta de líquida definida
+}
 // 🎯 Detecta se o CSV é MENSAL (range >= 2 DIAS)
-// 🆕 NOVA LÓGICA: precisa ter NO MÍNIMO 2 dias no range
-// Se for "01 al 01" (1 dia só) → é DIÁRIO, não mensal
-function detectarCsvMensal(nomeArquivo: string): { 
-  mes: number; 
-  ano: number; 
+function detectarCsvMensal(nomeArquivo: string): {
+  mes: number;
+  ano: number;
   trimestre: string;
   diaInicio: number;
   diaFim: number;
   mesParcial: boolean;
 } | null {
   const nome = nomeArquivo.replace(/\.csv$/i, '');
-  
-  // Padrão: YYYY-MM-DD al YYYY-MM-DD (com "al" no meio)
   const matchMensal = nome.match(/(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})\s+al\s+(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})/i);
   if (matchMensal) {
     const anoInicio = parseInt(matchMensal[1]);
@@ -120,36 +127,18 @@ function detectarCsvMensal(nomeArquivo: string): {
     const anoFim = parseInt(matchMensal[4]);
     const mesFim = parseInt(matchMensal[5]);
     const diaFim = parseInt(matchMensal[6]);
-    
-    // 🆕 NOVA REGRA: 
-    // Mesmo mês/ano E range de NO MÍNIMO 2 DIAS → MENSAL
-    // Range = diaFim - diaInicio + 1 (inclusivo)
-    // Se "01 al 01" → range = 1 dia → DIÁRIO ❌
-    // Se "01 al 02" → range = 2 dias → MENSAL ✅
     const mesmoMes = mesInicio === mesFim && anoInicio === anoFim;
     const rangeDeDias = diaFim - diaInicio + 1;
     const temMaisDeUmDia = rangeDeDias >= 2;
-    
     if (mesmoMes && temMaisDeUmDia) {
       let trimestre = 'Q1';
       if (mesInicio >= 4 && mesInicio <= 6) trimestre = 'Q2';
       else if (mesInicio >= 7 && mesInicio <= 9) trimestre = 'Q3';
       else if (mesInicio >= 10) trimestre = 'Q4';
-      
-      // É parcial se não cobre o mês inteiro
       const mesParcial = diaFim < 28;
-      
-      return { 
-        mes: mesInicio, 
-        ano: anoInicio, 
-        trimestre,
-        diaInicio,
-        diaFim,
-        mesParcial,
-      };
+      return { mes: mesInicio, ano: anoInicio, trimestre, diaInicio, diaFim, mesParcial };
     }
   }
-  
   return null;
 }
 // 🎯 Detecta data no nome do arquivo (modo diário)
@@ -194,12 +183,14 @@ export default function UploadPage() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState<string | null>(null);
-  
-  // 🎯 Modo MENSAL (CSV consolidado de um mês inteiro OU parcial)
-  const [csvMensal, setCsvMensal] = useState<{ 
-    mes: number; 
-    ano: number; 
-    trimestre: string; 
+
+  // 🆕 aviso quando o dia+processo já foi importado (proteção contra duplicata)
+  const [jaImportado, setJaImportado] = useState<{ qtd: number; arquivo: string | null } | null>(null);
+
+  const [csvMensal, setCsvMensal] = useState<{
+    mes: number;
+    ano: number;
+    trimestre: string;
     nomeArquivo: string;
     diaInicio: number;
     diaFim: number;
@@ -207,49 +198,57 @@ export default function UploadPage() {
   } | null>(null);
   useEffect(() => {
     async function carregarBase() {
-      console.log('🔄 Carregando colaboradores e metas...');
       const { data: colabs } = await supabase
         .from('colaboradores')
         .select('id_groot, nome, processo');
-      if (colabs) {
-        console.log('✅ Colaboradores carregados:', colabs.length);
-        setColaboradores(colabs as ColaboradorMap[]);
-      }
+      if (colabs) setColaboradores(colabs as ColaboradorMap[]);
       const { data: conf } = await supabase.from('config').select('chave, valor');
       if (conf) {
         const map: Record<string, number> = {};
         (conf as { chave: string; valor: string }[]).forEach((c) => {
           map[c.chave] = Number(c.valor);
         });
-        console.log('✅ Metas carregadas:', Object.keys(map).length);
         setMetas(map);
       }
     }
     carregarBase();
   }, []);
+
+  // 🆕 Checa se já existe importação daquele dia + processo (proteção contra duplicata)
+  useEffect(() => {
+    async function checarDuplicata() {
+      setJaImportado(null);
+      if (csvMensal || !processoSelecionado || !dataRef) return;
+      const { data, count } = await supabase
+        .from('historico')
+        .select('arquivo_origem', { count: 'exact' })
+        .eq('data_referencia', dataRef)
+        .eq('processo', processoSelecionado)
+        .limit(1);
+      if ((count || 0) > 0) {
+        setJaImportado({ qtd: count || 0, arquivo: data?.[0]?.arquivo_origem || null });
+      }
+    }
+    checarDuplicata();
+  }, [dataRef, processoSelecionado, csvMensal, sucesso]);
+
   function onArquivoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    console.log('📂 Arquivo selecionado:', f.name);
-    // 🎯 Tenta detectar se é CSV MENSAL (range >= 2 dias)
     const mensal = detectarCsvMensal(f.name);
     if (mensal) {
       setCsvMensal({ ...mensal, nomeArquivo: f.name });
-      console.log('📆 CSV MENSAL detectado:', mensal);
-      const tipoStr = mensal.mesParcial 
-        ? `Mês parcial (dias ${mensal.diaInicio}-${mensal.diaFim})` 
+      const tipoStr = mensal.mesParcial
+        ? `Mês parcial (dias ${mensal.diaInicio}-${mensal.diaFim})`
         : 'Mês completo';
       if (typeof window !== 'undefined' && (window as any).showToast) {
         (window as any).showToast('info', `📆 CSV ${tipoStr}: ${String(mensal.mes).padStart(2, '0')}/${mensal.ano}`);
       }
     } else {
       setCsvMensal(null);
-      
-      // Tenta detectar a data no nome (modo diário)
       const dataDetectada = detectarDataNoNome(f.name);
       if (dataDetectada) {
         setDataRef(dataDetectada);
-        console.log('📅 Data detectada automaticamente:', dataDetectada);
         if (typeof window !== 'undefined' && (window as any).showToast) {
           (window as any).showToast('info', `Data detectada: ${dataDetectada.split('-').reverse().join('/')}`);
         }
@@ -266,9 +265,7 @@ export default function UploadPage() {
       skipEmptyLines: true,
       complete: (result) => {
         setCarregando(false);
-        console.log('📊 CSV lido:', result.data.length, 'linhas');
         if (result.errors.length > 0) {
-          console.error('❌ Erros do papaparse:', result.errors);
           setErro('Erro ao ler CSV: ' + result.errors[0].message);
           return;
         }
@@ -282,7 +279,6 @@ export default function UploadPage() {
     });
   }
   function enviar() {
-    console.log('🚀 Botão ENVIAR clicado!');
     if (!linhas.length) {
       setErro('⚠️ Nenhum arquivo carregado.');
       return;
@@ -316,22 +312,15 @@ export default function UploadPage() {
       const idGrootRaw = pegarValor(linha, ['id_groot', 'id groot', 'groot', 'id']);
       const idGroot = normalizarIdGroot(idGrootRaw);
       const nomeCsv = pegarValor(linha, ['nome', 'agente', 'representante', 'representantes']);
-      if (!idGroot) {
-        console.warn(`Linha ${idx + 1}: sem ID Groot, pulando.`);
-        return;
-      }
+      if (!idGroot) return;
       const cadastro = mapaCadastro[idGroot];
       const vinculado = !!cadastro;
       const nomeOficial = cadastro?.nome || nomeCsv || 'Sem nome';
       const processo = processoSelecionado;
       const prodLiquida = parseNumber(
         pegarValor(linha, [
-          'prod_liquida_sist',
-          'prod liquida sist',
-          'prod liquida sistemico',
-          'prod_liquida',
-          'liquida',
-          'produtividade liquida',
+          'prod_liquida_sist', 'prod liquida sist', 'prod liquida sistemico',
+          'prod_liquida', 'liquida', 'produtividade liquida',
         ])
       );
       const prodEfetiva = parseNumber(
@@ -339,39 +328,24 @@ export default function UploadPage() {
       );
       const utilizacao = pegarValor(linha, ['utilizacao', 'utilização']);
       const tempoProcesso = pegarValor(linha, [
-        'tempo_em_processo',
-        'tempo em processo',
-        'tempo em processo sistemico',
-        'tempo_processo',
-        'tempo processo',
+        'tempo_em_processo', 'tempo em processo', 'tempo em processo sistemico',
+        'tempo_processo', 'tempo processo',
       ]);
       const tempoEfetivo = pegarValor(linha, ['tempo_efetivo', 'tempo efetivo']);
-      const tempoOcioso = pegarValor(linha, [
-        'tempo_ocioso',
-        'tempo ocioso',
-        'ociosidade',
-      ]);
-      const unidades = parseNumber(
-        pegarValor(linha, ['unidades', 'volume', 'quantidade'])
-      );
+      const tempoOcioso = pegarValor(linha, ['tempo_ocioso', 'tempo ocioso', 'ociosidade']);
+      const unidades = parseNumber(pegarValor(linha, ['unidades', 'volume', 'quantidade']));
       const ima = parseNumber(pegarValor(linha, ['ima']));
       registrosBrutos.push({
-        idGroot,
-        nomeCsv,
-        processo,
-        prodLiquida,
-        prodEfetiva,
-        utilizacao,
-        tempoProcesso,
-        tempoEfetivo,
-        tempoOcioso,
-        unidades,
-        ima,
-        vinculado,
-        nomeOficial,
+        idGroot, nomeCsv, processo, prodLiquida, prodEfetiva, utilizacao,
+        tempoProcesso, tempoEfetivo, tempoOcioso, unidades, ima, vinculado, nomeOficial,
       });
     });
-    console.log('✅ Total de registros pra salvar:', registrosBrutos.length);
+
+    // ============================================================
+    // 🎯 NET DO TIME (por processo) = Σ unidades ÷ Σ horas de processo
+    // Só entram quem tem horas > 0 E unidades > 0 (quem não produziu não
+    // distorce o denominador com horas vazias).
+    // ============================================================
     const netPorProc: Record<string, { volume: number; horas: number }> = {};
     registrosBrutos.forEach((r) => {
       const horas = hmsToSeconds(r.tempoProcesso) / 3600;
@@ -385,24 +359,54 @@ export default function UploadPage() {
       const a = netPorProc[proc];
       netMedia[proc] = a.horas > 0 ? a.volume / a.horas : 0;
     });
+
     const finais: RegistroProcessado[] = registrosBrutos.map((r) => {
       const horas = hmsToSeconds(r.tempoProcesso) / 3600;
       const netInd = horas > 0 ? r.unidades / horas : 0;
       const netTime = netMedia[r.processo] || 0;
+
+      // 1) IMPACTO NET (velocidade): quanto o RITMO dele difere do time
       let impacto = 0;
       if (netTime > 0 && netInd > 0) {
         impacto = ((netInd - netTime) / netTime) * 100;
         impacto = Math.max(-100, Math.min(200, impacto));
         impacto = Number(impacto.toFixed(2));
       }
+
+      // 2) CONTRIBUIÇÃO NET (peso): NET_com_ele − NET_sem_ele (em pç/h)
+      //    Positivo = puxou o time pra cima | Negativo = foi carregado
+      let contribuicao = 0;
+      const agg = netPorProc[r.processo];
+      const entraNoNet = horas > 0 && r.unidades > 0 && !!agg;
+      if (entraNoNet) {
+        const volSemEle = agg.volume - r.unidades;
+        const horasSemEle = agg.horas - horas;
+        const netSemEle = horasSemEle > 0 ? volSemEle / horasSemEle : netTime;
+        contribuicao = Number((netTime - netSemEle).toFixed(2));
+      }
+
+      // 3) RENDIMENTO vs ESPERADO: esperado = meta_liquida × horas
+      //    pctEsperado = unidades ÷ esperado × 100
+      let pctEsperado = 0;
+      const metaLiq = metaLiquidaDoProcesso(r.processo, metas);
+      if (metaLiq > 0 && horas > 0) {
+        const esperado = metaLiq * horas;
+        if (esperado > 0) {
+          pctEsperado = Number(((r.unidades / esperado) * 100).toFixed(1));
+        }
+      }
+
       const statusMeta = classificar(r.prodLiquida, r.processo, metas);
       return {
         ...r,
         impactoNet: impacto,
         statusMeta,
+        contribuicaoNet: contribuicao,
+        pctEsperado,
+        netTime: Number(netTime.toFixed(2)),
+        horasProcesso: Number(horas.toFixed(2)),
       };
     });
-    console.log('✅ Processamento concluído:', finais.length, 'registros');
     setProcessado(finais);
     if (finais.length === 0) {
       setErro('⚠️ Nenhuma linha do CSV tem ID Groot válido. Verifique o arquivo.');
@@ -410,7 +414,6 @@ export default function UploadPage() {
   }
   async function salvarMensal() {
     if (!processado.length || !arquivo || !csvMensal) return;
-    console.log('📆 Salvando CSV MENSAL...');
     setSalvando(true);
     setErro(null);
     setSucesso(null);
@@ -424,7 +427,6 @@ export default function UploadPage() {
         .eq('processo', processoSelecionado)
         .gte('data_referencia', primeiroDia)
         .lte('data_referencia', ultimoDia);
-      console.log(`📊 Histórico existente: ${historicoExistente?.length || 0} registros em ${mes}/${ano}`);
       const histPorColab: Record<string, { unidades: number; dias: number; somaLiquida: number }> = {};
       (historicoExistente || []).forEach((h) => {
         if (!h.id_groot) return;
@@ -439,7 +441,6 @@ export default function UploadPage() {
       let complementados = 0;
       let novos = 0;
       let ignorados = 0;
-      // 🆕 Calcula dias úteis estimados (até a data fim do range)
       const diasUteisEstimados = diaFim - diaInicio + 1;
       processado.forEach((r) => {
         if (!r.idGroot) {
@@ -448,7 +449,6 @@ export default function UploadPage() {
         }
         const existente = histPorColab[r.idGroot];
         if (existente && existente.unidades >= r.unidades) {
-          console.log(`⏭️ ${r.nomeOficial}: histórico (${existente.unidades}) >= CSV (${r.unidades}), ignora`);
           ignorados++;
           return;
         }
@@ -463,20 +463,15 @@ export default function UploadPage() {
           id_groot: r.idGroot,
           nome: r.nomeOficial || r.nomeCsv,
           nome_csv: r.nomeCsv,
-          mes,
-          ano,
-          trimestre,
+          mes, ano, trimestre,
           processo: processoSelecionado,
           prod_liquida_media: liquidaRestante,
           unidades_total: unidadesRestantes,
           dias_trabalhados: diasComplementares,
           arquivo_origem: arquivo.name,
         });
-        if (existente) {
-          complementados++;
-        } else {
-          novos++;
-        }
+        if (existente) complementados++;
+        else novos++;
       });
       if (registrosParaSalvar.length === 0) {
         setErro('Nenhum registro pra salvar — o histórico diário já cobre todo o mês.');
@@ -510,41 +505,30 @@ export default function UploadPage() {
       );
     } catch (e: any) {
       setErro('Erro ao salvar: ' + e.message);
-      console.error('❌ Erro mensal:', e);
     } finally {
       setSalvando(false);
     }
   }
   async function confirmarEnvio() {
     if (!processado.length || !arquivo) return;
-    console.log('💾 Confirmar envio clicado!');
     setSalvando(true);
     setErro(null);
     setSucesso(null);
     try {
-      const idsParaApagar = processado
-        .filter((r) => r.idGroot)
-        .map((r) => r.idGroot);
-      
-      if (idsParaApagar.length > 0) {
-        const { error: errDelete } = await supabase
-          .from('historico')
-          .delete()
-          .eq('data_referencia', dataRef)
-          .eq('processo', processoSelecionado)
-          .in('id_groot', idsParaApagar);
-        
-        if (errDelete) {
-          console.error('Erro deletando duplicatas:', errDelete);
-        }
-      }
-      await supabase
+      // ============================================================
+      // 🛡️ SUBSTITUIÇÃO LIMPA: apaga TUDO daquele dia+processo antes de inserir.
+      // (Antes só apagava pelos id_groot do CSV atual, o que deixava
+      //  registros órfãos de uploads anteriores → duplicação no dia-a-dia.)
+      // ============================================================
+      const { error: errDelete } = await supabase
         .from('historico')
         .delete()
         .eq('data_referencia', dataRef)
-        .eq('processo', processoSelecionado)
-        .is('id_groot', null)
-        .eq('arquivo_origem', arquivo.name);
+        .eq('processo', processoSelecionado);
+      if (errDelete) {
+        console.error('Erro limpando o dia+processo:', errDelete);
+      }
+
       const dataObj = new Date(dataRef + 'T12:00:00');
       const mes = dataObj.getMonth() + 1;
       let quarter = 'Q1';
@@ -566,6 +550,11 @@ export default function UploadPage() {
         impacto_net: r.impactoNet,
         status_meta: r.statusMeta,
         ima: r.ima,
+        // 🆕 novos indicadores persistidos
+        contribuicao_net: r.contribuicaoNet,
+        pct_esperado: r.pctEsperado,
+        net_time: r.netTime,
+        horas_processo: r.horasProcesso,
         arquivo_origem: arquivo.name,
         tipo_origem: 'Produtividade',
         trimestre: quarter,
@@ -590,8 +579,7 @@ export default function UploadPage() {
       const naoVinc = processado.length - vinc;
       let mensagem = `✅ ${processado.length} registros salvos no banco!`;
       if (vinc > 0) mensagem += ` (${vinc} já vinculados ao cadastro)`;
-      if (naoVinc > 0)
-        mensagem += ` ${naoVinc} aguardando cadastro.`;
+      if (naoVinc > 0) mensagem += ` ${naoVinc} aguardando cadastro.`;
       setSucesso(mensagem);
       setTimeout(() => {
         setArquivo(null);
@@ -640,7 +628,6 @@ export default function UploadPage() {
           <p className="text-red-300 text-sm">{erro}</p>
         </div>
       )}
-      {/* 🎯 AVISO CSV MENSAL DETECTADO - logo no topo */}
       {csvMensal && (
         <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border-2 border-purple-500/40 rounded-2xl p-5">
           <h3 className="text-purple-300 font-black text-lg mb-2 flex items-center gap-2">
@@ -662,8 +649,8 @@ export default function UploadPage() {
                 {csvMensal.mesParcial ? '🟡 Parcial' : '✅ Completo'}
               </p>
               <p className="text-xs text-gray-400">
-                {csvMensal.mesParcial 
-                  ? `${csvMensal.diaFim - csvMensal.diaInicio + 1} dias` 
+                {csvMensal.mesParcial
+                  ? `${csvMensal.diaFim - csvMensal.diaInicio + 1} dias`
                   : 'Mês inteiro'}
               </p>
             </div>
@@ -678,7 +665,7 @@ export default function UploadPage() {
             <li>Usado pra <strong>calibração trimestral</strong>, não polui o detalhe diário</li>
             {csvMensal.mesParcial && (
               <li className="text-yellow-300">
-                ⚠️ <strong>Mês parcial:</strong> cobre só {csvMensal.diaFim - csvMensal.diaInicio + 1} dias 
+                ⚠️ <strong>Mês parcial:</strong> cobre só {csvMensal.diaFim - csvMensal.diaInicio + 1} dias
                 (até dia {csvMensal.diaFim}). Se subir de novo no fim do mês, vai atualizar.
               </li>
             )}
@@ -728,11 +715,29 @@ export default function UploadPage() {
           </p>
         )}
       </div>
+
+      {/* 🆕 AVISO DE DUPLICATA */}
+      {jaImportado && processado.length === 0 && (
+        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border-2 border-amber-500/40 rounded-2xl p-4">
+          <p className="text-amber-300 font-bold flex items-center gap-2 mb-1">
+            ⚠️ Esse dia já foi importado
+          </p>
+          <p className="text-xs text-gray-300">
+            Já existem <strong className="text-amber-200">{jaImportado.qtd} registro(s)</strong> de{' '}
+            <strong>{processoSelecionado}</strong> em{' '}
+            <strong>{dataRef.split('-').reverse().join('/')}</strong>
+            {jaImportado.arquivo ? <> (arquivo <span className="font-mono">{jaImportado.arquivo}</span>)</> : null}.
+          </p>
+          <p className="text-xs text-amber-200/80 mt-2">
+            Se confirmar o envio, esses registros do dia serão <strong>substituídos</strong> pelos novos (o dia inteiro é limpo antes de inserir). Isso evita duplicação.
+          </p>
+        </div>
+      )}
+
       {/* SELEÇÃO DE ARQUIVO */}
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
         <h2 className="text-lg font-bold text-[#FFD700]">2️⃣ Selecionar arquivo</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Data ref - só aparece se NÃO for mensal */}
           {!csvMensal && (
             <div>
               <label className="block text-sm font-bold text-gray-300 mb-2">
@@ -749,7 +754,6 @@ export default function UploadPage() {
               </p>
             </div>
           )}
-          {/* Info mensal - aparece se for mensal */}
           {csvMensal && (
             <div>
               <label className="block text-sm font-bold text-purple-300 mb-2">
@@ -792,7 +796,6 @@ export default function UploadPage() {
           </div>
         )}
       </div>
-      {/* BOTÃO ENVIAR */}
       {processado.length === 0 && (
         <button
           onClick={enviar}
@@ -875,6 +878,8 @@ export default function UploadPage() {
                   <th className="py-2 pr-2 text-right">Líquida</th>
                   <th className="py-2 pr-2 text-right">Unid.</th>
                   <th className="py-2 pr-2 text-right">Imp.NET</th>
+                  <th className="py-2 pr-2 text-right">Contrib.</th>
+                  <th className="py-2 pr-2 text-right">% Esper.</th>
                   <th className="py-2 pr-2">Meta</th>
                 </tr>
               </thead>
@@ -898,11 +903,28 @@ export default function UploadPage() {
                     </td>
                     <td
                       className={`py-2 pr-2 text-right font-mono ${
-                        r.impactoNet > 0 ? 'text-green-400' : 'text-red-400'
+                        r.impactoNet > 0 ? 'text-green-400' : r.impactoNet < 0 ? 'text-red-400' : 'text-gray-400'
                       }`}
                     >
                       {r.impactoNet > 0 ? '+' : ''}
                       {r.impactoNet.toFixed(1)}%
+                    </td>
+                    <td
+                      className={`py-2 pr-2 text-right font-mono ${
+                        r.contribuicaoNet > 0 ? 'text-green-400' : r.contribuicaoNet < 0 ? 'text-red-400' : 'text-gray-500'
+                      }`}
+                      title="Contribuição NET: quanto puxou o time (pç/h)"
+                    >
+                      {r.contribuicaoNet > 0 ? '+' : ''}
+                      {r.contribuicaoNet.toFixed(1)}
+                    </td>
+                    <td
+                      className={`py-2 pr-2 text-right font-mono ${
+                        r.pctEsperado >= 100 ? 'text-green-400' : r.pctEsperado > 0 ? 'text-yellow-400' : 'text-gray-500'
+                      }`}
+                      title="Rendimento vs esperado (meta × horas)"
+                    >
+                      {r.pctEsperado > 0 ? `${r.pctEsperado.toFixed(0)}%` : '—'}
                     </td>
                     <td className="py-2 pr-2">
                       <span
