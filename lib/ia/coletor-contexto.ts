@@ -20,6 +20,7 @@ export interface ContextoColaborador {
   feedbacks90dias: any[];
   dpmoUltimasSemanas: any[];
   ocupacao30dias: any[];
+  presenca90dias: any[];
   tarefas: any[];
   geradoEm: string;
 }
@@ -38,9 +39,10 @@ export async function coletarContextoColaborador(
   limite30.setDate(limite30.getDate() - 30);
   const limite30Str = limite30.toISOString().split('T')[0];
 
-  const limite90 = new Date(hoje);
-  limite90.setDate(limite90.getDate() - 90);
-  const limite90Str = limite90.toISOString();
+  const limite90Date = new Date(hoje);
+  limite90Date.setDate(limite90Date.getDate() - 90);
+  const limite90Str = limite90Date.toISOString();          // timestamp (feedbacks)
+  const limite90StrData = limite90Date.toISOString().split('T')[0]; // date (presenca)
 
   // 1. CADASTRO (obrigatório — se não achar, retorna null)
   const { data: cadastro } = await supabase
@@ -51,58 +53,73 @@ export async function coletarContextoColaborador(
 
   if (!cadastro) return null;
 
-  // 2. HISTÓRICO (30 dias) — produtividade diária
-  const { data: historicoRaw } = await supabase
-    .from('historico')
-    .select('*')
-    .eq('id_groot', idGroot)
-    .gte('data', limite30Str)
-    .order('data', { ascending: true });
+  const ehP2M = (cadastro.processo || '').toLowerCase().includes('p2m');
 
-  // 3. FEEDBACKS (90 dias)
-  const { data: feedbacksRaw } = await supabase
-    .from('feedbacks')
-    .select('*')
-    .eq('id_groot', idGroot)
-    .gte('created_at', limite90Str)
-    .order('created_at', { ascending: false });
-
-  // 4. DPMO (últimas 5 semanas)
-  const { data: dpmoRaw } = await supabase
-    .from('dpmo_agregado')
-    .select('*')
-    .eq('id_groot', idGroot)
-    .order('ano', { ascending: false })
-    .order('semana', { ascending: false })
-    .limit(5);
-
-  // 5. OCUPAÇÃO P2M (30 dias) — só se for P2M
-  let ocupacaoRaw: any[] = [];
-  if ((cadastro.processo || '').toLowerCase().includes('p2m')) {
-    const { data } = await supabase
-      .from('ocupacao_p2m')
+  // 2..7 — busca tudo em paralelo (mais rápido que sequencial)
+  const [
+    historicoRes,
+    feedbacksRes,
+    dpmoRes,
+    ocupacaoRes,
+    presencaRes,
+    tarefasRes,
+  ] = await Promise.all([
+    // HISTÓRICO (30 dias) — produtividade diária ✅ coluna correta: data_referencia
+    supabase
+      .from('historico')
       .select('*')
       .eq('id_groot', idGroot)
       .gte('data_referencia', limite30Str)
-      .order('data_referencia', { ascending: false });
-    ocupacaoRaw = data || [];
-  }
-
-  // 6. TAREFAS (em aberto)
-  const { data: tarefasRaw } = await supabase
-    .from('tarefas')
-    .select('*')
-    .eq('id_groot', idGroot)
-    .order('created_at', { ascending: false })
-    .limit(20);
+      .order('data_referencia', { ascending: true }),
+    // FEEDBACKS (90 dias) ✅ coluna correta: registrado_em
+    supabase
+      .from('feedbacks')
+      .select('*')
+      .eq('id_groot', idGroot)
+      .gte('registrado_em', limite90Str)
+      .order('registrado_em', { ascending: false }),
+    // DPMO (últimas 5 semanas)
+    supabase
+      .from('dpmo_agregado')
+      .select('*')
+      .eq('id_groot', idGroot)
+      .order('ano', { ascending: false })
+      .order('semana', { ascending: false })
+      .limit(5),
+    // OCUPAÇÃO P2M (30 dias) — só se for P2M
+    ehP2M
+      ? supabase
+          .from('ocupacao_p2m')
+          .select('*')
+          .eq('id_groot', idGroot)
+          .gte('data_referencia', limite30Str)
+          .order('data_referencia', { ascending: false })
+      : Promise.resolve({ data: [] as any[] }),
+    // 🆕 PRESENÇA (90 dias) — absenteísmo/atestados pra IA ter contexto
+    supabase
+      .from('presenca')
+      .select('*')
+      .eq('id_groot', idGroot)
+      .gte('data_referencia', limite90StrData)
+      .neq('status', 'descartado')
+      .order('data_referencia', { ascending: false }),
+    // TAREFAS ✅ coluna correta: criado_em
+    supabase
+      .from('tarefas')
+      .select('*')
+      .eq('id_groot', idGroot)
+      .order('criado_em', { ascending: false })
+      .limit(20),
+  ]);
 
   return {
     cadastro,
-    historico30dias: historicoRaw || [],
-    feedbacks90dias: feedbacksRaw || [],
-    dpmoUltimasSemanas: dpmoRaw || [],
-    ocupacao30dias: ocupacaoRaw,
-    tarefas: tarefasRaw || [],
+    historico30dias: historicoRes.data || [],
+    feedbacks90dias: feedbacksRes.data || [],
+    dpmoUltimasSemanas: dpmoRes.data || [],
+    ocupacao30dias: ocupacaoRes.data || [],
+    presenca90dias: presencaRes.data || [],
+    tarefas: tarefasRes.data || [],
     geradoEm: hoje.toISOString(),
   };
 }
@@ -118,6 +135,7 @@ export function formatarContextoParaIA(contexto: ContextoColaborador): string {
     feedbacks90dias,
     dpmoUltimasSemanas,
     ocupacao30dias,
+    presenca90dias,
     tarefas,
     geradoEm,
   } = contexto;
@@ -171,11 +189,47 @@ export function formatarContextoParaIA(contexto: ContextoColaborador): string {
     linhas.push('');
     linhas.push('**Detalhe diário (mais recente primeiro):**');
     [...historico30dias].reverse().slice(0, 30).forEach((h) => {
-      const data = formatarData(h.data);
+      const data = formatarData(h.data_referencia);
       const liq = Number(h.prod_liquida) || 0;
       const status = h.status_meta || '—';
       linhas.push(`- ${data}: ${liq} und/h • ${status}`);
     });
+  }
+  linhas.push('');
+
+  // ─────────────────────────────────────
+  // 🩺 PRESENÇA / ABSENTEÍSMO (90 dias)
+  // ─────────────────────────────────────
+  linhas.push('## 🩺 Presença / Absenteísmo (últimos 90 dias)');
+  if (presenca90dias.length === 0) {
+    linhas.push('_Sem registros de presença no período._');
+  } else {
+    const pres = { presencas: 0, atestados: 0, faltas: 0, bhNaoPlan: 0, ferias: 0, afastado: 0, sinergia: 0, abandono: 0 };
+    presenca90dias.forEach((p) => {
+      const m = (p.motivo || '').toLowerCase();
+      if (m.includes('p - presente') || p.status === 'presente') pres.presencas++;
+      else if (m.includes('atestado')) pres.atestados++;
+      else if (m.includes('fi - falta')) pres.faltas++;
+      else if (m.includes('bh - banco de horas n')) pres.bhNaoPlan++;
+      else if (m.includes('sinergia')) pres.sinergia++;
+      else if (m.includes('abandono')) pres.abandono++;
+      else if (m.includes('férias') || m.includes('ferias')) pres.ferias++;
+      else if (m.includes('afasta')) pres.afastado++;
+    });
+    const totalContab = pres.presencas + pres.faltas + pres.bhNaoPlan + pres.atestados;
+    const pctAbs = totalContab > 0 ? (((pres.faltas + pres.bhNaoPlan) / totalContab) * 100).toFixed(1) : '0';
+
+    linhas.push(`- **Presenças:** ${pres.presencas} dia(s)`);
+    linhas.push(`- **Faltas injustificadas:** ${pres.faltas}${pres.bhNaoPlan > 0 ? ` (+${pres.bhNaoPlan} BH não planejado)` : ''}`);
+    linhas.push(`- **Atestados:** ${pres.atestados}`);
+    if (pres.ferias > 0) linhas.push(`- **Férias:** ${pres.ferias} dia(s) _(não conta como falta)_`);
+    if (pres.afastado > 0) linhas.push(`- **Afastado (INSS):** ${pres.afastado} dia(s) _(fora da operação)_`);
+    if (pres.sinergia > 0) linhas.push(`- **Sinergia externa:** ${pres.sinergia} dia(s)`);
+    if (pres.abandono > 0) linhas.push(`- **⚠️ Abandono registrado:** ${pres.abandono} dia(s)`);
+    linhas.push(`- **ABS%:** ${pctAbs}% ${Number(pctAbs) > 10 ? '🔴 alto' : Number(pctAbs) > 5 ? '🟡 atenção' : '🟢 ok'}`);
+    if (pres.ferias > 5 || pres.afastado > 5) {
+      linhas.push(`- _Obs.: colaborador teve muitos dias fora da operação — considere isso ao avaliar a produção._`);
+    }
   }
   linhas.push('');
 
@@ -189,7 +243,7 @@ export function formatarContextoParaIA(contexto: ContextoColaborador): string {
     linhas.push(`- **Total:** ${feedbacks90dias.length} feedback(s)`);
     linhas.push('');
     feedbacks90dias.forEach((f) => {
-      const data = f.created_at ? formatarData(f.created_at) : '—';
+      const data = f.registrado_em ? formatarData(f.registrado_em) : '—';
       const tipo = f.tipo || '—';
       const classe = f.classificacao || '—';
       const obs = f.observacao || f.texto || '(sem observação)';
@@ -234,11 +288,13 @@ export function formatarContextoParaIA(contexto: ContextoColaborador): string {
   if (tarefas.length === 0) {
     linhas.push('_Nenhuma tarefa registrada._');
   } else {
-    const abertas = tarefas.filter((t) => (t.status || '').toLowerCase() !== 'concluida');
+    // ✅ status reais: Pendente / Finalizada (não "concluida")
+    const abertas = tarefas.filter((t) => (t.status || '').toLowerCase() === 'pendente');
     linhas.push(`- **Total:** ${tarefas.length} • **Em aberto:** ${abertas.length}`);
     abertas.slice(0, 10).forEach((t) => {
-      const desc = t.descricao || t.titulo || t.texto || '(sem descrição)';
-      linhas.push(`- ${desc} [status: ${t.status || '—'}]`);
+      // ✅ campos reais da tabela tarefas
+      const desc = t.motivo || t.diagnostico || t.tipo || '(sem descrição)';
+      linhas.push(`- [${t.tipo || 'Tarefa'}] ${desc} [status: ${t.status || '—'}]`);
     });
   }
   linhas.push('');
