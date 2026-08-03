@@ -432,7 +432,7 @@ export default function DetalheColaboradorPage() {
         else {
           setColaborador(data);
           if (data) {
-            buscarHistorico(data.id_groot);
+            buscarHistorico(data.id_groot, data.processo);
             buscarDpmoEventos(data.id_groot, data.nome, data.processo);
             buscarDpmoAgregado(data.id_groot, data.nome, data.processo);
             buscarOcupacaoP2M(data.id_groot, data.nome, data.processo);
@@ -493,7 +493,7 @@ export default function DetalheColaboradorPage() {
     const { data } = await supabase.from('config').select('valor').eq('chave', chave).single();
     if (data) setMetaProcesso(Number(data.valor));
   }
-  async function buscarHistorico(idGroot: string) {
+  async function buscarHistorico(idGroot: string, processoCadastro?: string | null) {
     try {
       setLoadingHistorico(true);
       const { data } = await supabase
@@ -501,7 +501,19 @@ export default function DetalheColaboradorPage() {
         .select('*')
         .eq('id_groot', idGroot)
         .order('data_referencia', { ascending: false });
-      setHistorico(data || []);
+      // 🎯 REGRA: cada colaborador mostra APENAS os dados do processo do cadastro dele.
+      // Se o Robson é P2M no cadastro, linhas de Checkin (que entraram por cobertura/engano)
+      // são ignoradas na exibição. Vale pra todos.
+      let linhas = data || [];
+      if (processoCadastro) {
+        const doProcesso = linhas.filter((h: any) => h.processo === processoCadastro);
+        // Só aplica o filtro se sobrar algo — evita esvaziar o card caso o processo
+        // esteja gravado com outro rótulo. Se filtrar e sobrar, usa o filtrado.
+        if (doProcesso.length > 0) {
+          linhas = doProcesso;
+        }
+      }
+      setHistorico(linhas);
     } finally {
       setLoadingHistorico(false);
     }
