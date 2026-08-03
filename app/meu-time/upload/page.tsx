@@ -178,6 +178,7 @@ export default function UploadPage() {
   const [linhas, setLinhas] = useState<LinhaCSV[]>([]);
   const [cabecalhos, setCabecalhos] = useState<string[]>([]);
   const [processado, setProcessado] = useState<RegistroProcessado[]>([]);
+  const [puladosProcessoDiferente, setPuladosProcessoDiferente] = useState<string[]>([]);
   const [colaboradores, setColaboradores] = useState<ColaboradorMap[]>([]);
   const [metas, setMetas] = useState<Record<string, number>>({});
   const [carregando, setCarregando] = useState(false);
@@ -260,6 +261,7 @@ export default function UploadPage() {
     setErro(null);
     setSucesso(null);
     setProcessado([]);
+    setPuladosProcessoDiferente([]);
     setLinhas([]);
     setCarregando(true);
     setFase('lendo');
@@ -313,6 +315,7 @@ export default function UploadPage() {
       vinculado: boolean;
       nomeOficial: string;
     }> = [];
+    const puladosProcesso: string[] = []; // 🎯 quem foi pulado por processo diferente do cadastro
     linhas.forEach((linha, idx) => {
       const idGrootRaw = pegarValor(linha, ['id_groot', 'id groot', 'groot', 'id']);
       const idGroot = normalizarIdGroot(idGrootRaw);
@@ -320,6 +323,13 @@ export default function UploadPage() {
       if (!idGroot) return;
       const cadastro = mapaCadastro[idGroot];
       const vinculado = !!cadastro;
+      // 🎯 REGRA: só grava se o processo do CSV bater com o processo do cadastro.
+      // Se o Robson é P2M no cadastro e aparece num CSV de Checkin (cobertura/engano),
+      // ele é PULADO — não entra dado do processo errado. Vale pra todos.
+      if (cadastro && cadastro.processo && cadastro.processo !== processoSelecionado) {
+        puladosProcesso.push(`${cadastro.nome} (é ${cadastro.processo})`);
+        return;
+      }
       const nomeOficial = cadastro?.nome || nomeCsv || 'Sem nome';
       const processo = processoSelecionado;
       const prodLiquida = parseNumber(
@@ -413,6 +423,10 @@ export default function UploadPage() {
       };
     });
     setProcessado(finais);
+    setPuladosProcessoDiferente(puladosProcesso);
+    if (puladosProcesso.length > 0 && typeof window !== 'undefined' && (window as any).showToast) {
+      (window as any).showToast('info', `⏭️ ${puladosProcesso.length} pulado(s): processo diferente do cadastro`);
+    }
     if (finais.length === 0) {
       setErro('⚠️ Nenhuma linha do CSV tem ID Groot válido. Verifique o arquivo.');
     }
@@ -527,14 +541,21 @@ export default function UploadPage() {
     setSucesso(null);
     try {
       // ============================================================
-      // 🛡️ SUBSTITUIÇÃO LIMPA: apaga TUDO daquele dia+processo antes de inserir.
-      // (Antes só apagava pelos id_groot do CSV atual, o que deixava
-      //  registros órfãos de uploads anteriores → duplicação no dia-a-dia.)
+      // 🛡️ SUBSTITUIÇÃO LIMPA À PROVA DE BALA
+      // Apaga TUDO daquele dia+processo por INTERVALO (>= dia E < dia+1),
+      // em vez de igualdade exata. Assim funciona tanto se data_referencia
+      // for DATE ('2026-08-01') quanto TIMESTAMP ('2026-08-01T13:00:00+00') —
+      // pega qualquer hora dentro do dia. É isso que evita a duplicação.
       // ============================================================
+      const dataObjDelete = new Date(dataRef + 'T00:00:00');
+      const proximoDia = new Date(dataObjDelete.getTime() + 24 * 60 * 60 * 1000);
+      const proximoDiaStr = `${proximoDia.getFullYear()}-${String(proximoDia.getMonth() + 1).padStart(2, '0')}-${String(proximoDia.getDate()).padStart(2, '0')}`;
+
       const { error: errDelete } = await supabase
         .from('historico')
         .delete()
-        .eq('data_referencia', dataRef)
+        .gte('data_referencia', dataRef)
+        .lt('data_referencia', proximoDiaStr)
         .eq('processo', processoSelecionado);
       if (errDelete) {
         console.error('Erro limpando o dia+processo:', errDelete);
@@ -856,6 +877,29 @@ export default function UploadPage() {
         </div>
       )}
       {/* PREVIEW */}
+      {puladosProcessoDiferente.length > 0 && (
+        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/40 rounded-2xl p-4">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">⏭️</span>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-300">
+                {puladosProcessoDiferente.length} colaborador(es) pulado(s) — processo diferente do cadastro
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Este CSV é de <strong className="text-white">{processoSelecionado}</strong>, mas essas pessoas estão cadastradas em outro processo. Elas não serão gravadas (evita dado trocado). Se alguém mudou de processo, atualize o cadastro.
+              </p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {puladosProcessoDiferente.map((p, i) => (
+                  <span key={i} className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-200 border border-amber-500/30">
+                    {p}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {processado.length > 0 && (
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
