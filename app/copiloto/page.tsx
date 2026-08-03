@@ -356,15 +356,22 @@ export default function CopilotoPage() {
   
   // ✅ Pega o mês mais recente disponível por colaborador (não restringe ao mês atual)
   // produtividadeMensal já vem ordenado por ano desc, mes desc → primeiro match = mais recente
-  // Filtra por processo igual à Calibração para evitar cross-contamination
+  // Normaliza processo antes de comparar (ex: "CK" === "Checkin", igual à Calibração)
+  function normProc(p: string | null | undefined): string {
+    const s = String(p || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (s === 'CK' || s === 'CHECKIN' || s === 'CHECK') return 'CHECKIN';
+    if (s === 'P2M') return 'P2M';
+    if (s === 'SORTING' || s === 'SORT') return 'SORTING';
+    return s;
+  }
   const colaboradoresMap = new Map(colaboradores.map(c => [c.id_groot, c]));
   const mensalPorId: Record<string, ProdutividadeMensalLinha> = {};
   produtividadeMensal.forEach((m) => {
     if (mensalPorId[m.id_groot]) return; // já tem o mais recente
     const colab = colaboradoresMap.get(m.id_groot);
     if (!colab) return;
-    // filtra processo (igual à Calibração)
-    if (m.processo && colab.processo && m.processo !== colab.processo) return;
+    // filtra processo com normalização (evita "CK" ≠ "Checkin")
+    if (m.processo && colab.processo && normProc(m.processo) !== normProc(colab.processo)) return;
     mensalPorId[m.id_groot] = m;
   });
   
