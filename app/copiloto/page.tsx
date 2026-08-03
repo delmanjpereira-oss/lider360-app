@@ -350,50 +350,44 @@ export default function CopilotoPage() {
     if (!ultimoStatusPorId[h.id_groot]) ultimoStatusPorId[h.id_groot] = h;
   });
   
-  const hoje = new Date();
-  const mesAtual = hoje.getMonth() + 1;
-  const anoAtual = hoje.getFullYear();
-  
-  // ✅ Pega o mês mais recente COM DADOS REPRESENTATIVOS (>= 5 dias trabalhados)
-  // Evita pegar registro de agosto com 1d e ignorar julho completo (22d)
-  // produtividadeMensal já vem ordenado por ano desc, mes desc
-  function normProc(p: string | null | undefined): string {
-    const s = String(p || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (s === 'CK' || s === 'CHECKIN' || s === 'CHECK') return 'CHECKIN';
-    if (s === 'P2M') return 'P2M';
-    if (s === 'SORTING' || s === 'SORT') return 'SORTING';
-    return s;
-  }
-  const colaboradoresMap = new Map(colaboradores.map(c => [c.id_groot, c]));
-  const mensalPorId: Record<string, ProdutividadeMensalLinha> = {};
-  const mensalCandidato: Record<string, ProdutividadeMensalLinha> = {};
-
-  produtividadeMensal.forEach((m) => {
-    const colab = colaboradoresMap.get(m.id_groot);
-    if (!colab) return;
-    if (m.processo && colab.processo && normProc(m.processo) !== normProc(colab.processo)) return;
-    const dias = Number(m.dias_trabalhados) || 0;
-    if (!mensalCandidato[m.id_groot]) mensalCandidato[m.id_groot] = m;
-    if (!mensalPorId[m.id_groot] && dias >= 5) mensalPorId[m.id_groot] = m;
+  // ✅ MONITOR: calcula média do historico diário agrupado por mês
+  // Mesmo approach da Calibração — mais confiável que produtividade_mensal
+  // Pega o mês mais recente com >= 5 dias; fallback: mês mais recente disponível
+  const grupoHist: Record<string, Record<string, number[]>> = {};
+  historico.forEach((h) => {
+    if (!h.prod_liquida || h.prod_liquida <= 0) return;
+    const d = new Date(h.data_referencia + 'T12:00:00');
+    const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+    if (!grupoHist[h.id_groot]) grupoHist[h.id_groot] = {};
+    if (!grupoHist[h.id_groot][key]) grupoHist[h.id_groot][key] = [];
+    grupoHist[h.id_groot][key].push(h.prod_liquida);
   });
 
-  colaboradores.forEach((c) => {
-    if (!mensalPorId[c.id_groot] && mensalCandidato[c.id_groot]) {
-      mensalPorId[c.id_groot] = mensalCandidato[c.id_groot];
+  const mediaHistPorId: Record<string, { media: number; dias: number }> = {};
+  Object.entries(grupoHist).forEach(([idGroot, meses]) => {
+    const sorted = Object.entries(meses)
+      .map(([key, vals]) => {
+        const [ano, mes] = key.split('-').map(Number);
+        return { ano, mes, vals };
+      })
+      .sort((a, b) => a.ano !== b.ano ? b.ano - a.ano : b.mes - a.mes);
+    // prefere mês mais recente com >= 5 dias; fallback: qualquer mês
+    const preferido = sorted.find(m => m.vals.length >= 5) || sorted[0];
+    if (preferido && preferido.vals.length > 0) {
+      const media = Math.round(preferido.vals.reduce((s, v) => s + v, 0) / preferido.vals.length);
+      mediaHistPorId[idGroot] = { media, dias: preferido.vals.length };
     }
   });
-  
+
   const monitor = { ofensores: [] as MonitorItem[], alinhados: [] as MonitorItem[], superas: [] as MonitorItem[] };
-  
-  // ✅ ALTERADO: prioridade agora é o acumulado mensal; diário só entra como fallback
+
   colaboradores.forEach((c) => {
+    const mediaHist = mediaHistPorId[c.id_groot];
     const ultimoDiario = ultimoStatusPorId[c.id_groot];
-    const mensal = mensalPorId[c.id_groot];
 
-    if (mensal) {
-      const liquida = Number(mensal.prod_liquida_media) || 0;
+    if (mediaHist) {
+      const liquida = mediaHist.media;
       const status = determinarStatusPorMeta(liquida, c.processo || '');
-
       const item: MonitorItem = {
         idGroot: c.id_groot,
         id: c.id,
@@ -404,16 +398,14 @@ export default function CopilotoPage() {
         ultimoImpacto: 0,
         diasAbaixo: calcularStreak(c.id_groot),
         fonte: 'mensal',
-        diasMes: mensal.dias_trabalhados,
+        diasMes: mediaHist.dias,
       };
-
       if (status === 'Abaixo') monitor.ofensores.push(item);
       else if (status === 'Alinhado') monitor.alinhados.push(item);
       else if (status === 'Supera') monitor.superas.push(item);
     } else if (ultimoDiario) {
       const liquida = Number(ultimoDiario.prod_liquida) || 0;
       const status = determinarStatusPorMeta(liquida, c.processo || '');
-
       const item: MonitorItem = {
         idGroot: c.id_groot,
         id: c.id,
@@ -425,7 +417,6 @@ export default function CopilotoPage() {
         diasAbaixo: calcularStreak(c.id_groot),
         fonte: 'diario',
       };
-
       if (status === 'Abaixo') monitor.ofensores.push(item);
       else if (status === 'Alinhado') monitor.alinhados.push(item);
       else if (status === 'Supera') monitor.superas.push(item);
