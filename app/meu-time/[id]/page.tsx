@@ -730,6 +730,15 @@ export default function DetalheColaboradorPage() {
       eventos: eventosOutro.length,
     };
   })();
+  // 🆕 Histórico do MÊS SELECIONADO (declarado ANTES do DPMO, que depende dele)
+  const historicoFiltrado = (() => {
+    const [anoSel, mesSel] = mesSelecionado.split('-').map(Number);
+    return historico.filter((h) => {
+      const data = new Date(h.data_referencia + 'T12:00:00');
+      return data.getMonth() + 1 === mesSel && data.getFullYear() === anoSel;
+    });
+  })();
+
   const dpmoPorSemana = calcularDpmoPorSemana();
   // 🆕 só semanas completas E do mês selecionado
   const semanasCompletas = (() => {
@@ -802,14 +811,6 @@ export default function DetalheColaboradorPage() {
     return `${nomesMes[(mes || 1) - 1]}/${ano}`;
   })();
 
-  // 🆕 Histórico do MÊS SELECIONADO (antes era fixo no mês atual)
-  const historicoFiltrado = (() => {
-    const [anoSel, mesSel] = mesSelecionado.split('-').map(Number);
-    return historico.filter((h) => {
-      const data = new Date(h.data_referencia + 'T12:00:00');
-      return data.getMonth() + 1 === mesSel && data.getFullYear() === anoSel;
-    });
-  })();
   const analisesOciosidade: AnaliseOciosidade[] = historicoFiltrado
     .map((h) => analisarOciosidade(h, metaProcesso))
     .filter((a): a is AnaliseOciosidade => a !== null);
