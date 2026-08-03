@@ -354,11 +354,18 @@ export default function CopilotoPage() {
   const mesAtual = hoje.getMonth() + 1;
   const anoAtual = hoje.getFullYear();
   
+  // ✅ Pega o mês mais recente disponível por colaborador (não restringe ao mês atual)
+  // produtividadeMensal já vem ordenado por ano desc, mes desc → primeiro match = mais recente
+  // Filtra por processo igual à Calibração para evitar cross-contamination
+  const colaboradoresMap = new Map(colaboradores.map(c => [c.id_groot, c]));
   const mensalPorId: Record<string, ProdutividadeMensalLinha> = {};
   produtividadeMensal.forEach((m) => {
-    if (m.mes === mesAtual && m.ano === anoAtual && !mensalPorId[m.id_groot]) {
-      mensalPorId[m.id_groot] = m;
-    }
+    if (mensalPorId[m.id_groot]) return; // já tem o mais recente
+    const colab = colaboradoresMap.get(m.id_groot);
+    if (!colab) return;
+    // filtra processo (igual à Calibração)
+    if (m.processo && colab.processo && m.processo !== colab.processo) return;
+    mensalPorId[m.id_groot] = m;
   });
   
   const monitor = { ofensores: [] as MonitorItem[], alinhados: [] as MonitorItem[], superas: [] as MonitorItem[] };
