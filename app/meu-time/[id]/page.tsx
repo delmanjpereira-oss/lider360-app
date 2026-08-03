@@ -29,6 +29,11 @@ type HistoricoLinha = {
   impacto_net: number;
   status_meta: string;
   ima: number;
+  // 🆕 indicadores salvos no upload
+  contribuicao_net: number | null;
+  pct_esperado: number | null;
+  net_time: number | null;
+  horas_processo: number | null;
 };
 type DpmoEvento = {
   id: number;
@@ -388,6 +393,11 @@ export default function DetalheColaboradorPage() {
   const [mesSelecionado, setMesSelecionado] = useState<string>(
     `${agoraInit.getFullYear()}-${String(agoraInit.getMonth() + 1).padStart(2, '0')}`
   );
+
+  // 🆕 MODO DE VISÃO (olhinho): 'colaborador' esconde o que é privado do TL.
+  // Abre SEMPRE em 'colaborador' (seguro pra mostrar na tela pro colaborador).
+  const [modoVisao, setModoVisao] = useState<'colaborador' | 'tl'>('colaborador');
+  const modoTL = modoVisao === 'tl';
   
   const [metaIma, setMetaIma] = useState(1567);
   const [metaProcesso, setMetaProcesso] = useState(296);
@@ -887,7 +897,70 @@ export default function DetalheColaboradorPage() {
       temMensal,
     };
   })();
-  
+
+  // ============================================================
+  // 🆕 INDICADORES NOVOS DO MÊS (contribuição, rendimento, líquida ponderada)
+  // Tudo calculado do ACUMULADO (soma unidades ÷ soma horas), não média de
+  // percentuais — é o método preciso. Usa SÓ o que já está salvo no histórico
+  // (net_time, horas_processo, contribuicao_net, pct_esperado). Zero query nova.
+  // ============================================================
+  const REFERENCIA_HORAS = 7 + 20 / 60; // 7h20 = referência de jornada cheia
+
+  const indicadoresMes = (() => {
+    // considera dias com horas de processo e unidades válidas
+    const dias = historicoFiltrado.filter(
+      (h) => (Number(h.horas_processo) || 0) > 0 && (Number(h.unidades) || 0) > 0
+    );
+    if (dias.length === 0) return null;
+
+    let somaUnidDela = 0;
+    let somaHorasDela = 0;
+    let somaNetTimePonderado = 0; // Σ (net_time_do_dia × horas_dela_no_dia)
+    let somaHorasParaTime = 0;
+    let somaEsperado = 0; // Σ (meta × horas) — pra rendimento ponderado
+
+    dias.forEach((h) => {
+      const horas = Number(h.horas_processo) || 0;
+      const unid = Number(h.unidades) || 0;
+      const netTimeDia = Number(h.net_time) || 0;
+      somaUnidDela += unid;
+      somaHorasDela += horas;
+      if (netTimeDia > 0) {
+        somaNetTimePonderado += netTimeDia * horas;
+        somaHorasParaTime += horas;
+      }
+    });
+
+    // NET dela no mês (acumulado)
+    const netDelaMes = somaHorasDela > 0 ? somaUnidDela / somaHorasDela : 0;
+    // NET do time no mês (média dos net_time diários, ponderada pelas horas dela)
+    const netTimeMes = somaHorasParaTime > 0 ? somaNetTimePonderado / somaHorasParaTime : 0;
+    // Contribuição do mês = quanto o ritmo dela ficou acima/abaixo do time (pç/h)
+    const contribuicaoMes = netTimeMes > 0 ? Number((netDelaMes - netTimeMes).toFixed(1)) : 0;
+
+    // Rendimento vs esperado do mês (ponderado): esperado = meta × horas
+    const metaLiq = metaProcesso || 0;
+    somaEsperado = metaLiq * somaHorasDela;
+    const pctEsperadoMes = somaEsperado > 0 ? Number(((somaUnidDela / somaEsperado) * 100).toFixed(0)) : 0;
+
+    // Líquida média do mês ponderada por horas (mais precisa que média de %):
+    // usa unidades ÷ horas (que é o NET real acumulado)
+    const liquidaPonderada = Math.round(netDelaMes);
+
+    // Impacto NET do mês = ((NET dela − NET time) ÷ NET time) × 100
+    const impactoMes = netTimeMes > 0 ? Number((((netDelaMes - netTimeMes) / netTimeMes) * 100).toFixed(1)) : 0;
+
+    return {
+      dias: dias.length,
+      netDelaMes: Math.round(netDelaMes),
+      netTimeMes: Math.round(netTimeMes),
+      contribuicaoMes,
+      pctEsperadoMes,
+      liquidaPonderada,
+      impactoMes,
+    };
+  })();
+
   if (loading) {
     return (
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
@@ -964,7 +1037,84 @@ export default function DetalheColaboradorPage() {
         </div>
       </div>
 
-      {perfilDominante.perfil !== 'SEM DADOS' && (
+      {/* 🆕 OLHINHO — alterna entre modo Colaborador (padrão) e modo TL */}
+      <div className={`rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 border-2 transition-all ${
+        modoTL
+          ? 'bg-gradient-to-br from-purple-500/15 to-pink-500/5 border-purple-500/40'
+          : 'bg-gradient-to-br from-emerald-500/10 to-green-500/5 border-emerald-500/30'
+      }`}>
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">{modoTL ? '🔓' : '👁️'}</span>
+          <div>
+            <p className="text-sm font-black text-white">
+              {modoTL ? 'Modo Gestão (TL)' : 'Modo Apresentação (Colaborador)'}
+            </p>
+            <p className="text-xs text-gray-400">
+              {modoTL
+                ? 'Você está vendo tudo — inclusive feedbacks e análise comportamental.'
+                : 'Seguro pra mostrar. Indicadores de desempenho visíveis; anotações privadas ocultas.'}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => setModoVisao(modoTL ? 'colaborador' : 'tl')}
+          className={`font-bold px-4 py-2 rounded-lg text-sm transition-all flex items-center gap-2 ${
+            modoTL
+              ? 'bg-purple-500/30 text-purple-200 hover:bg-purple-500/40'
+              : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+          }`}
+        >
+          {modoTL ? '🙈 Voltar pra visão do colaborador' : '👁️ Revelar dados de gestão'}
+        </button>
+      </div>
+
+      {/* 🆕 DESTAQUE: Impacto NET + Contribuição + Rendimento (o coração do desempenho) */}
+      {indicadoresMes && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Impacto NET (velocidade) */}
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-5 relative overflow-hidden">
+            <div className={`absolute top-0 left-0 w-full h-1 ${indicadoresMes.impactoMes >= 0 ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <p className="text-xs text-gray-400 uppercase font-bold tracking-wider mb-1">⚡ Impacto NET</p>
+            <p className={`text-4xl font-black ${indicadoresMes.impactoMes > 0 ? 'text-green-400' : indicadoresMes.impactoMes < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+              {indicadoresMes.impactoMes > 0 ? '+' : ''}{indicadoresMes.impactoMes}%
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Ritmo dele: <strong className="text-white">{indicadoresMes.netDelaMes}</strong> vs time <strong className="text-white">{indicadoresMes.netTimeMes}</strong> pç/h
+            </p>
+          </div>
+
+          {/* Contribuição NET (peso) */}
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-5 relative overflow-hidden">
+            <div className={`absolute top-0 left-0 w-full h-1 ${indicadoresMes.contribuicaoMes >= 0 ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <p className="text-xs text-gray-400 uppercase font-bold tracking-wider mb-1">🏋️ Contribuição no time</p>
+            <p className={`text-4xl font-black ${indicadoresMes.contribuicaoMes > 0 ? 'text-green-400' : indicadoresMes.contribuicaoMes < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+              {indicadoresMes.contribuicaoMes > 0 ? '+' : ''}{indicadoresMes.contribuicaoMes}
+              <span className="text-lg font-bold text-gray-500"> pç/h</span>
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              {indicadoresMes.contribuicaoMes > 0
+                ? '🟢 Puxou o time pra cima'
+                : indicadoresMes.contribuicaoMes < 0
+                ? '🔴 Foi carregado pelo time'
+                : '➖ Neutro'}
+            </p>
+          </div>
+
+          {/* Rendimento vs esperado */}
+          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-5 relative overflow-hidden">
+            <div className={`absolute top-0 left-0 w-full h-1 ${indicadoresMes.pctEsperadoMes >= 100 ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+            <p className="text-xs text-gray-400 uppercase font-bold tracking-wider mb-1">🎯 Rendimento</p>
+            <p className={`text-4xl font-black ${indicadoresMes.pctEsperadoMes >= 100 ? 'text-green-400' : 'text-yellow-400'}`}>
+              {indicadoresMes.pctEsperadoMes}%
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              do esperado pro tempo trabalhado ({metaProcesso} pç/h × horas)
+            </p>
+          </div>
+        </div>
+      )}
+
+      {modoTL && perfilDominante.perfil !== 'SEM DADOS' && (
         <div className={`bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 ${
           perfilDominante.perfil === 'EQUILIBRADO' ? 'border-green-500/40' :
           perfilDominante.perfil === 'RUSHER' ? 'border-yellow-500/40' :
@@ -1125,6 +1275,7 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       )}
+      {modoTL && (
       <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 rounded-2xl p-6 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-lg font-bold text-purple-300 flex items-center gap-2">
@@ -1202,6 +1353,7 @@ export default function DetalheColaboradorPage() {
           </div>
         )}
       </div>
+      )}
       {(colaborador.processo === 'Checkin' || colaborador.processo === 'P2M') && dpmoPorSemana.length > 0 && (
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1335,6 +1487,7 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       )}
+      {modoTL && (
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-[#FFD700]">💬 Feedbacks Recentes</h2>
@@ -1364,6 +1517,7 @@ export default function DetalheColaboradorPage() {
           </div>
         )}
       </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
           <h2 className="text-lg font-bold text-[#FFD700] mb-4">📋 Dados Cadastrais</h2>
@@ -1439,6 +1593,9 @@ export default function DetalheColaboradorPage() {
                   <th className="py-3 pr-3 text-right">Ocio Saud.</th>
                   <th className="py-3 pr-3 text-right">Ocio Real</th>
                   <th className="py-3 pr-3 text-right">Imp.NET</th>
+                  <th className="py-3 pr-3 text-right">Contrib.</th>
+                  <th className="py-3 pr-3 text-right">% Esper.</th>
+                  <th className="py-3 pr-3 text-center">Jornada</th>
                   <th className="py-3 pr-3">Status</th>
                   <th className="py-3 pr-3 text-right">NET Time</th>
                   <th className="py-3 pr-3 border-l border-[#2a2a2a] bg-orange-500/5">
@@ -1471,6 +1628,35 @@ export default function DetalheColaboradorPage() {
                         impactoReal < 0 ? 'text-red-400' : 'text-gray-400'
                       }`}>
                         {impactoReal === null ? '—' : `${impactoReal > 0 ? '+' : ''}${impactoReal.toFixed(1)}%`}
+                      </td>
+                      {/* 🆕 Contribuição NET do dia (salva no upload) */}
+                      <td className={`py-3 pr-3 text-right font-mono font-bold ${
+                        h.contribuicao_net == null ? 'text-gray-500' :
+                        Number(h.contribuicao_net) > 0 ? 'text-green-400' :
+                        Number(h.contribuicao_net) < 0 ? 'text-red-400' : 'text-gray-400'
+                      }`} title="Quanto puxou o NET do time (pç/h)">
+                        {h.contribuicao_net == null ? '—' : `${Number(h.contribuicao_net) > 0 ? '+' : ''}${Number(h.contribuicao_net).toFixed(1)}`}
+                      </td>
+                      {/* 🆕 Rendimento vs esperado do dia */}
+                      <td className={`py-3 pr-3 text-right font-mono font-bold ${
+                        h.pct_esperado == null ? 'text-gray-500' :
+                        Number(h.pct_esperado) >= 100 ? 'text-green-400' : 'text-yellow-400'
+                      }`} title="Unidades ÷ (meta × horas)">
+                        {h.pct_esperado == null ? '—' : `${Number(h.pct_esperado).toFixed(0)}%`}
+                      </td>
+                      {/* 🆕 Marcador de jornada 7h20 (parcial / normal / hora extra) */}
+                      <td className="py-3 pr-3 text-center">
+                        {(() => {
+                          const hp = Number(h.horas_processo) || 0;
+                          if (hp <= 0) return <span className="text-gray-600 text-xs">—</span>;
+                          if (hp < REFERENCIA_HORAS - 0.25) {
+                            return <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-yellow-500/15 text-yellow-400" title={`${hp.toFixed(1)}h — abaixo de 7h20 (parcial: atraso/treinamento/imprevisto)`}>🟡 Parcial</span>;
+                          }
+                          if (hp > REFERENCIA_HORAS + 0.25) {
+                            return <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-blue-500/15 text-blue-400" title={`${hp.toFixed(1)}h — acima de 7h20 (hora extra)`}>🔵 Extra</span>;
+                          }
+                          return <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-green-500/15 text-green-400" title={`${hp.toFixed(1)}h — jornada normal`}>🟢 Normal</span>;
+                        })()}
                       </td>
                       <td className="py-3 pr-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${corStatus(h.status_meta)}`}>{h.status_meta}</span>
