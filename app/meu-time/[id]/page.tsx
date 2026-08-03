@@ -382,6 +382,12 @@ export default function DetalheColaboradorPage() {
   
   // 🆕 STATE pro CSV mensal
   const [produtividadeMensal, setProdutividadeMensal] = useState<ProdutividadeMensal | null>(null);
+
+  // 🆕 MÊS SELECIONADO (formato "YYYY-MM"). Inicia no mês ATUAL (comportamento de hoje mantido)
+  const agoraInit = new Date();
+  const [mesSelecionado, setMesSelecionado] = useState<string>(
+    `${agoraInit.getFullYear()}-${String(agoraInit.getMonth() + 1).padStart(2, '0')}`
+  );
   
   const [metaIma, setMetaIma] = useState(1567);
   const [metaProcesso, setMetaProcesso] = useState(296);
@@ -416,7 +422,6 @@ export default function DetalheColaboradorPage() {
             buscarMetaIma(data.processo);
             buscarMetaProcesso(data.processo);
             buscarTurnosDiarios();
-            buscarProdutividadeMensal(data.id_groot); // 🆕
           }
         }
       } catch (e: unknown) {
@@ -428,23 +433,30 @@ export default function DetalheColaboradorPage() {
     }
     buscar();
   }, [id]);
+
+  // 🆕 Busca a produtividade mensal SEMPRE que o mês selecionado mudar
+  useEffect(() => {
+    if (colaborador?.id_groot) {
+      buscarProdutividadeMensal(colaborador.id_groot, mesSelecionado);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colaborador, mesSelecionado]);
   
-  // 🆕 BUSCA PRODUTIVIDADE MENSAL DO MÊS ATUAL
-  async function buscarProdutividadeMensal(idGroot: string) {
+  // 🆕 BUSCA PRODUTIVIDADE MENSAL DO MÊS SELECIONADO
+  async function buscarProdutividadeMensal(idGroot: string, mesRef: string) {
     try {
-      const agora = new Date();
-      const mesAtual = agora.getMonth() + 1;
-      const anoAtual = agora.getFullYear();
+      const [anoRef, mesNum] = mesRef.split('-').map(Number);
       const { data } = await supabase
         .from('produtividade_mensal')
         .select('id, mes, ano, prod_liquida_media, unidades_total, dias_trabalhados')
         .eq('id_groot', idGroot)
-        .eq('mes', mesAtual)
-        .eq('ano', anoAtual)
+        .eq('mes', mesNum)
+        .eq('ano', anoRef)
         .maybeSingle();
-      if (data) setProdutividadeMensal(data as ProdutividadeMensal);
+      setProdutividadeMensal(data ? (data as ProdutividadeMensal) : null);
     } catch (e) {
       console.warn('Erro produtividade mensal:', e);
+      setProdutividadeMensal(null);
     }
   }
   
@@ -720,13 +732,39 @@ export default function DetalheColaboradorPage() {
     }
     return null;
   })();
+
+  // 🆕 MESES DISPONÍVEIS: distintos (ano+mes) que têm dados no histórico + SEMPRE o mês atual.
+  // Cada item guarda ano e mês separadamente — jun/26 e jun/27 nunca se misturam.
+  const mesesDisponiveis = (() => {
+    const set = new Map<string, { ano: number; mes: number }>();
+    historico.forEach((h) => {
+      const d = new Date(h.data_referencia + 'T12:00:00');
+      const ano = d.getFullYear();
+      const mes = d.getMonth() + 1;
+      const chave = `${ano}-${String(mes).padStart(2, '0')}`;
+      set.set(chave, { ano, mes });
+    });
+    // garante o mês atual na lista (mesmo sem dados), pra manter o comportamento de hoje
+    const ag = new Date();
+    const chaveAtual = `${ag.getFullYear()}-${String(ag.getMonth() + 1).padStart(2, '0')}`;
+    if (!set.has(chaveAtual)) set.set(chaveAtual, { ano: ag.getFullYear(), mes: ag.getMonth() + 1 });
+    return Array.from(set.entries())
+      .map(([chave, v]) => ({ chave, ...v }))
+      .sort((a, b) => (a.ano !== b.ano ? b.ano - a.ano : b.mes - a.mes)); // mais recente primeiro
+  })();
+
+  const nomesMes = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const rotuloMesSelecionado = (() => {
+    const [ano, mes] = mesSelecionado.split('-').map(Number);
+    return `${nomesMes[(mes || 1) - 1]}/${ano}`;
+  })();
+
+  // 🆕 Histórico do MÊS SELECIONADO (antes era fixo no mês atual)
   const historicoFiltrado = (() => {
-    const agora = new Date();
-    const mesAtual = agora.getMonth() + 1;
-    const anoAtual = agora.getFullYear();
+    const [anoSel, mesSel] = mesSelecionado.split('-').map(Number);
     return historico.filter((h) => {
       const data = new Date(h.data_referencia + 'T12:00:00');
-      return data.getMonth() + 1 === mesAtual && data.getFullYear() === anoAtual;
+      return data.getMonth() + 1 === mesSel && data.getFullYear() === anoSel;
     });
   })();
   const analisesOciosidade: AnaliseOciosidade[] = historicoFiltrado
@@ -900,6 +938,32 @@ export default function DetalheColaboradorPage() {
           </div>
         </div>
       </div>
+
+      {/* 🆕 FILTRO DE MÊS — abre no mês atual, permite escolher meses com dados */}
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">📆</span>
+          <div>
+            <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Mês em análise</p>
+            <p className="text-sm text-white font-bold capitalize">{rotuloMesSelecionado}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500 font-bold">Ver outro mês:</label>
+          <select
+            value={mesSelecionado}
+            onChange={(e) => setMesSelecionado(e.target.value)}
+            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-2 text-white font-bold text-sm focus:border-[#FFD700] focus:outline-none cursor-pointer"
+          >
+            {mesesDisponiveis.map((m) => (
+              <option key={m.chave} value={m.chave}>
+                {nomesMes[m.mes - 1]}/{m.ano}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {perfilDominante.perfil !== 'SEM DADOS' && (
         <div className={`bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 ${
           perfilDominante.perfil === 'EQUILIBRADO' ? 'border-green-500/40' :
@@ -1218,12 +1282,10 @@ export default function DetalheColaboradorPage() {
         <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
           <h2 className="text-lg font-bold text-emerald-400 flex items-center gap-2">📦 Ocupação P2M</h2>
           {(() => {
-            const agora = new Date();
-            const mesAtual = agora.getMonth() + 1;
-            const anoAtual = agora.getFullYear();
+            const [anoSel, mesSel] = mesSelecionado.split('-').map(Number);
             const doMes = ocupacaoP2M.filter((o) => {
               const d = new Date(o.data_referencia + 'T12:00:00');
-              return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual;
+              return d.getMonth() + 1 === mesSel && d.getFullYear() === anoSel;
             });
             if (doMes.length === 0) return <p className="text-sm text-gray-400">Sem dados deste mês.</p>;
             const mediaOcup = doMes.reduce((s, o) => s + o.ocupacao_pct, 0) / doMes.length;
@@ -1342,15 +1404,15 @@ export default function DetalheColaboradorPage() {
       </div>
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico do Mês</h2>
+          <h2 className="text-lg font-bold text-[#FFD700]">📊 Histórico — <span className="capitalize">{rotuloMesSelecionado}</span></h2>
           <div className="flex items-center gap-2 flex-wrap">
             {turnosDiarios.length > 0 && (
               <span className="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full font-bold">
                 📥 {turnosDiarios.length} turnos
               </span>
             )}
-            <span className="text-xs bg-cyan-500/20 text-cyan-400 px-3 py-1 rounded-full font-bold">
-              {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+            <span className="text-xs bg-cyan-500/20 text-cyan-400 px-3 py-1 rounded-full font-bold capitalize">
+              {rotuloMesSelecionado}
             </span>
           </div>
         </div>
