@@ -29,6 +29,8 @@ type Registro = {
 
 // ============================================================
 // Categorização dos status do Checkpoint (Justificativa Checkpoint)
+// status/categoria seguem o padrão que a tabela presenca já usa.
+// O 'motivo' guarda SEMPRE o texto cru (é o que o Copiloto IA lê).
 // ============================================================
 function categorizarStatus(motivo: string): {
   status: string;
@@ -42,9 +44,9 @@ function categorizarStatus(motivo: string): {
   if (m.includes('p - presente') || m.includes('sie') || m.includes('sinergia')) {
     return { status: 'presente', categoria: 'presenca', contaAbs: false, contaPresenca: true };
   }
-  // 🔴 CONTA ABS (falta de verdade)
+  // 🔴 CONTA ABS
   if (m.includes('fi - falta') || m.includes('falta injustificada')) {
-    return { status: 'falta_injustificada', categoria: 'falta', contaAbs: true, contaPresenca: false };
+    return { status: 'falta', categoria: 'falta', contaAbs: true, contaPresenca: false };
   }
   if (m.includes('ab - abandono') || m.includes('abandono')) {
     return { status: 'abandono', categoria: 'falta', contaAbs: true, contaPresenca: false };
@@ -57,22 +59,22 @@ function categorizarStatus(motivo: string): {
   }
   // ⚪ NEUTRO (não conta ABS nem presença)
   if (m.includes('dsr') || m.includes('escala')) {
-    return { status: 'dsr_folga', categoria: 'neutro', contaAbs: false, contaPresenca: false };
+    return { status: 'descanso', categoria: 'descanso', contaAbs: false, contaPresenca: false };
   }
   if (m.includes('férias') || m.includes('ferias') || m.startsWith('fe -')) {
-    return { status: 'ferias', categoria: 'neutro', contaAbs: false, contaPresenca: false };
+    return { status: 'ferias', categoria: 'ferias', contaAbs: false, contaPresenca: false };
   }
-  if (m.includes('banco de horas planejado') || m.includes('bh - banco de horas planejado')) {
-    return { status: 'bh_planejado', categoria: 'neutro', contaAbs: false, contaPresenca: false };
+  if (m.includes('banco de horas planejado')) {
+    return { status: 'bh_planejado', categoria: 'bh_planejado', contaAbs: false, contaPresenca: false };
   }
   if (m.includes('acompanhamento filho')) {
-    return { status: 'justificado', categoria: 'neutro', contaAbs: false, contaPresenca: false };
+    return { status: 'justificado', categoria: 'justificado', contaAbs: false, contaPresenca: false };
   }
   // ⚫ INATIVO (fora da operação)
-  if (m.includes('afastado') || m.includes('af - ')) {
+  if (m.includes('afastado') || m.startsWith('af -')) {
     return { status: 'afastado', categoria: 'inativo', contaAbs: false, contaPresenca: false };
   }
-  if (m.includes('desligado') || m.includes('de - ')) {
+  if (m.includes('desligado') || m.startsWith('de -')) {
     return { status: 'desligado', categoria: 'inativo', contaAbs: false, contaPresenca: false };
   }
   if (m.includes('hcd') || m.includes('divergente')) {
@@ -133,11 +135,11 @@ function formatarDataBr(iso: string): string {
 
 const LABELS_STATUS: Record<string, { label: string; cor: string }> = {
   presente: { label: '✅ Presente', cor: 'text-green-400' },
-  falta_injustificada: { label: '🔴 Falta', cor: 'text-red-400' },
+  falta: { label: '🔴 Falta', cor: 'text-red-400' },
   abandono: { label: '🔴 Abandono', cor: 'text-red-400' },
   bh_nao_planejado: { label: '🔴 BH não planej.', cor: 'text-red-400' },
   atestado: { label: '🟡 Atestado', cor: 'text-yellow-400' },
-  dsr_folga: { label: '⚪ Folga (DSR)', cor: 'text-gray-400' },
+  descanso: { label: '⚪ Folga (DSR)', cor: 'text-gray-400' },
   ferias: { label: '🏖️ Férias', cor: 'text-blue-400' },
   bh_planejado: { label: '⚪ BH planej.', cor: 'text-gray-400' },
   justificado: { label: '🟡 Justificado', cor: 'text-yellow-400' },
@@ -261,7 +263,7 @@ export default function ImportarPresencaPage() {
   // resumo por categoria (só do time)
   const resumo = {
     presencas: registrosDoTime.filter((r) => r.contaPresenca).length,
-    faltas: registrosDoTime.filter((r) => r.status === 'falta_injustificada').length,
+    faltas: registrosDoTime.filter((r) => r.status === 'falta').length,
     atestados: registrosDoTime.filter((r) => r.status === 'atestado').length,
     afastados: registrosDoTime.filter((r) => r.status === 'afastado').length,
     ferias: registrosDoTime.filter((r) => r.status === 'ferias').length,
@@ -278,26 +280,49 @@ export default function ImportarPresencaPage() {
     setSucesso(null);
 
     try {
-      const linhas = registrosDoTime.map((r) => ({
-        id_groot: r.idGroot,
-        nome_colab: r.nomeOficial || r.nomeCsv,
-        data_referencia: r.data,
-        status: r.status,
-        motivo: r.motivo,
-        categoria: r.categoria,
-        conta_abs: r.contaAbs,
-        conta_presenca: r.contaPresenca,
-        arquivo_origem: nomeArquivo,
-        chave_unica: `${r.idGroot}|${r.data}`,
-      }));
+      // Só as colunas que existem na tabela presenca
+      const linhas = registrosDoTime.map((r) => {
+        const cadastro = colaboradores.find(
+          (c) => normalizarIdGroot(c.id_groot) === r.idGroot
+        );
+        return {
+          id_groot: r.idGroot,
+          nome_colab: r.nomeOficial || r.nomeCsv,
+          processo: cadastro?.processo || null, // processo vem do cadastro (não do CSV)
+          data_referencia: r.data,
+          status: r.status,
+          motivo: r.motivo,
+          categoria: r.categoria,
+          conta_abs: r.contaAbs,
+          conta_presenca: r.contaPresenca,
+          registrado_por: 'csv_meli',
+        };
+      });
+
+      // 🛡️ Proteção contra duplicata SEM depender de chave única:
+      // apaga os registros desses colaboradores nesse período antes de inserir.
+      const idsDoTime = Array.from(new Set(registrosDoTime.map((r) => r.idGroot)));
+      const datasDoArquivo = Array.from(new Set(registrosDoTime.map((r) => r.data))).sort();
+      const dataMin = datasDoArquivo[0];
+      const dataMax = datasDoArquivo[datasDoArquivo.length - 1];
+
+      if (dataMin && dataMax && idsDoTime.length > 0) {
+        const { error: errDel } = await supabase
+          .from('presenca')
+          .delete()
+          .in('id_groot', idsDoTime)
+          .gte('data_referencia', dataMin)
+          .lte('data_referencia', dataMax);
+        if (errDel) {
+          console.error('Erro limpando presença anterior:', errDel);
+        }
+      }
 
       const batchSize = 200;
       let total = 0;
       for (let i = 0; i < linhas.length; i += batchSize) {
         const batch = linhas.slice(i, i + batchSize);
-        const { error } = await supabase
-          .from('presenca')
-          .upsert(batch, { onConflict: 'chave_unica' });
+        const { error } = await supabase.from('presenca').insert(batch);
         if (error) {
           setErro('Erro salvando: ' + error.message);
           setEnviando(false);
