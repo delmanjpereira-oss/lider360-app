@@ -157,6 +157,8 @@ export default function ImportarPresencaPage() {
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState<string | null>(null);
+  // 🆕 fase do overlay: null | 'lendo' | 'salvando' | 'sucesso'
+  const [fase, setFase] = useState<null | 'lendo' | 'salvando' | 'sucesso'>(null);
 
   useEffect(() => {
     carregarColaboradores();
@@ -174,6 +176,7 @@ export default function ImportarPresencaPage() {
     if (!arq) return;
     setNomeArquivo(arq.name);
     setCarregandoCsv(true);
+    setFase('lendo');
     setErro(null);
     setSucesso(null);
     setRegistros([]);
@@ -196,6 +199,7 @@ export default function ImportarPresencaPage() {
 
         if (!temIdGroot || !temData || !temJustificativa) {
           setCarregandoCsv(false);
+          setFase(null);
           setErro(
             `❌ Esse não parece o CSV Checkpoint. Precisa ter as colunas IDGroot, Data e Justificativa Checkpoint. Encontradas: ${colsDetectadas.join(', ')}`
           );
@@ -237,9 +241,11 @@ export default function ImportarPresencaPage() {
 
         setRegistros(novos);
         setCarregandoCsv(false);
+        setFase(null);
       },
       error: (err) => {
         setCarregandoCsv(false);
+        setFase(null);
         setErro('Erro lendo CSV: ' + err.message);
       },
     });
@@ -276,6 +282,7 @@ export default function ImportarPresencaPage() {
       return;
     }
     setEnviando(true);
+    setFase('salvando');
     setErro(null);
     setSucesso(null);
 
@@ -326,11 +333,14 @@ export default function ImportarPresencaPage() {
         if (error) {
           setErro('Erro salvando: ' + error.message);
           setEnviando(false);
+          setFase(null);
           return;
         }
         total += batch.length;
       }
 
+      // ✅ mostra a animação de sucesso antes de limpar
+      setFase('sucesso');
       setSucesso(`✅ ${total} registros de presença salvos! (${resumo.absTotal} contam como ABS)`);
       if (typeof window !== 'undefined' && (window as any).showToast) {
         (window as any).showToast('success', `✅ ${total} registros salvos!`);
@@ -339,9 +349,11 @@ export default function ImportarPresencaPage() {
         setRegistros([]);
         setNomeArquivo('');
         setSucesso(null);
-      }, 3500);
+        setFase(null);
+      }, 2200);
     } catch (e: any) {
       setErro('Erro: ' + e.message);
+      setFase(null);
     } finally {
       setEnviando(false);
     }
@@ -349,6 +361,58 @@ export default function ImportarPresencaPage() {
 
   return (
     <div className="space-y-6">
+      {/* 🆕 OVERLAY PROFISSIONAL — lendo / salvando / sucesso */}
+      {fase && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-md animate-[presFadeIn_0.2s_ease-out]">
+          <div className="bg-gradient-to-br from-[#141b2e] to-[#0a0f1c] border border-[#FFD700]/20 rounded-3xl px-10 py-9 text-center shadow-2xl shadow-black/50 max-w-sm mx-4">
+            {fase === 'sucesso' ? (
+              <>
+                {/* círculo de sucesso animado */}
+                <div className="relative mx-auto mb-5 w-20 h-20">
+                  <div className="absolute inset-0 rounded-full bg-green-500/20 animate-ping"></div>
+                  <div className="relative w-20 h-20 rounded-full bg-green-500/15 border-2 border-green-400 flex items-center justify-center">
+                    <span className="text-4xl animate-[presPopIn_0.4s_ease-out]">✅</span>
+                  </div>
+                </div>
+                <p className="text-2xl font-black text-green-400 mb-1">Salvo!</p>
+                <p className="text-sm text-gray-400">Dados de presença atualizados</p>
+              </>
+            ) : (
+              <>
+                {/* spinner duplo dark MELI */}
+                <div className="relative mx-auto mb-6 w-20 h-20">
+                  <div className="absolute inset-0 rounded-full border-4 border-[#FFD700]/10"></div>
+                  <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-[#FFD700] animate-spin"></div>
+                  <div className="absolute inset-2 rounded-full border-4 border-transparent border-b-cyan-400 animate-spin [animation-duration:1.5s] [animation-direction:reverse]"></div>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-2xl">{fase === 'lendo' ? '📄' : '💾'}</span>
+                  </div>
+                </div>
+                <p className="text-xl font-black text-white mb-1">
+                  {fase === 'lendo' ? 'Lendo arquivo...' : 'Salvando no banco...'}
+                </p>
+                <p className="text-sm text-gray-400">
+                  {fase === 'lendo'
+                    ? 'Processando os registros do CSV'
+                    : `Gravando ${registrosDoTime.length} registros`}
+                </p>
+                {/* barrinha indeterminada */}
+                <div className="mt-5 h-1 w-full bg-[#0a0a0a] rounded-full overflow-hidden">
+                  <div className="h-full w-1/3 bg-gradient-to-r from-transparent via-[#FFD700] to-transparent animate-[presSlide_1.2s_ease-in-out_infinite]"></div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* animações do overlay (style normal, sem depender de styled-jsx) */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes presFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes presPopIn { 0% { transform: scale(0); } 70% { transform: scale(1.2); } 100% { transform: scale(1); } }
+        @keyframes presSlide { 0% { transform: translateX(-120%); } 100% { transform: translateX(420%); } }
+      ` }} />
+
       <Link href="/presenca" className="text-gray-400 hover:text-white inline-flex items-center gap-2">
         ← Voltar para PRESENÇA
       </Link>
@@ -402,13 +466,6 @@ export default function ImportarPresencaPage() {
           <input type="file" accept=".csv" onChange={onArquivoChange} className="hidden" />
         </label>
       </div>
-
-      {carregandoCsv && (
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 text-center">
-          <span className="text-4xl block mb-2 animate-pulse">⏳</span>
-          <p className="text-gray-400">Lendo CSV...</p>
-        </div>
-      )}
 
       {/* PERÍODO + RESUMO */}
       {registros.length > 0 && !carregandoCsv && (
@@ -530,9 +587,19 @@ export default function ImportarPresencaPage() {
           <button
             onClick={enviar}
             disabled={enviando || registrosDoTime.length === 0}
-            className="w-full bg-gradient-to-r from-[#FFD700] to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-black font-bold py-4 rounded-2xl transition-colors disabled:opacity-50 text-lg"
+            className="group w-full bg-gradient-to-r from-[#FFD700] to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-black font-black py-4 rounded-2xl transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed text-lg shadow-lg shadow-yellow-500/20 hover:shadow-yellow-500/40 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] flex items-center justify-center gap-3"
           >
-            {enviando ? '⏳ Salvando...' : `✅ Salvar ${registrosDoTime.length} registros do seu time`}
+            {enviando ? (
+              <>
+                <span className="inline-block w-5 h-5 border-[3px] border-black/30 border-t-black rounded-full animate-spin"></span>
+                Salvando...
+              </>
+            ) : (
+              <>
+                <span className="group-hover:scale-110 transition-transform">✅</span>
+                Salvar {registrosDoTime.length} registros do seu time
+              </>
+            )}
           </button>
         </>
       )}
