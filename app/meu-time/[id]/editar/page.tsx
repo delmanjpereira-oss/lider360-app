@@ -1,31 +1,24 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '../../../../lib/supabase';
-
 export default function EditarColaboradorPage() {
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
-
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState(false);
-
   const [form, setForm] = useState({
     id_groot: '',
     nome: '',
-    cargo: '',
     processo: 'Checkin',
     status: 'Ativo',
     carreira: 'REP1',
     data_admissao: '',
-    aniversario: '',
   });
-
   useEffect(() => {
     async function buscar() {
       try {
@@ -34,19 +27,16 @@ export default function EditarColaboradorPage() {
           .select('*')
           .eq('id', parseInt(id))
           .single();
-
         if (error) {
           setErro(error.message);
         } else if (data) {
           setForm({
             id_groot: data.id_groot || '',
             nome: data.nome || '',
-            cargo: data.cargo || '',
             processo: data.processo || 'Checkin',
             status: data.status || 'Ativo',
             carreira: data.carreira || 'REP1',
             data_admissao: data.data_admissao || '',
-            aniversario: data.aniversario || '',
           });
         }
       } catch (e: unknown) {
@@ -58,42 +48,37 @@ export default function EditarColaboradorPage() {
     }
     buscar();
   }, [id]);
-
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) {
     setForm({ ...form, [e.target.name]: e.target.value });
   }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSalvando(true);
     setErro(null);
     setSucesso(false);
-
     try {
       if (!form.id_groot.trim() || !form.nome.trim()) {
         setErro('ID Groot e Nome são obrigatórios');
         setSalvando(false);
         return;
       }
-
       const dados = {
         id_groot: form.id_groot.trim(),
         nome: form.nome.trim(),
-        cargo: form.cargo.trim() || null,
+        // 🎯 Carreira também vai pro campo `cargo` do banco (mantém consistência
+        // com a tela de Cadastrar e evita deixar o cargo vazio no card).
+        cargo: form.carreira,
         processo: form.processo,
         status: form.status,
         carreira: form.carreira,
         data_admissao: form.data_admissao || null,
-        aniversario: form.aniversario || null,
       };
-
       const { error } = await supabase
         .from('colaboradores')
         .update(dados)
         .eq('id', parseInt(id));
-
       if (error) {
         setErro(error.message);
       } else {
@@ -109,7 +94,6 @@ export default function EditarColaboradorPage() {
       setSalvando(false);
     }
   }
-
   if (loading) {
     return (
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-12 text-center">
@@ -118,7 +102,6 @@ export default function EditarColaboradorPage() {
       </div>
     );
   }
-
   return (
     <div className="space-y-6 max-w-2xl">
       <Link
@@ -127,14 +110,12 @@ export default function EditarColaboradorPage() {
       >
         ← Voltar
       </Link>
-
       <div>
         <h1 className="text-4xl font-black mb-2">
           Editar <span className="text-[#FFD700]">Colaborador</span>
         </h1>
         <p className="text-gray-400">Atualize os dados do colaborador</p>
       </div>
-
       {sucesso && (
         <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4 flex items-center gap-3">
           <span className="text-2xl">✅</span>
@@ -143,7 +124,6 @@ export default function EditarColaboradorPage() {
           </p>
         </div>
       )}
-
       {erro && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-start gap-3">
           <span className="text-2xl">❌</span>
@@ -153,7 +133,6 @@ export default function EditarColaboradorPage() {
           </div>
         </div>
       )}
-
       <form
         onSubmit={handleSubmit}
         className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 space-y-4"
@@ -171,7 +150,6 @@ export default function EditarColaboradorPage() {
             className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-white focus:border-[#FFD700] focus:outline-none transition-colors"
           />
         </div>
-
         <div>
           <label className="block text-sm font-bold text-gray-300 mb-2">
             Nome <span className="text-red-400">*</span>
@@ -185,20 +163,6 @@ export default function EditarColaboradorPage() {
             className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-white focus:border-[#FFD700] focus:outline-none transition-colors"
           />
         </div>
-
-        <div>
-          <label className="block text-sm font-bold text-gray-300 mb-2">
-            Cargo
-          </label>
-          <input
-            type="text"
-            name="cargo"
-            value={form.cargo}
-            onChange={handleChange}
-            className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-white focus:border-[#FFD700] focus:outline-none transition-colors"
-          />
-        </div>
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-bold text-gray-300 mb-2">
@@ -215,7 +179,6 @@ export default function EditarColaboradorPage() {
               <option value="Sorting">Sorting</option>
             </select>
           </div>
-
           <div>
             <label className="block text-sm font-bold text-gray-300 mb-2">
               Status
@@ -231,7 +194,6 @@ export default function EditarColaboradorPage() {
               <option value="Afastado">Afastado</option>
             </select>
           </div>
-
           <div>
             <label className="block text-sm font-bold text-gray-300 mb-2">
               Carreira
@@ -248,7 +210,6 @@ export default function EditarColaboradorPage() {
               <option value="MULTIPLICADOR">MULTIPLICADOR</option>
             </select>
           </div>
-
           <div>
             <label className="block text-sm font-bold text-gray-300 mb-2">
               Data de Admissão
@@ -261,21 +222,7 @@ export default function EditarColaboradorPage() {
               className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-white focus:border-[#FFD700] focus:outline-none transition-colors"
             />
           </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-bold text-gray-300 mb-2">
-              Aniversário
-            </label>
-            <input
-              type="date"
-              name="aniversario"
-              value={form.aniversario}
-              onChange={handleChange}
-              className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-4 py-3 text-white focus:border-[#FFD700] focus:outline-none transition-colors"
-            />
-          </div>
         </div>
-
         <div className="flex gap-3 pt-4 border-t border-[#2a2a2a]">
           <button
             type="submit"
