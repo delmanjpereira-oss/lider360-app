@@ -71,23 +71,20 @@ function getSemanaIso(dataStr: string): { semana: number; ano: number; mes: numb
 // 🎯 Analisa o período dos registros
 function analisarPeriodo(registros: Registro[]): PeriodoInfo | null {
   if (registros.length === 0) return null;
-  
-  // Pega todas as datas únicas
+
   const datasSet = new Set<string>();
   registros.forEach((r) => datasSet.add(r.data));
   const datasOrdenadas = Array.from(datasSet).sort();
-  
+
   if (datasOrdenadas.length === 0) return null;
-  
+
   const dataInicio = datasOrdenadas[0];
   const dataFim = datasOrdenadas[datasOrdenadas.length - 1];
-  
-  // Calcula range em dias
+
   const inicioMs = new Date(dataInicio + 'T12:00:00').getTime();
   const fimMs = new Date(dataFim + 'T12:00:00').getTime();
   const totalDiasRange = Math.floor((fimMs - inicioMs) / (1000 * 60 * 60 * 24)) + 1;
-  
-  // Descobre dias faltando (se algum)
+
   const diasFaltando: string[] = [];
   const cursor = new Date(inicioMs);
   const fim = new Date(fimMs);
@@ -98,8 +95,7 @@ function analisarPeriodo(registros: Registro[]): PeriodoInfo | null {
     }
     cursor.setDate(cursor.getDate() + 1);
   }
-  
-  // Determina tipo baseado no total de dias com dados
+
   const diasComDadosCount = datasOrdenadas.length;
   let tipo: PeriodoInfo['tipo'] = 'diario';
   if (diasComDadosCount === 1) tipo = 'diario';
@@ -107,10 +103,9 @@ function analisarPeriodo(registros: Registro[]): PeriodoInfo | null {
   else if (diasComDadosCount <= 15) tipo = 'quinzenal';
   else if (diasComDadosCount < 28) tipo = 'mensal_parcial';
   else tipo = 'mensal_completo';
-  
-  // Pega mes/ano/trimestre da primeira data
+
   const info = getSemanaIso(dataInicio);
-  
+
   return {
     dataInicio,
     dataFim,
@@ -136,7 +131,7 @@ export default function UploadOcupacaoPage() {
   const [nomeArquivo, setNomeArquivo] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [carregandoCsv, setCarregandoCsv] = useState(false);
-  
+
   // 🆕 Estados de filtro
   const [modoFiltro, setModoFiltro] = useState<'tudo' | 'especifico' | 'range'>('tudo');
   const [dataEspecifica, setDataEspecifica] = useState<string>('');
@@ -144,11 +139,16 @@ export default function UploadOcupacaoPage() {
   const [rangeFim, setRangeFim] = useState<string>('');
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState<string | null>(null);
-  
+
+  // 🆕 Proteção contra duplicata: dias que já existem no banco + confirmação
+  const [diasJaExistentes, setDiasJaExistentes] = useState<string[]>([]);
+  const [checandoDuplicata, setChecandoDuplicata] = useState(false);
+  const [confirmouSobrescrever, setConfirmouSobrescrever] = useState(false);
+
   useEffect(() => {
     carregarColaboradores();
   }, []);
-  
+
   async function carregarColaboradores() {
     const { data } = await supabase
       .from('colaboradores')
@@ -156,17 +156,17 @@ export default function UploadOcupacaoPage() {
       .eq('status', 'Ativo');
     if (data) setColaboradores(data);
   }
-  
+
   function vincular(userId: string): { idGroot: string | null; nomeOficial: string | null } {
     const colab = colaboradores.find((c) => c.id_groot === userId);
     if (colab) return { idGroot: colab.id_groot, nomeOficial: colab.nome };
     return { idGroot: null, nomeOficial: null };
   }
-  
+
   function onArquivoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const arq = e.target.files?.[0];
     if (!arq) return;
-    
+
     setNomeArquivo(arq.name);
     setCarregandoCsv(true);
     setErro(null);
@@ -175,19 +175,21 @@ export default function UploadOcupacaoPage() {
     setDataEspecifica('');
     setRangeInicio('');
     setRangeFim('');
-    
+    setDiasJaExistentes([]);
+    setConfirmouSobrescrever(false);
+
     Papa.parse<LinhaCSV>(arq, {
       header: true,
       skipEmptyLines: true,
       complete: (resultado) => {
         const linhas = resultado.data;
         const novos: Registro[] = [];
-        
+
         linhas.forEach((l) => {
           const userId = l['USER_ID']?.trim();
           const dataStr = parseDataBr(l['Data']);
           if (!userId || !dataStr) return;
-          
+
           const rep = l['Rep']?.trim() || '';
           const teamLeader = l['Team Leader']?.trim() || '';
           const supervisor = l['Supervisor']?.trim() || '';
@@ -195,7 +197,7 @@ export default function UploadOcupacaoPage() {
           const ocupacaoPct = parsePercent(l['Ocupação (%)']);
           const { semana, ano, mes, trimestre } = getSemanaIso(dataStr);
           const { idGroot, nomeOficial } = vincular(userId);
-          
+
           novos.push({
             userId,
             data: dataStr,
@@ -213,9 +215,11 @@ export default function UploadOcupacaoPage() {
             vinculado: !!idGroot,
           });
         });
-        
+
         setRegistros(novos);
         setCarregandoCsv(false);
+        // 🆕 Depois de ler, checa no banco quais dias já existem
+        checarDuplicata(novos);
       },
       error: (err) => {
         setCarregandoCsv(false);
@@ -223,35 +227,76 @@ export default function UploadOcupacaoPage() {
       },
     });
   }
-  
+
+  // 🆕 Checa no banco quais DIAS do CSV já foram importados antes
+  async function checarDuplicata(regs: Registro[]) {
+    const dias = Array.from(new Set(regs.map((r) => r.data))).sort();
+    if (dias.length === 0) {
+      setDiasJaExistentes([]);
+      return;
+    }
+    setChecandoDuplicata(true);
+    try {
+      const { data } = await supabase
+        .from('ocupacao_p2m')
+        .select('data_referencia')
+        .in('data_referencia', dias);
+      const existentes = Array.from(
+        new Set((data || []).map((d: any) => d.data_referencia))
+      ).sort();
+      setDiasJaExistentes(existentes as string[]);
+    } catch (e) {
+      // se a checagem falhar, não trava o upload — só não mostra o aviso
+      setDiasJaExistentes([]);
+    } finally {
+      setChecandoDuplicata(false);
+    }
+  }
+
+  // 🆕 Reseta a confirmação se o filtro mudar (pra não sobrescrever sem querer)
+  useEffect(() => {
+    setConfirmouSobrescrever(false);
+  }, [modoFiltro, dataEspecifica, rangeInicio, rangeFim]);
+
   // 🆕 Analisa período dos registros
   const periodoInfo = analisarPeriodo(registros);
-  
+
   // 🆕 Filtra registros conforme modo escolhido
   const registrosFiltrados = (() => {
     if (modoFiltro === 'tudo') return registros;
-    
+
     if (modoFiltro === 'especifico' && dataEspecifica) {
       return registros.filter((r) => r.data === dataEspecifica);
     }
-    
+
     if (modoFiltro === 'range' && rangeInicio && rangeFim) {
       return registros.filter((r) => r.data >= rangeInicio && r.data <= rangeFim);
     }
-    
+
     return registros;
   })();
-  
+
+  // 🆕 Dos dias que vou realmente enviar (após filtro), quais já existem no banco?
+  const diasDoEnvio = Array.from(new Set(registrosFiltrados.map((r) => r.data)));
+  const diasConflitantes = diasDoEnvio.filter((d) => diasJaExistentes.includes(d));
+  const temConflito = diasConflitantes.length > 0;
+
   async function enviar() {
     if (registrosFiltrados.length === 0) {
       setErro('⚠️ Nenhum registro pra enviar. Ajuste o filtro.');
       return;
     }
-    
+
+    // 🆕 BLOQUEIO: se há dias que já existem e ainda não confirmou, exige confirmação
+    if (temConflito && !confirmouSobrescrever) {
+      setErro('⚠️ Esse período já foi importado. Marque a confirmação abaixo pra sobrescrever.');
+      return;
+    }
+
     setEnviando(true);
     setErro(null);
     setSucesso(null);
-    
+
     try {
       const linhas = registrosFiltrados.map((r) => ({
         user_id: r.userId,
@@ -269,16 +314,16 @@ export default function UploadOcupacaoPage() {
         trimestre: r.trimestre,
         chave_unica: `${r.userId}|${r.data}`,
       }));
-      
+
       const batchSize = 200;
       let totalEnviado = 0;
-      
+
       for (let i = 0; i < linhas.length; i += batchSize) {
         const batch = linhas.slice(i, i + batchSize);
         const { error } = await supabase
           .from('ocupacao_p2m')
           .upsert(batch, { onConflict: 'chave_unica' });
-        
+
         if (error) {
           setErro('Erro salvando: ' + error.message);
           if (typeof window !== 'undefined' && (window as any).showToast) {
@@ -289,16 +334,21 @@ export default function UploadOcupacaoPage() {
         }
         totalEnviado += batch.length;
       }
-      
-      setSucesso(`✅ ${totalEnviado} registros enviados com sucesso!`);
+
+      const msgSobrescrito = temConflito
+        ? ` (${diasConflitantes.length} dia(s) atualizado(s))`
+        : '';
+      setSucesso(`✅ ${totalEnviado} registros enviados com sucesso!${msgSobrescrito}`);
       if (typeof window !== 'undefined' && (window as any).showToast) {
         (window as any).showToast('success', `✅ ${totalEnviado} registros enviados!`);
       }
-      
+
       setTimeout(() => {
         setRegistros([]);
         setNomeArquivo('');
         setModoFiltro('tudo');
+        setDiasJaExistentes([]);
+        setConfirmouSobrescrever(false);
         setSucesso(null);
       }, 3000);
     } catch (e: any) {
@@ -307,37 +357,37 @@ export default function UploadOcupacaoPage() {
       setEnviando(false);
     }
   }
-  
+
   const vinculados = registrosFiltrados.filter((r) => r.vinculado).length;
   const naoVinculados = registrosFiltrados.filter((r) => !r.vinculado).length;
-  
+
   return (
     <div className="space-y-6">
       <Link href="/meu-time" className="text-gray-400 hover:text-white inline-flex items-center gap-2">
         ← Voltar para MEU TIME
       </Link>
-      
+
       <div>
         <h1 className="text-4xl font-black mb-2">
           🎯 Upload <span className="text-[#FFD700]">Ocupação P2M</span>
         </h1>
         <p className="text-gray-400">Suba o CSV "Totefullness — Visão Gestão P2M"</p>
       </div>
-      
+
       {sucesso && (
         <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4 flex items-start gap-3">
           <span className="text-2xl">✅</span>
           <p className="text-green-400 font-bold">{sucesso}</p>
         </div>
       )}
-      
+
       {erro && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-start gap-3">
           <span className="text-2xl">❌</span>
           <p className="text-red-300 text-sm">{erro}</p>
         </div>
       )}
-      
+
       {/* SELEÇÃO DE ARQUIVO */}
       <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-dashed border-[#FFD700]/30 rounded-2xl p-8">
         <div className="text-center">
@@ -353,14 +403,14 @@ export default function UploadOcupacaoPage() {
           {nomeArquivo && <p className="mt-3 text-sm text-gray-300">📄 {nomeArquivo}</p>}
         </div>
       </div>
-      
+
       {carregandoCsv && (
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 text-center">
           <span className="text-4xl block mb-2">⏳</span>
           <p className="text-gray-400">Lendo CSV...</p>
         </div>
       )}
-      
+
       {/* 🆕 CARD DE PERÍODO DETECTADO */}
       {periodoInfo && !carregandoCsv && (
         <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border-2 border-purple-500/40 rounded-2xl p-5">
@@ -409,7 +459,7 @@ export default function UploadOcupacaoPage() {
               </p>
             </div>
           </div>
-          
+
           {periodoInfo.diasFaltando.length > 0 && (
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm">
               <p className="text-yellow-300 font-bold mb-1">
@@ -423,14 +473,50 @@ export default function UploadOcupacaoPage() {
           )}
         </div>
       )}
-      
+
+      {/* 🆕 AVISO DE DUPLICATA + CONFIRMAÇÃO (Opção B) */}
+      {temConflito && !carregandoCsv && registros.length > 0 && (
+        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border-2 border-amber-500/50 rounded-2xl p-5">
+          <p className="text-amber-300 font-black flex items-center gap-2 mb-2 text-lg">
+            ⚠️ Esse período já foi importado
+          </p>
+          <p className="text-sm text-gray-300 mb-2">
+            <strong className="text-amber-200">{diasConflitantes.length} dia(s)</strong> do que você vai enviar já existem no banco:
+          </p>
+          <p className="text-xs text-amber-200/80 mb-3">
+            {diasConflitantes.slice(0, 10).map((d) => formatarDataBr(d)).join(', ')}
+            {diasConflitantes.length > 10 && ` e mais ${diasConflitantes.length - 10}...`}
+          </p>
+          <p className="text-xs text-gray-400 mb-3">
+            Se continuar, os dados desses dias serão <strong className="text-amber-200">substituídos</strong> pelos novos do CSV (cada colaborador do mesmo dia é atualizado). Os demais dias são inseridos normalmente.
+          </p>
+          <label className="flex items-center gap-3 bg-[#0a0a0a] border border-amber-500/30 rounded-lg p-3 cursor-pointer hover:border-amber-500/50 transition-all">
+            <input
+              type="checkbox"
+              checked={confirmouSobrescrever}
+              onChange={(e) => setConfirmouSobrescrever(e.target.checked)}
+              className="w-5 h-5 accent-amber-500"
+            />
+            <span className="text-sm font-bold text-amber-200">
+              Sim, entendi e quero sobrescrever esses {diasConflitantes.length} dia(s)
+            </span>
+          </label>
+        </div>
+      )}
+
+      {checandoDuplicata && !carregandoCsv && (
+        <p className="text-xs text-gray-500 flex items-center gap-2">
+          <span className="animate-spin inline-block">⏳</span> Verificando se o período já foi importado...
+        </p>
+      )}
+
       {/* 🆕 FILTROS OPCIONAIS */}
       {periodoInfo && !carregandoCsv && periodoInfo.diasComDados.length > 1 && (
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-5 space-y-4">
           <div className="flex items-center gap-2 mb-2">
             <h3 className="text-sm font-bold text-[#FFD700]">🎯 Filtrar antes de salvar (opcional)</h3>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <button
               onClick={() => setModoFiltro('tudo')}
@@ -445,7 +531,7 @@ export default function UploadOcupacaoPage() {
                 {registros.length} registros
               </p>
             </button>
-            
+
             <button
               onClick={() => setModoFiltro('especifico')}
               className={`p-3 rounded-lg border-2 transition-all font-bold text-sm ${
@@ -457,7 +543,7 @@ export default function UploadOcupacaoPage() {
               📅 Data específica
               <p className="text-xs font-normal opacity-80 mt-1">Selecionar 1 dia</p>
             </button>
-            
+
             <button
               onClick={() => setModoFiltro('range')}
               className={`p-3 rounded-lg border-2 transition-all font-bold text-sm ${
@@ -470,7 +556,7 @@ export default function UploadOcupacaoPage() {
               <p className="text-xs font-normal opacity-80 mt-1">De X até Y</p>
             </button>
           </div>
-          
+
           {modoFiltro === 'especifico' && (
             <div className="bg-[#0a0a0a] border border-blue-500/30 rounded-lg p-3">
               <label className="block text-xs font-bold text-blue-300 mb-2">
@@ -484,16 +570,17 @@ export default function UploadOcupacaoPage() {
                 <option value="">— Selecione uma data —</option>
                 {periodoInfo.diasComDados.map((d) => {
                   const qtdRegs = registros.filter((r) => r.data === d).length;
+                  const jaTem = diasJaExistentes.includes(d);
                   return (
                     <option key={d} value={d}>
-                      {formatarDataBr(d)} ({qtdRegs} registros)
+                      {formatarDataBr(d)} ({qtdRegs} registros){jaTem ? ' • já importado' : ''}
                     </option>
                   );
                 })}
               </select>
             </div>
           )}
-          
+
           {modoFiltro === 'range' && (
             <div className="bg-[#0a0a0a] border border-purple-500/30 rounded-lg p-3 grid grid-cols-2 gap-3">
               <div>
@@ -520,7 +607,7 @@ export default function UploadOcupacaoPage() {
               </div>
             </div>
           )}
-          
+
           {modoFiltro !== 'tudo' && registrosFiltrados.length !== registros.length && (
             <div className="text-xs text-gray-400 flex items-center gap-2">
               🔍 Filtro ativo:
@@ -529,7 +616,7 @@ export default function UploadOcupacaoPage() {
           )}
         </div>
       )}
-      
+
       {/* STATS + PREVIEW */}
       {registros.length > 0 && !carregandoCsv && (
         <>
@@ -549,13 +636,13 @@ export default function UploadOcupacaoPage() {
               <p className="text-xs text-red-400">❌ Não vinculados</p>
             </div>
           </div>
-          
+
           {naoVinculados > 0 && (
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm text-yellow-300">
               ⚠️ <strong>{naoVinculados} registros não foram vinculados.</strong> O <code>USER_ID</code> do CSV precisa estar cadastrado como <code>id_groot</code> em MEU TIME.
             </div>
           )}
-          
+
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl overflow-hidden">
             <div className="bg-[#0a0a0a] px-4 py-2 border-b border-[#2a2a2a] flex items-center justify-between">
               <h3 className="text-sm font-bold text-[#FFD700]">
@@ -605,14 +692,16 @@ export default function UploadOcupacaoPage() {
               )}
             </div>
           </div>
-          
+
           <button
             onClick={enviar}
-            disabled={enviando || registrosFiltrados.length === 0}
-            className="w-full bg-gradient-to-r from-[#FFD700] to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-black font-bold py-4 rounded-2xl transition-colors disabled:opacity-50 text-lg"
+            disabled={enviando || registrosFiltrados.length === 0 || (temConflito && !confirmouSobrescrever)}
+            className="w-full bg-gradient-to-r from-[#FFD700] to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-black font-bold py-4 rounded-2xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-lg"
           >
-            {enviando 
-              ? '⏳ Enviando...' 
+            {enviando
+              ? '⏳ Enviando...'
+              : temConflito && !confirmouSobrescrever
+              ? '🔒 Confirme a sobrescrita acima pra continuar'
               : `✅ Enviar ${registrosFiltrados.length} ${registrosFiltrados.length === 1 ? 'registro' : 'registros'}`}
           </button>
         </>
