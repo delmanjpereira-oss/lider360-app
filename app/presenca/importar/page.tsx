@@ -1,384 +1,330 @@
 'use client';
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Papa from 'papaparse';
 import { supabase } from '../../../lib/supabase';
 
-// ============================================
-// MAPEAMENTO DE STATUS — MELI → app
-// ============================================
-
-type ConfigStatus = {
-  contaPresenca: boolean;
-  contaAbs: boolean;
-  categoria: 'presenca' | 'falta' | 'justificado' | 'descanso' | 'inativo';
-  emoji: string;
-  cor: string;
-};
-
-const MAPA_STATUS: Record<string, ConfigStatus> = {
-  'P - Presente':                       { contaPresenca: true, contaAbs: false, categoria: 'presenca',    emoji: '✅', cor: 'green' },
-  'DSR - Escala':                       { contaPresenca: false, contaAbs: false, categoria: 'descanso',   emoji: '🟦', cor: 'blue' },
-  'FI - Falta Injustificada':           { contaPresenca: false, contaAbs: true, categoria: 'falta',       emoji: '🔴', cor: 'red' },
-  'BH - Banco de Horas planejado':      { contaPresenca: false, contaAbs: false, categoria: 'justificado', emoji: '🟡', cor: 'yellow' },
-  'BH - Banco de Horas não planejado':  { contaPresenca: false, contaAbs: true, categoria: 'falta',       emoji: '🟠', cor: 'orange' },
-  'FJ - Atestado':                      { contaPresenca: false, contaAbs: false, categoria: 'justificado', emoji: '🩺', cor: 'green' },
-  'FJ - Falecimento 1º grau':           { contaPresenca: false, contaAbs: false, categoria: 'justificado', emoji: '🕊️', cor: 'gray' },
-  'FJ - Abono Fretado (falta)':         { contaPresenca: false, contaAbs: true, categoria: 'falta',       emoji: '🚌', cor: 'orange' },
-  'DE - Desligado':                     { contaPresenca: false, contaAbs: false, categoria: 'inativo',    emoji: '🚪', cor: 'gray' },
-  'HTF - HC Transferido para outro CAD':{ contaPresenca: false, contaAbs: false, categoria: 'inativo',    emoji: '🔄', cor: 'gray' },
-  'SIE - Sinergia Externa':             { contaPresenca: true, contaAbs: false, categoria: 'presenca',    emoji: '🤝', cor: 'purple' },
-  'FE - Férias':                        { contaPresenca: false, contaAbs: false, categoria: 'justificado', emoji: '🌴', cor: 'cyan' },
-  'CE - Curso Externo':                 { contaPresenca: false, contaAbs: false, categoria: 'justificado', emoji: '🎓', cor: 'blue' },
-  'AB - Abandono':                      { contaPresenca: false, contaAbs: true, categoria: 'falta',       emoji: '🚫', cor: 'red' },
-  'AF - Afastamento':                   { contaPresenca: false, contaAbs: false, categoria: 'inativo',    emoji: '🏥', cor: 'gray' },
-  'TR - Treinamento':                   { contaPresenca: false, contaAbs: false, categoria: 'justificado', emoji: '🎓', cor: 'cyan' },
-};
-
-function configStatus(status: string): ConfigStatus {
-  if (MAPA_STATUS[status]) return MAPA_STATUS[status];
-  const sUpper = status.toUpperCase();
-  if (sUpper.includes('PRESENTE')) return MAPA_STATUS['P - Presente'];
-  if (sUpper.includes('DSR')) return MAPA_STATUS['DSR - Escala'];
-  if (sUpper.includes('FALTA INJUSTIF')) return MAPA_STATUS['FI - Falta Injustificada'];
-  if (sUpper.includes('ATESTADO')) return MAPA_STATUS['FJ - Atestado'];
-  if (sUpper.includes('FÉRIAS') || sUpper.includes('FERIAS')) return MAPA_STATUS['FE - Férias'];
-  if (sUpper.includes('SINERGIA')) return MAPA_STATUS['SIE - Sinergia Externa'];
-  if (sUpper.includes('BANCO DE HORAS')) {
-    return sUpper.includes('NÃO PLAN') 
-      ? MAPA_STATUS['BH - Banco de Horas não planejado']
-      : MAPA_STATUS['BH - Banco de Horas planejado'];
-  }
-  return { contaPresenca: false, contaAbs: false, categoria: 'justificado', emoji: '❓', cor: 'gray' };
-}
-
-// ============================================
-// PARSER
-// ============================================
-
-function detectarDelimitador(texto: string): string {
-  const primeiraLinha = texto.split('\n')[0] || '';
-  const tabs = (primeiraLinha.match(/\t/g) || []).length;
-  const pontosVirgula = (primeiraLinha.match(/;/g) || []).length;
-  const virgulas = (primeiraLinha.match(/,/g) || []).length;
-  if (tabs >= 10) return '\t';
-  if (pontosVirgula > virgulas) return ';';
-  return ',';
-}
-
-function parsearData(s: string): string | null {
-  const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!m) return null;
-  const dia = m[1].padStart(2, '0');
-  const mes = m[2].padStart(2, '0');
-  return `${m[3]}-${mes}-${dia}`;
-}
-
-function parsearLinhaCSV(linha: string, delim: string): string[] {
-  const cells: string[] = [];
-  let atual = '';
-  let dentroAspas = false;
-  for (let i = 0; i < linha.length; i++) {
-    const c = linha[i];
-    if (c === '"') {
-      dentroAspas = !dentroAspas;
-    } else if (c === delim && !dentroAspas) {
-      cells.push(atual);
-      atual = '';
-    } else {
-      atual += c;
-    }
-  }
-  cells.push(atual);
-  return cells.map(c => c.trim());
-}
-
-// ============================================
-// TIPOS
-// ============================================
-
-type RegistroPresenca = {
-  id_groot: string;
-  nome_colab: string;
-  processo: string;
-  data_entrada: string | null;
-  data_referencia: string;
-  status_meli: string;
-  status_app: string;
-  categoria: string;
-  conta_presenca: boolean;
-  conta_abs: boolean;
-  emoji: string;
-};
-
-type ColabPreview = {
+type Colaborador = {
   id_groot: string;
   nome: string;
-  processo: string;
-  dataEntradaCSV: string | null;
-  dataAdmissaoAtual: string | null;
-  precisaAtualizarData: boolean;
-  totalDias: number;
-  presencas: number;
-  faltas: number;
-  justificados: number;
-  descansos: number;
-  pctAbs: number;
-  registros: RegistroPresenca[];
+  processo: string | null;
+  status: string;
 };
 
-// ============================================
-// PÁGINA
-// ============================================
+type LinhaCSV = Record<string, string>;
+
+type Registro = {
+  idGroot: string;
+  nomeCsv: string;
+  data: string;          // ISO YYYY-MM-DD
+  motivo: string;        // texto cru da Justificativa Checkpoint
+  status: string;        // categorizado
+  categoria: string;     // presenca | falta | atestado | neutro | inativo
+  contaAbs: boolean;
+  contaPresenca: boolean;
+  idGrootCadastro: string | null;
+  nomeOficial: string | null;
+  vinculado: boolean;
+};
+
+// ============================================================
+// Categorização dos status do Checkpoint (Justificativa Checkpoint)
+// ============================================================
+function categorizarStatus(motivo: string): {
+  status: string;
+  categoria: string;
+  contaAbs: boolean;
+  contaPresenca: boolean;
+} {
+  const m = (motivo || '').toLowerCase();
+
+  // ✅ PRESENÇA
+  if (m.includes('p - presente') || m.includes('sie') || m.includes('sinergia')) {
+    return { status: 'presente', categoria: 'presenca', contaAbs: false, contaPresenca: true };
+  }
+  // 🔴 CONTA ABS (falta de verdade)
+  if (m.includes('fi - falta') || m.includes('falta injustificada')) {
+    return { status: 'falta_injustificada', categoria: 'falta', contaAbs: true, contaPresenca: false };
+  }
+  if (m.includes('ab - abandono') || m.includes('abandono')) {
+    return { status: 'abandono', categoria: 'falta', contaAbs: true, contaPresenca: false };
+  }
+  if (m.includes('não planejado') || m.includes('nao planejado')) {
+    return { status: 'bh_nao_planejado', categoria: 'falta', contaAbs: true, contaPresenca: false };
+  }
+  if (m.includes('atestado')) {
+    return { status: 'atestado', categoria: 'atestado', contaAbs: true, contaPresenca: false };
+  }
+  // ⚪ NEUTRO (não conta ABS nem presença)
+  if (m.includes('dsr') || m.includes('escala')) {
+    return { status: 'dsr_folga', categoria: 'neutro', contaAbs: false, contaPresenca: false };
+  }
+  if (m.includes('férias') || m.includes('ferias') || m.startsWith('fe -')) {
+    return { status: 'ferias', categoria: 'neutro', contaAbs: false, contaPresenca: false };
+  }
+  if (m.includes('banco de horas planejado') || m.includes('bh - banco de horas planejado')) {
+    return { status: 'bh_planejado', categoria: 'neutro', contaAbs: false, contaPresenca: false };
+  }
+  if (m.includes('acompanhamento filho')) {
+    return { status: 'justificado', categoria: 'neutro', contaAbs: false, contaPresenca: false };
+  }
+  // ⚫ INATIVO (fora da operação)
+  if (m.includes('afastado') || m.includes('af - ')) {
+    return { status: 'afastado', categoria: 'inativo', contaAbs: false, contaPresenca: false };
+  }
+  if (m.includes('desligado') || m.includes('de - ')) {
+    return { status: 'desligado', categoria: 'inativo', contaAbs: false, contaPresenca: false };
+  }
+  if (m.includes('hcd') || m.includes('divergente')) {
+    return { status: 'hc_divergente', categoria: 'inativo', contaAbs: false, contaPresenca: false };
+  }
+  // fallback
+  return { status: 'outro', categoria: 'neutro', contaAbs: false, contaPresenca: false };
+}
+
+function normalizarChave(s: string): string {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
+}
+
+function pegarValor(linha: LinhaCSV, aliases: string[]): string {
+  const chaves = Object.keys(linha);
+  for (const alias of aliases) {
+    const aliasNorm = normalizarChave(alias);
+    for (const chave of chaves) {
+      if (normalizarChave(chave) === aliasNorm) {
+        return linha[chave] || '';
+      }
+    }
+  }
+  return '';
+}
+
+function normalizarIdGroot(v: string): string {
+  return String(v || '').replace(/\D/g, '').trim();
+}
+
+// Converte data pra ISO. O Checkpoint já vem ISO (2026-07-31), mas aceita BR também.
+function parsearData(valor: string): string | null {
+  if (!valor) return null;
+  const s = valor.trim();
+  // já ISO?
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
+  }
+  // BR dd/mm/yyyy
+  const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (br) {
+    return `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`;
+  }
+  return null;
+}
+
+function formatarDataBr(iso: string): string {
+  const p = iso.split('-');
+  if (p.length !== 3) return iso;
+  return `${p[2]}/${p[1]}/${p[0]}`;
+}
+
+const LABELS_STATUS: Record<string, { label: string; cor: string }> = {
+  presente: { label: '✅ Presente', cor: 'text-green-400' },
+  falta_injustificada: { label: '🔴 Falta', cor: 'text-red-400' },
+  abandono: { label: '🔴 Abandono', cor: 'text-red-400' },
+  bh_nao_planejado: { label: '🔴 BH não planej.', cor: 'text-red-400' },
+  atestado: { label: '🟡 Atestado', cor: 'text-yellow-400' },
+  dsr_folga: { label: '⚪ Folga (DSR)', cor: 'text-gray-400' },
+  ferias: { label: '🏖️ Férias', cor: 'text-blue-400' },
+  bh_planejado: { label: '⚪ BH planej.', cor: 'text-gray-400' },
+  justificado: { label: '🟡 Justificado', cor: 'text-yellow-400' },
+  afastado: { label: '⚫ Afastado', cor: 'text-gray-500' },
+  desligado: { label: '⚫ Desligado', cor: 'text-gray-500' },
+  hc_divergente: { label: '⚫ HC Diverg.', cor: 'text-gray-500' },
+  outro: { label: '❔ Outro', cor: 'text-gray-400' },
+};
 
 export default function ImportarPresencaPage() {
-  const router = useRouter();
-  const [arquivo, setArquivo] = useState<File | null>(null);
-  const [parseando, setParseando] = useState(false);
-  const [importando, setImportando] = useState(false);
-  const [colabsPreview, setColabsPreview] = useState<ColabPreview[]>([]);
-  const [totalLinhasIgnoradas, setTotalLinhasIgnoradas] = useState(0);
-  const [periodo, setPeriodo] = useState<{ inicio: string; fim: string } | null>(null);
-  const [datasAtualizar, setDatasAtualizar] = useState(0);
-  const [erro, setErro] = useState('');
+  const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
+  const [registros, setRegistros] = useState<Registro[]>([]);
+  const [nomeArquivo, setNomeArquivo] = useState('');
+  const [carregandoCsv, setCarregandoCsv] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [sucesso, setSucesso] = useState<string | null>(null);
 
-  async function selecionarArquivo(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    setArquivo(file);
-    setColabsPreview([]);
-    setErro('');
-    setParseando(true);
-    
-    try {
-      const texto = await file.text();
-      const delim = detectarDelimitador(texto);
-      const linhas = texto.split(/\r?\n/).filter(l => l.trim());
-      
-      if (linhas.length < 2) throw new Error('CSV vazio ou sem dados');
-      
-      const header = parsearLinhaCSV(linhas[0], delim);
-      
-      const idxIdGroot = header.findIndex(h => 
-        h.toUpperCase().replace(/[_ ]/g, '') === 'IDGROOT' || 
-        h.toLowerCase() === 'id_groot'
-      );
-      const idxNome = header.findIndex(h => 
-        h.toLowerCase().includes('nome completo') || h.toLowerCase() === 'nome'
-      );
-      const idxProcesso = header.findIndex(h => h.toLowerCase() === 'processo');
-      const idxDataEntrada = header.findIndex(h => 
-        h.toLowerCase().includes('data de entrada') || h.toLowerCase() === 'data_entrada'
-      );
-      
-      if (idxIdGroot === -1 || idxNome === -1) {
-        throw new Error(`Colunas não encontradas. Encontradas: ${header.slice(0, 18).join(', ')}`);
-      }
-      
-      const colunasDatas: { idx: number; dataIso: string; dataBR: string }[] = [];
-      for (let i = 0; i < header.length; i++) {
-        const dataIso = parsearData(header[i]);
-        if (dataIso) {
-          colunasDatas.push({ idx: i, dataIso, dataBR: header[i] });
-        }
-      }
-      
-      if (colunasDatas.length === 0) {
-        throw new Error('Nenhuma coluna de data encontrada (DD/MM/YYYY)');
-      }
-      
-      setPeriodo({
-        inicio: colunasDatas[0].dataIso,
-        fim: colunasDatas[colunasDatas.length - 1].dataIso,
-      });
-      
-      // 🎯 Busca colabs do MEU TIME com data_admissao atual
-      const { data: meuTime } = await supabase
-        .from('colaboradores')
-        .select('id_groot, nome, status, data_admissao');
-      
-      const meuTimeMap: Record<string, any> = {};
-      (meuTime || []).forEach((c: any) => {
-        meuTimeMap[String(c.id_groot)] = c;
-      });
-      
-      const colabsMap: Record<string, ColabPreview> = {};
-      let ignorados = 0;
-      let precisaAtualizar = 0;
-      
-      for (let i = 1; i < linhas.length; i++) {
-        const cells = parsearLinhaCSV(linhas[i], delim);
-        if (cells.length < Math.max(idxIdGroot, idxNome) + 1) continue;
-        
-        const idGroot = String(cells[idxIdGroot]).trim().replace(/\D/g, '');
-        if (!idGroot) continue;
-        
-        const colabBanco = meuTimeMap[idGroot];
-        if (!colabBanco) {
-          ignorados++;
-          continue;
-        }
-        
-        const nome = cells[idxNome]?.trim() || 'Sem nome';
-        const processo = idxProcesso >= 0 ? cells[idxProcesso]?.trim() || '' : '';
-        const dataEntradaBR = idxDataEntrada >= 0 ? cells[idxDataEntrada]?.trim() : '';
-        const dataEntradaISO = parsearData(dataEntradaBR);
-        
-        // 🎯 Verifica se data_admissao precisa atualizar
-        const dataAdmissaoAtual = colabBanco.data_admissao || null;
-        const precisaAtualizarData = !!(
-          dataEntradaISO && 
-          dataAdmissaoAtual !== dataEntradaISO &&
-          dataAdmissaoAtual !== dataEntradaBR
+  useEffect(() => {
+    carregarColaboradores();
+  }, []);
+
+  async function carregarColaboradores() {
+    const { data } = await supabase
+      .from('colaboradores')
+      .select('id_groot, nome, processo, status');
+    if (data) setColaboradores(data as Colaborador[]);
+  }
+
+  function onArquivoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const arq = e.target.files?.[0];
+    if (!arq) return;
+    setNomeArquivo(arq.name);
+    setCarregandoCsv(true);
+    setErro(null);
+    setSucesso(null);
+    setRegistros([]);
+
+    Papa.parse<LinhaCSV>(arq, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (resultado) => {
+        const linhas = resultado.data;
+        const colsDetectadas = resultado.meta.fields || [];
+
+        // valida se tem as colunas mínimas do Checkpoint
+        const temIdGroot = colsDetectadas.some((c) =>
+          ['idgroot', 'id_groot', 'id groot'].includes(normalizarChave(c))
         );
-        if (precisaAtualizarData) precisaAtualizar++;
-        
-        const registros: RegistroPresenca[] = [];
-        let presencas = 0, faltas = 0, justificados = 0, descansos = 0;
-        
-        for (const cd of colunasDatas) {
-          const statusBruto = cells[cd.idx]?.trim();
-          if (!statusBruto) continue;
-          
-          const config = configStatus(statusBruto);
-          
-          if (config.categoria === 'presenca') presencas++;
-          else if (config.categoria === 'falta') faltas++;
-          else if (config.categoria === 'justificado') justificados++;
-          else if (config.categoria === 'descanso') descansos++;
-          
-          registros.push({
-            id_groot: idGroot,
-            nome_colab: nome,
-            processo,
-            data_entrada: dataEntradaISO,
-            data_referencia: cd.dataIso,
-            status_meli: statusBruto,
-            status_app: config.categoria === 'presenca' ? 'presente' 
-                      : config.categoria === 'falta' ? 'falta'
-                      : config.categoria === 'justificado' ? 'justificado'
-                      : config.categoria === 'descanso' ? 'descanso'
-                      : 'inativo',
-            categoria: config.categoria,
-            conta_presenca: config.contaPresenca,
-            conta_abs: config.contaAbs,
-            emoji: config.emoji,
+        const temData = colsDetectadas.some((c) => normalizarChave(c) === 'data');
+        const temJustificativa = colsDetectadas.some((c) =>
+          normalizarChave(c).includes('justificativa_checkpoint')
+        );
+
+        if (!temIdGroot || !temData || !temJustificativa) {
+          setCarregandoCsv(false);
+          setErro(
+            `❌ Esse não parece o CSV Checkpoint. Precisa ter as colunas IDGroot, Data e Justificativa Checkpoint. Encontradas: ${colsDetectadas.join(', ')}`
+          );
+          return;
+        }
+
+        const mapaCadastro: Record<string, Colaborador> = {};
+        colaboradores.forEach((c) => {
+          mapaCadastro[normalizarIdGroot(c.id_groot)] = c;
+        });
+
+        const novos: Registro[] = [];
+        linhas.forEach((l) => {
+          const idGrootRaw = pegarValor(l, ['IDGroot', 'ID_GROOT', 'ID Groot']);
+          const idGroot = normalizarIdGroot(idGrootRaw);
+          const dataIso = parsearData(pegarValor(l, ['Data']));
+          if (!idGroot || !dataIso) return;
+
+          const nomeCsv = pegarValor(l, ['Colaborador', 'Nome', 'Representante']);
+          // usa "Justificativa Checkpoint" (não a Miscellany)
+          const motivo = pegarValor(l, ['Justificativa Checkpoint']).trim();
+          const cat = categorizarStatus(motivo);
+
+          const cadastro = mapaCadastro[idGroot];
+          novos.push({
+            idGroot,
+            nomeCsv,
+            data: dataIso,
+            motivo,
+            status: cat.status,
+            categoria: cat.categoria,
+            contaAbs: cat.contaAbs,
+            contaPresenca: cat.contaPresenca,
+            idGrootCadastro: cadastro ? cadastro.id_groot : null,
+            nomeOficial: cadastro ? cadastro.nome : null,
+            vinculado: !!cadastro,
           });
-        }
-        
-        const totalContabilizado = presencas + faltas + justificados;
-        const pctAbs = totalContabilizado > 0 ? (faltas / totalContabilizado) * 100 : 0;
-        
-        colabsMap[idGroot] = {
-          id_groot: idGroot,
-          nome,
-          processo,
-          dataEntradaCSV: dataEntradaISO,
-          dataAdmissaoAtual,
-          precisaAtualizarData,
-          totalDias: registros.length,
-          presencas,
-          faltas,
-          justificados,
-          descansos,
-          pctAbs: Number(pctAbs.toFixed(1)),
-          registros,
-        };
-      }
-      
-      const lista = Object.values(colabsMap).sort((a, b) => b.pctAbs - a.pctAbs);
-      
-      setColabsPreview(lista);
-      setTotalLinhasIgnoradas(ignorados);
-      setDatasAtualizar(precisaAtualizar);
-      
-      if (lista.length === 0) {
-        setErro('Nenhum colab do CSV bate com o "Meu Time" cadastrado.');
-      }
-      
-    } catch (e: any) {
-      console.error(e);
-      setErro(e.message || 'Erro ao processar CSV');
-    } finally {
-      setParseando(false);
-    }
+        });
+
+        setRegistros(novos);
+        setCarregandoCsv(false);
+      },
+      error: (err) => {
+        setCarregandoCsv(false);
+        setErro('Erro lendo CSV: ' + err.message);
+      },
+    });
   }
 
-  async function confirmarImportacao() {
-    if (colabsPreview.length === 0 || !periodo) return;
-    
-    setImportando(true);
-    
-    try {
-      // 1️⃣ ATUALIZA data_admissao dos colabs que mudaram
-      for (const c of colabsPreview) {
-        if (c.precisaAtualizarData && c.dataEntradaCSV) {
-          await supabase
-            .from('colaboradores')
-            .update({ data_admissao: c.dataEntradaCSV })
-            .eq('id_groot', c.id_groot);
-        }
-      }
-      
-      // 2️⃣ Apaga registros do período (substitui)
-      await supabase
-        .from('presenca')
-        .delete()
-        .gte('data_referencia', periodo.inicio)
-        .lte('data_referencia', periodo.fim);
-      
-      // 3️⃣ Insere todos os registros novos
-      const todosRegistros = colabsPreview.flatMap(c => c.registros);
-      
-      const registrosParaInserir = todosRegistros.map(r => ({
-        id_groot: r.id_groot,
-        nome_colab: r.nome_colab,
-        processo: r.processo,
-        data_referencia: r.data_referencia,
-        status: r.status_app,
-        motivo: r.status_meli,
-        categoria: r.categoria,
-        conta_abs: r.conta_abs,
-        conta_presenca: r.conta_presenca,
-        registrado_por: 'csv_meli',
-      }));
-      
-      const LOTE = 500;
-      for (let i = 0; i < registrosParaInserir.length; i += LOTE) {
-        const lote = registrosParaInserir.slice(i, i + LOTE);
-        const { error } = await supabase.from('presenca').insert(lote);
-        if (error) throw new Error(error.message);
-      }
-      
-      if (typeof window !== 'undefined' && (window as any).showToast) {
-        (window as any).showToast('success', 
-          `🎉 ${colabsPreview.length} colabs · ${todosRegistros.length} dias · ${datasAtualizar} datas atualizadas`
-        );
-      }
-      
-      setTimeout(() => router.push('/presenca'), 1500);
-      
-    } catch (e: any) {
-      console.error(e);
-      setErro('Erro ao salvar: ' + e.message);
-    } finally {
-      setImportando(false);
-    }
-  }
+  // Só entram no banco os que estão no MEU TIME (vinculados)
+  const registrosDoTime = registros.filter((r) => r.vinculado);
+  const registrosForaDoTime = registros.filter((r) => !r.vinculado);
 
-  const stats = {
-    total: colabsPreview.length,
-    presencas: colabsPreview.reduce((s, c) => s + c.presencas, 0),
-    faltas: colabsPreview.reduce((s, c) => s + c.faltas, 0),
-    justificados: colabsPreview.reduce((s, c) => s + c.justificados, 0),
-    altosAbs: colabsPreview.filter(c => c.pctAbs > 10).length,
+  // 🆕 quem do time (ativo) NÃO apareceu no CSV
+  const idsNoCsv = new Set(registros.map((r) => r.idGroot));
+  const doTimeForaDoCsv = colaboradores.filter(
+    (c) => c.status === 'Ativo' && !idsNoCsv.has(normalizarIdGroot(c.id_groot))
+  );
+
+  // período detectado
+  const datas = Array.from(new Set(registros.map((r) => r.data))).sort();
+  const periodoInicio = datas[0];
+  const periodoFim = datas[datas.length - 1];
+
+  // resumo por categoria (só do time)
+  const resumo = {
+    presencas: registrosDoTime.filter((r) => r.contaPresenca).length,
+    faltas: registrosDoTime.filter((r) => r.status === 'falta_injustificada').length,
+    atestados: registrosDoTime.filter((r) => r.status === 'atestado').length,
+    afastados: registrosDoTime.filter((r) => r.status === 'afastado').length,
+    ferias: registrosDoTime.filter((r) => r.status === 'ferias').length,
+    absTotal: registrosDoTime.filter((r) => r.contaAbs).length,
   };
 
+  async function enviar() {
+    if (registrosDoTime.length === 0) {
+      setErro('⚠️ Nenhum registro do seu time pra enviar.');
+      return;
+    }
+    setEnviando(true);
+    setErro(null);
+    setSucesso(null);
+
+    try {
+      const linhas = registrosDoTime.map((r) => ({
+        id_groot: r.idGroot,
+        nome_colab: r.nomeOficial || r.nomeCsv,
+        data_referencia: r.data,
+        status: r.status,
+        motivo: r.motivo,
+        categoria: r.categoria,
+        conta_abs: r.contaAbs,
+        conta_presenca: r.contaPresenca,
+        arquivo_origem: nomeArquivo,
+        chave_unica: `${r.idGroot}|${r.data}`,
+      }));
+
+      const batchSize = 200;
+      let total = 0;
+      for (let i = 0; i < linhas.length; i += batchSize) {
+        const batch = linhas.slice(i, i + batchSize);
+        const { error } = await supabase
+          .from('presenca')
+          .upsert(batch, { onConflict: 'chave_unica' });
+        if (error) {
+          setErro('Erro salvando: ' + error.message);
+          setEnviando(false);
+          return;
+        }
+        total += batch.length;
+      }
+
+      setSucesso(`✅ ${total} registros de presença salvos! (${resumo.absTotal} contam como ABS)`);
+      if (typeof window !== 'undefined' && (window as any).showToast) {
+        (window as any).showToast('success', `✅ ${total} registros salvos!`);
+      }
+      setTimeout(() => {
+        setRegistros([]);
+        setNomeArquivo('');
+        setSucesso(null);
+      }, 3500);
+    } catch (e: any) {
+      setErro('Erro: ' + e.message);
+    } finally {
+      setEnviando(false);
+    }
+  }
+
   return (
-    <div className="space-y-6 max-w-5xl">
-      <Link href="/presenca" className="text-gray-400 hover:text-white transition-colors inline-flex items-center gap-2">
+    <div className="space-y-6">
+      <Link href="/presenca" className="text-gray-400 hover:text-white inline-flex items-center gap-2">
         ← Voltar para PRESENÇA
       </Link>
 
@@ -386,183 +332,183 @@ export default function ImportarPresencaPage() {
         <h1 className="text-4xl font-black mb-2">
           📥 Importar <span className="text-[#FFD700]">Presença</span>
         </h1>
-        <p className="text-gray-400">
-          Sobe o CSV do MELI - app filtra só o seu time e atualiza tudo
-        </p>
+        <p className="text-gray-400">Sobe o CSV Checkpoint (Absenteísmo) — o app filtra só o seu time</p>
       </div>
 
-      <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/5 border border-blue-500/30 rounded-2xl p-6">
-        <h2 className="text-lg font-bold text-blue-300 mb-3 flex items-center gap-2">
-          💡 O que o app vai fazer
-        </h2>
-        <ol className="space-y-2 text-sm text-gray-300 list-decimal pl-5">
-          <li>Identifica os colabs do seu time pelo <code className="bg-[#0a0a0a] px-1.5 rounded text-blue-300">ID_GROOT</code></li>
-          <li>Salva presença/falta/atestado de cada dia</li>
-          <li><strong className="text-yellow-300">Atualiza data de admissão</strong> de cada colab automaticamente</li>
-          <li>Copiloto IA usa esses dados pra análise de carreira/janela</li>
-        </ol>
+      {sucesso && (
+        <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4 flex items-start gap-3">
+          <span className="text-2xl">✅</span>
+          <p className="text-green-400 font-bold">{sucesso}</p>
+        </div>
+      )}
+      {erro && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-start gap-3">
+          <span className="text-2xl">❌</span>
+          <p className="text-red-300 text-sm">{erro}</p>
+        </div>
+      )}
+
+      {/* CARD EXPLICATIVO */}
+      <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-5">
+        <h3 className="text-blue-300 font-bold mb-3 flex items-center gap-2">💡 O que o app vai fazer</h3>
+        <ul className="space-y-2 text-sm text-gray-300">
+          <li>1. Identifica os colabs do seu time pelo <code className="bg-blue-500/10 px-1 rounded">IDGroot</code></li>
+          <li>2. Salva presença/falta/atestado de cada dia (coluna <strong>Justificativa Checkpoint</strong>)</li>
+          <li>3. Calcula quem <strong>conta como ABS</strong> (falta, abandono, atestado, BH não planejado)</li>
+          <li>4. Copiloto IA usa esses dados pra análise de absenteísmo</li>
+        </ul>
       </div>
 
-      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
-        <label className="block">
-          <div className="border-2 border-dashed border-[#2a2a2a] hover:border-[#FFD700]/40 rounded-2xl p-8 text-center cursor-pointer transition-all">
-            <span className="text-6xl block mb-3">📂</span>
-            <p className="text-white font-bold mb-1">
-              {arquivo ? arquivo.name : 'Clique pra selecionar o CSV'}
-            </p>
-            <p className="text-xs text-gray-500">
-              {arquivo 
-                ? `${(arquivo.size / 1024).toFixed(1)} KB - clique pra trocar`
-                : 'CSV do MELI (Pessoas - Lista de Presença)'}
-            </p>
-            <input
-              type="file"
-              accept=".csv,.txt,.tsv"
-              onChange={selecionarArquivo}
-              className="hidden"
-              disabled={parseando || importando}
-            />
-          </div>
+      {/* UPLOAD */}
+      <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border-2 border-dashed border-[#FFD700]/30 rounded-2xl p-8">
+        <label className="block text-center cursor-pointer">
+          <span className="text-6xl block mb-3">📂</span>
+          {nomeArquivo ? (
+            <>
+              <p className="text-lg font-bold text-white">{nomeArquivo}</p>
+              <p className="text-xs text-gray-500 mt-1">clique pra trocar</p>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-bold text-white">Escolher CSV Checkpoint</p>
+              <p className="text-xs text-gray-500 mt-1">Absenteísmo — Painel de Gestão RC</p>
+            </>
+          )}
+          <input type="file" accept=".csv" onChange={onArquivoChange} className="hidden" />
         </label>
       </div>
 
-      {parseando && (
-        <div className="text-center py-8">
-          <span className="text-5xl block mb-3 animate-pulse">⏳</span>
-          <p className="text-gray-400 font-bold">Processando CSV...</p>
+      {carregandoCsv && (
+        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 text-center">
+          <span className="text-4xl block mb-2 animate-pulse">⏳</span>
+          <p className="text-gray-400">Lendo CSV...</p>
         </div>
       )}
 
-      {erro && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4">
-          <p className="text-red-300 font-bold">❌ {erro}</p>
-        </div>
-      )}
-
-      {colabsPreview.length > 0 && !parseando && (
+      {/* PERÍODO + RESUMO */}
+      {registros.length > 0 && !carregandoCsv && (
         <>
-          {periodo && (
-            <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border border-purple-500/30 rounded-2xl p-4">
-              <p className="text-purple-300 font-bold mb-1 flex items-center gap-2">
-                📅 Período detectado
+          <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/5 border-2 border-purple-500/40 rounded-2xl p-5">
+            <h3 className="text-purple-300 font-black text-lg mb-3">📆 Período detectado</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-[#0a0a0a] rounded-lg p-3">
+                <p className="text-[10px] text-gray-500 uppercase font-bold">Período</p>
+                <p className="text-sm font-mono font-bold text-purple-300">
+                  {periodoInicio ? formatarDataBr(periodoInicio) : '—'}
+                </p>
+                <p className="text-xs text-gray-400">até {periodoFim ? formatarDataBr(periodoFim) : '—'}</p>
+              </div>
+              <div className="bg-[#0a0a0a] rounded-lg p-3">
+                <p className="text-[10px] text-gray-500 uppercase font-bold">Dias</p>
+                <p className="text-2xl font-black text-purple-300">{datas.length}</p>
+              </div>
+              <div className="bg-[#0a0a0a] rounded-lg p-3">
+                <p className="text-[10px] text-gray-500 uppercase font-bold">Do seu time</p>
+                <p className="text-2xl font-black text-green-400">{registrosDoTime.length}</p>
+              </div>
+              <div className="bg-[#0a0a0a] rounded-lg p-3">
+                <p className="text-[10px] text-gray-500 uppercase font-bold">Fora do time</p>
+                <p className="text-2xl font-black text-gray-500">{registrosForaDoTime.length}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* RESUMO POR CATEGORIA */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3 text-center">
+              <p className="text-2xl font-black text-green-400">{resumo.presencas}</p>
+              <p className="text-[10px] text-gray-400">Presenças</p>
+            </div>
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-center">
+              <p className="text-2xl font-black text-red-400">{resumo.faltas}</p>
+              <p className="text-[10px] text-gray-400">Faltas</p>
+            </div>
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 text-center">
+              <p className="text-2xl font-black text-yellow-400">{resumo.atestados}</p>
+              <p className="text-[10px] text-gray-400">Atestados</p>
+            </div>
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 text-center">
+              <p className="text-2xl font-black text-blue-400">{resumo.ferias}</p>
+              <p className="text-[10px] text-gray-400">Férias</p>
+            </div>
+            <div className="bg-gray-500/10 border border-gray-500/30 rounded-xl p-3 text-center">
+              <p className="text-2xl font-black text-gray-400">{resumo.afastados}</p>
+              <p className="text-[10px] text-gray-400">Afastados</p>
+            </div>
+            <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3 text-center">
+              <p className="text-2xl font-black text-orange-400">{resumo.absTotal}</p>
+              <p className="text-[10px] text-gray-400">Contam ABS</p>
+            </div>
+          </div>
+
+          {/* 🆕 AVISO: quem do time NÃO está no CSV */}
+          {doTimeForaDoCsv.length > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4">
+              <p className="text-amber-300 font-bold mb-2 flex items-center gap-2">
+                ⚠️ {doTimeForaDoCsv.length} colaborador(es) do seu time NÃO estão no CSV
               </p>
-              <p className="text-white text-lg font-mono">
-                {periodo.inicio.split('-').reverse().join('/')} → {periodo.fim.split('-').reverse().join('/')}
+              <p className="text-xs text-gray-400 mb-2">
+                Esses ativos não têm registro de presença nesse arquivo. Confira se ficaram de fora:
               </p>
-              <div className="flex gap-2 mt-2 flex-wrap text-xs">
-                {totalLinhasIgnoradas > 0 && (
-                  <span className="text-gray-400">ℹ️ {totalLinhasIgnoradas} colab(s) fora do seu time (ignorados)</span>
-                )}
-                {datasAtualizar > 0 && (
-                  <span className="text-yellow-300 font-bold">📅 {datasAtualizar} data(s) de admissão serão atualizadas</span>
+              <div className="flex flex-wrap gap-2">
+                {doTimeForaDoCsv.slice(0, 20).map((c) => (
+                  <span key={c.id_groot} className="text-xs bg-[#0a0a0a] border border-amber-500/20 rounded-full px-3 py-1 text-amber-200">
+                    {c.nome}
+                  </span>
+                ))}
+                {doTimeForaDoCsv.length > 20 && (
+                  <span className="text-xs text-gray-500 px-2 py-1">+ {doTimeForaDoCsv.length - 20}...</span>
                 )}
               </div>
             </div>
           )}
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-4">
-              <span className="text-2xl block mb-1">👥</span>
-              <p className="text-2xl font-black text-white">{stats.total}</p>
-              <p className="text-xs text-gray-400">Colabs do time</p>
+          {/* PREVIEW */}
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl overflow-hidden">
+            <div className="bg-[#0a0a0a] px-4 py-2 border-b border-[#2a2a2a]">
+              <h3 className="text-sm font-bold text-[#FFD700]">
+                📋 Preview do seu time ({registrosDoTime.length} registros)
+              </h3>
             </div>
-            <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4">
-              <span className="text-2xl block mb-1">✅</span>
-              <p className="text-2xl font-black text-green-400">{stats.presencas}</p>
-              <p className="text-xs text-green-300">Presenças</p>
-            </div>
-            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4">
-              <span className="text-2xl block mb-1">🔴</span>
-              <p className="text-2xl font-black text-red-400">{stats.faltas}</p>
-              <p className="text-xs text-red-300">Faltas</p>
-            </div>
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-4">
-              <span className="text-2xl block mb-1">🩺</span>
-              <p className="text-2xl font-black text-yellow-400">{stats.justificados}</p>
-              <p className="text-xs text-yellow-300">Justificados</p>
-            </div>
-            <div className="bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4">
-              <span className="text-2xl block mb-1">⚠️</span>
-              <p className="text-2xl font-black text-orange-400">{stats.altosAbs}</p>
-              <p className="text-xs text-orange-300">ABS &gt; 10%</p>
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-6">
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              📋 Preview por Colaborador
-            </h3>
-            
-            <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
-              {colabsPreview.map((c) => (
-                <div 
-                  key={c.id_groot}
-                  className={`p-3 rounded-xl border ${
-                    c.pctAbs > 10 ? 'bg-red-500/5 border-red-500/30'
-                    : c.pctAbs > 5 ? 'bg-yellow-500/5 border-yellow-500/30'
-                    : 'bg-green-500/5 border-green-500/30'
-                  }`}
-                >
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-bold truncate flex items-center gap-2">
-                        {c.nome}
-                        {c.precisaAtualizarData && (
-                          <span className="text-[10px] bg-yellow-500/30 text-yellow-200 px-1.5 py-0.5 rounded font-bold">
-                            📅 atualizar data
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-gray-500 font-mono">
-                        ID: {c.id_groot} {c.processo && `· ${c.processo}`}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs">
-                      <div className="text-center">
-                        <p className="text-green-400 font-mono font-bold">{c.presencas}</p>
-                        <p className="text-[10px] text-gray-500">Presente</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-red-400 font-mono font-bold">{c.faltas}</p>
-                        <p className="text-[10px] text-gray-500">Faltas</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-yellow-400 font-mono font-bold">{c.justificados}</p>
-                        <p className="text-[10px] text-gray-500">Justif</p>
-                      </div>
-                      <div className="text-center">
-                        <span className={`text-base font-mono font-black px-3 py-1 rounded-full ${
-                          c.pctAbs > 10 ? 'bg-red-500/20 text-red-300'
-                          : c.pctAbs > 5 ? 'bg-yellow-500/20 text-yellow-300'
-                          : 'bg-green-500/20 text-green-300'
-                        }`}>
-                          {c.pctAbs.toFixed(1)}%
-                        </span>
-                        <p className="text-[10px] text-gray-500 mt-1">ABS</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="overflow-x-auto max-h-96">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-[#0a0a0a]">
+                  <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400">
+                    <th className="py-2 px-3">Colaborador</th>
+                    <th className="py-2 px-3">Data</th>
+                    <th className="py-2 px-3">Status</th>
+                    <th className="py-2 px-3 text-center">ABS?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {registrosDoTime.slice(0, 60).map((r, i) => {
+                    const lbl = LABELS_STATUS[r.status] || LABELS_STATUS.outro;
+                    return (
+                      <tr key={i} className="border-b border-[#2a2a2a] hover:bg-[#0a0a0a]">
+                        <td className="py-2 px-3 text-white text-xs">{r.nomeOficial || r.nomeCsv}</td>
+                        <td className="py-2 px-3 text-gray-300 text-xs font-mono">{formatarDataBr(r.data)}</td>
+                        <td className={`py-2 px-3 text-xs font-bold ${lbl.cor}`}>{lbl.label}</td>
+                        <td className="py-2 px-3 text-center">
+                          {r.contaAbs ? <span className="text-red-400 font-bold">SIM</span> : <span className="text-gray-600">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {registrosDoTime.length > 60 && (
+                <div className="text-center py-2 text-xs text-gray-500">+ {registrosDoTime.length - 60} linhas...</div>
+              )}
             </div>
           </div>
 
-          <div className="flex gap-3 flex-wrap sticky bottom-4">
-            <button
-              onClick={() => { setArquivo(null); setColabsPreview([]); setErro(''); setPeriodo(null); }}
-              disabled={importando}
-              className="flex-1 bg-[#1a1a1a] hover:bg-[#222] border border-[#2a2a2a] text-white font-bold py-3 px-6 rounded-xl transition-all disabled:opacity-50"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={confirmarImportacao}
-              disabled={importando}
-              className="flex-1 bg-gradient-to-br from-[#FFD700] to-yellow-500 hover:from-yellow-300 hover:to-yellow-400 text-black font-black py-3 px-6 rounded-xl shadow-lg shadow-[#FFD700]/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {importando ? <><span className="animate-spin">⏳</span> Importando...</> : <>✅ Confirmar ({stats.total} colabs)</>}
-            </button>
-          </div>
+          <button
+            onClick={enviar}
+            disabled={enviando || registrosDoTime.length === 0}
+            className="w-full bg-gradient-to-r from-[#FFD700] to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-black font-bold py-4 rounded-2xl transition-colors disabled:opacity-50 text-lg"
+          >
+            {enviando ? '⏳ Salvando...' : `✅ Salvar ${registrosDoTime.length} registros do seu time`}
+          </button>
         </>
       )}
     </div>
