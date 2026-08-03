@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
-import LoadingOverlay, { Fase } from '../../components/LoadingOverlay';
+import LoadingOverlay, { Fase } from '../components/LoadingOverlay';
 
 type LinhaColab = {
   id: string;
