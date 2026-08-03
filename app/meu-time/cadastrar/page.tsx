@@ -2,11 +2,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
+import LoadingOverlay, { Fase } from '../../components/LoadingOverlay';
 export default function CadastrarPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState(false);
+  const [fase, setFase] = useState<Fase>(null);
   const [form, setForm] = useState({
     id_groot: '',
     nome: '',
@@ -23,6 +25,7 @@ export default function CadastrarPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    setFase('salvando');
     setErro(null);
     setSucesso(false);
     try {
@@ -30,6 +33,7 @@ export default function CadastrarPage() {
       if (!form.id_groot.trim() || !form.nome.trim()) {
         setErro('ID Groot e Nome são obrigatórios');
         setLoading(false);
+        setFase(null);
         return;
       }
       // Prepara dados. Carreira = Cargo (mesma coisa): salva nos dois campos
@@ -48,41 +52,31 @@ export default function CadastrarPage() {
       if (error) {
         setErro(error.message);
         setLoading(false);
+        setFase(null);
       } else {
         // ✅ Sucesso: mostra overlay e redireciona pro /meu-time
         setSucesso(true);
+        setFase('sucesso');
         setTimeout(() => {
           router.push('/meu-time');
-        }, 1200);
+        }, 1400);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Erro desconhecido';
       setErro(msg);
       setLoading(false);
+      setFase(null);
     }
   }
   return (
     <div className="space-y-6 max-w-2xl">
-      {/* 🆕 OVERLAY DE SALVAMENTO — cobre a tela enquanto salva / ao dar certo */}
-      {(loading || sucesso) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="bg-gradient-to-br from-[#1a1a1a] to-[#141414] border border-[#2a2a2a] rounded-2xl p-8 text-center shadow-2xl max-w-xs mx-4">
-            {sucesso ? (
-              <>
-                <div className="text-6xl mb-3 animate-bounce">✅</div>
-                <p className="text-xl font-black text-green-400 mb-1">Cadastrado!</p>
-                <p className="text-sm text-gray-400">Voltando para o time...</p>
-              </>
-            ) : (
-              <>
-                <div className="inline-block w-14 h-14 border-4 border-[#FFD700] border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p className="text-xl font-black text-white mb-1">Salvando...</p>
-                <p className="text-sm text-gray-400">Cadastrando o colaborador</p>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <LoadingOverlay
+        fase={fase}
+        salvandoTitulo="Salvando..."
+        salvandoSub="Cadastrando o colaborador"
+        sucessoTitulo="Cadastrado!"
+        sucessoSub="Voltando para o time..."
+      />
 
       {/* Header */}
       <div className="flex items-center gap-3">
@@ -215,9 +209,16 @@ export default function CadastrarPage() {
           <button
             type="submit"
             disabled={loading}
-            className="flex-1 bg-[#FFD700] text-black font-bold py-3 rounded-lg hover:bg-yellow-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-[#FFD700] text-black font-black py-3 rounded-lg hover:bg-yellow-300 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-yellow-500/20 hover:shadow-yellow-500/40 hover:-translate-y-0.5 active:scale-[0.99] flex items-center justify-center gap-2"
           >
-            {loading ? '⏳ Salvando...' : '✅ Cadastrar Colaborador'}
+            {loading ? (
+              <>
+                <span className="inline-block w-4 h-4 border-[3px] border-black/30 border-t-black rounded-full animate-spin"></span>
+                Salvando...
+              </>
+            ) : (
+              '✅ Cadastrar Colaborador'
+            )}
           </button>
           <button
             type="button"
