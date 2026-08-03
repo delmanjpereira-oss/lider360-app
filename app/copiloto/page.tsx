@@ -354,9 +354,9 @@ export default function CopilotoPage() {
   const mesAtual = hoje.getMonth() + 1;
   const anoAtual = hoje.getFullYear();
   
-  // ✅ Pega o mês mais recente disponível por colaborador (não restringe ao mês atual)
-  // produtividadeMensal já vem ordenado por ano desc, mes desc → primeiro match = mais recente
-  // Normaliza processo antes de comparar (ex: "CK" === "Checkin", igual à Calibração)
+  // ✅ Pega o mês mais recente COM DADOS REPRESENTATIVOS (>= 5 dias trabalhados)
+  // Evita pegar registro de agosto com 1d e ignorar julho completo (22d)
+  // produtividadeMensal já vem ordenado por ano desc, mes desc
   function normProc(p: string | null | undefined): string {
     const s = String(p || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (s === 'CK' || s === 'CHECKIN' || s === 'CHECK') return 'CHECKIN';
@@ -366,13 +366,21 @@ export default function CopilotoPage() {
   }
   const colaboradoresMap = new Map(colaboradores.map(c => [c.id_groot, c]));
   const mensalPorId: Record<string, ProdutividadeMensalLinha> = {};
+  const mensalCandidato: Record<string, ProdutividadeMensalLinha> = {};
+
   produtividadeMensal.forEach((m) => {
-    if (mensalPorId[m.id_groot]) return; // já tem o mais recente
     const colab = colaboradoresMap.get(m.id_groot);
     if (!colab) return;
-    // filtra processo com normalização (evita "CK" ≠ "Checkin")
     if (m.processo && colab.processo && normProc(m.processo) !== normProc(colab.processo)) return;
-    mensalPorId[m.id_groot] = m;
+    const dias = Number(m.dias_trabalhados) || 0;
+    if (!mensalCandidato[m.id_groot]) mensalCandidato[m.id_groot] = m;
+    if (!mensalPorId[m.id_groot] && dias >= 5) mensalPorId[m.id_groot] = m;
+  });
+
+  colaboradores.forEach((c) => {
+    if (!mensalPorId[c.id_groot] && mensalCandidato[c.id_groot]) {
+      mensalPorId[c.id_groot] = mensalCandidato[c.id_groot];
+    }
   });
   
   const monitor = { ofensores: [] as MonitorItem[], alinhados: [] as MonitorItem[], superas: [] as MonitorItem[] };
