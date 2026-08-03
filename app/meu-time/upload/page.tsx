@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Papa from 'papaparse';
 import { supabase } from '../../../lib/supabase';
+import LoadingOverlay, { Fase } from '../../components/LoadingOverlay';
 type ColaboradorMap = {
   id_groot: string;
   nome: string;
@@ -181,6 +182,7 @@ export default function UploadPage() {
   const [metas, setMetas] = useState<Record<string, number>>({});
   const [carregando, setCarregando] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [fase, setFase] = useState<Fase>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState<string | null>(null);
 
@@ -260,11 +262,13 @@ export default function UploadPage() {
     setProcessado([]);
     setLinhas([]);
     setCarregando(true);
+    setFase('lendo');
     Papa.parse<LinhaCSV>(f, {
       header: true,
       skipEmptyLines: true,
       complete: (result) => {
         setCarregando(false);
+        setFase(null);
         if (result.errors.length > 0) {
           setErro('Erro ao ler CSV: ' + result.errors[0].message);
           return;
@@ -274,6 +278,7 @@ export default function UploadPage() {
       },
       error: (err) => {
         setCarregando(false);
+        setFase(null);
         setErro('Erro: ' + err.message);
       },
     });
@@ -415,6 +420,7 @@ export default function UploadPage() {
   async function salvarMensal() {
     if (!processado.length || !arquivo || !csvMensal) return;
     setSalvando(true);
+    setFase('salvando');
     setErro(null);
     setSucesso(null);
     try {
@@ -476,6 +482,7 @@ export default function UploadPage() {
       if (registrosParaSalvar.length === 0) {
         setErro('Nenhum registro pra salvar — o histórico diário já cobre todo o mês.');
         setSalvando(false);
+        setFase(null);
         return;
       }
       await supabase
@@ -500,11 +507,14 @@ export default function UploadPage() {
         modelo_csv: 'mensal_consolidado',
       });
       const tipoLabel = csvMensal.mesParcial ? `(parcial: dias ${diaInicio}-${diaFim})` : '(mês completo)';
+      setFase('sucesso');
       setSucesso(
         `✅ CSV MENSAL ${tipoLabel} salvo! ${registrosParaSalvar.length} registros: ${novos} novos, ${complementados} complementaram histórico, ${ignorados} ignorados.`
       );
+      setTimeout(() => setFase(null), 2200);
     } catch (e: any) {
       setErro('Erro ao salvar: ' + e.message);
+      setFase(null);
     } finally {
       setSalvando(false);
     }
@@ -512,6 +522,7 @@ export default function UploadPage() {
   async function confirmarEnvio() {
     if (!processado.length || !arquivo) return;
     setSalvando(true);
+    setFase('salvando');
     setErro(null);
     setSucesso(null);
     try {
@@ -580,18 +591,21 @@ export default function UploadPage() {
       let mensagem = `✅ ${processado.length} registros salvos no banco!`;
       if (vinc > 0) mensagem += ` (${vinc} já vinculados ao cadastro)`;
       if (naoVinc > 0) mensagem += ` ${naoVinc} aguardando cadastro.`;
+      setFase('sucesso');
       setSucesso(mensagem);
       setTimeout(() => {
+        setFase(null);
         setArquivo(null);
         setLinhas([]);
         setProcessado([]);
         setProcessoSelecionado('');
         const input = document.getElementById('input-csv') as HTMLInputElement;
         if (input) input.value = '';
-      }, 4000);
+      }, 2500);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Erro desconhecido';
       setErro(msg);
+      setFase(null);
     } finally {
       setSalvando(false);
     }
@@ -602,6 +616,15 @@ export default function UploadPage() {
   const totalAguardando = processado.length - totalVinculados;
   return (
     <div className="space-y-6 max-w-5xl">
+      <LoadingOverlay
+        fase={fase}
+        lendoTitulo="Lendo arquivo..."
+        lendoSub="Processando os registros do CSV"
+        salvandoTitulo="Salvando produtividade..."
+        salvandoSub="Gravando no banco de dados"
+        sucessoTitulo="Salvo!"
+        sucessoSub="Produtividade atualizada"
+      />
       <Link
         href="/meu-time"
         className="text-gray-400 hover:text-white transition-colors inline-flex items-center gap-2"
@@ -799,13 +822,13 @@ export default function UploadPage() {
       {processado.length === 0 && (
         <button
           onClick={enviar}
-          className={`w-full font-bold py-4 rounded-lg transition-colors text-lg ${
+          className={`group w-full font-black py-4 rounded-lg text-lg transition-all duration-150 flex items-center justify-center gap-3 active:scale-[0.99] ${
             podeEnviar
-              ? 'bg-[#FFD700] text-black hover:bg-yellow-300'
+              ? 'bg-[#FFD700] text-black hover:bg-yellow-300 shadow-lg shadow-yellow-500/20 hover:shadow-yellow-500/40 hover:-translate-y-0.5'
               : 'bg-[#FFD700]/50 text-black/70 hover:bg-[#FFD700]/70'
           }`}
         >
-          📤 Processar
+          <span className="group-hover:scale-110 transition-transform">📤</span> Processar
         </button>
       )}
       {processado.length === 0 && (
@@ -955,17 +978,31 @@ export default function UploadPage() {
             <button
               onClick={salvarMensal}
               disabled={salvando}
-              className="w-full bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-bold py-4 rounded-lg transition-all text-lg disabled:opacity-50 shadow-lg shadow-purple-500/30"
+              className="w-full bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-black py-4 rounded-lg transition-all duration-150 text-lg disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 hover:-translate-y-0.5 active:scale-[0.99] flex items-center justify-center gap-3"
             >
-              {salvando ? '💾 Salvando...' : `📆 Salvar Mensal (${String(csvMensal.mes).padStart(2,'0')}/${csvMensal.ano}) - ${processado.length} colabs`}
+              {salvando ? (
+                <>
+                  <span className="inline-block w-5 h-5 border-[3px] border-white/30 border-t-white rounded-full animate-spin"></span>
+                  Salvando...
+                </>
+              ) : (
+                `📆 Salvar Mensal (${String(csvMensal.mes).padStart(2, '0')}/${csvMensal.ano}) - ${processado.length} colabs`
+              )}
             </button>
           ) : (
             <button
               onClick={confirmarEnvio}
               disabled={salvando}
-              className="w-full bg-green-500 text-white font-bold py-4 rounded-lg hover:bg-green-400 transition-colors text-lg disabled:opacity-50"
+              className="w-full bg-green-500 text-white font-black py-4 rounded-lg hover:bg-green-400 transition-all duration-150 text-lg disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-green-500/20 hover:shadow-green-500/40 hover:-translate-y-0.5 active:scale-[0.99] flex items-center justify-center gap-3"
             >
-              {salvando ? '💾 Salvando...' : `✅ Confirmar envio diário (${processado.length} registros)`}
+              {salvando ? (
+                <>
+                  <span className="inline-block w-5 h-5 border-[3px] border-white/30 border-t-white rounded-full animate-spin"></span>
+                  Salvando...
+                </>
+              ) : (
+                `✅ Confirmar envio diário (${processado.length} registros)`
+              )}
             </button>
           )}
         </div>
