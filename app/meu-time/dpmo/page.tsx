@@ -4,6 +4,7 @@ import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
 import { useToast } from '../../components/ToastProvider';
 import ApolloBadge from '../../components/ApolloBadge';
+import LoadingOverlay, { Fase } from '../../components/LoadingOverlay';
 
 type Colaborador = {
   id_groot: string;
@@ -84,6 +85,8 @@ export default function DpmoPage() {
   const [processandoIA, setProcessandoIA] = useState(false);
   const [tokensGastos, setTokensGastos] = useState<{ input: number; output: number } | null>(null);
   const [salvando, setSalvando] = useState(false);
+  // 🆕 fase do overlay: null | 'lendo' (IA) | 'salvando' | 'sucesso'
+  const [fase, setFase] = useState<Fase>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const mesAtual = MESES.find((m) => m.num === mesSelecionado);
@@ -166,6 +169,7 @@ export default function DpmoPage() {
     }
 
     setProcessandoIA(true);
+    setFase('lendo');
     setLinhas([]);
     setSemanasDetectadas([]);
     setTokensGastos(null);
@@ -194,6 +198,7 @@ export default function DpmoPage() {
         console.error('❌ IA retornou erro:', data);
         toast.error('Erro na IA', data.erro || 'Falha desconhecida');
         setProcessandoIA(false);
+        setFase(null);
         return;
       }
 
@@ -246,6 +251,7 @@ export default function DpmoPage() {
       toast.error('Erro', e.message);
     } finally {
       setProcessandoIA(false);
+      setFase(null);
     }
   }
 
@@ -440,6 +446,7 @@ export default function DpmoPage() {
     }
 
     setSalvando(true);
+    setFase('salvando');
     console.log('💾 INICIANDO SALVAMENTO');
     console.log(`📊 ${vinculadas.length} colabs vinculados`);
 
@@ -515,14 +522,20 @@ export default function DpmoPage() {
         });
       } catch {}
 
+      // ✅ sucesso animado antes de limpar
+      setFase('sucesso');
       toast.success(
         `${vinculadas.length} colabs salvos!`,
         `${registrosDpmo.length} registros semanais atualizados`
       );
-      descartarTudo();
+      setTimeout(() => {
+        setFase(null);
+        descartarTudo();
+      }, 2200);
     } catch (e: any) {
       console.error('❌ Erro:', e);
       toast.error('Erro ao salvar', e.message);
+      setFase(null);
     } finally {
       setSalvando(false);
     }
@@ -553,6 +566,15 @@ export default function DpmoPage() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
+      <LoadingOverlay
+        fase={fase}
+        lendoTitulo="Claude Vision lendo os prints..."
+        lendoSub="Extraindo nomes, semanas e IMA (uns 5-10s)"
+        salvandoTitulo="Salvando DPMO..."
+        salvandoSub="Gravando IMA e semanas no banco"
+        sucessoTitulo="Salvo!"
+        sucessoSub="DPMO e IMA atualizados"
+      />
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="mb-6">
           <Link href="/meu-time" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
@@ -606,20 +628,20 @@ export default function DpmoPage() {
               <div className="flex gap-2">
                 <button
                   onClick={() => setProcessoSelecionado('Checkin')}
-                  className={`flex-1 py-2 rounded-lg font-bold text-sm ${
+                  className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all active:scale-95 ${
                     processoSelecionado === 'Checkin'
-                      ? 'bg-cyan-500 text-white'
-                      : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a]'
+                      ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/30'
+                      : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a] hover:border-cyan-500/40'
                   }`}
                 >
                   Checkin
                 </button>
                 <button
                   onClick={() => setProcessoSelecionado('P2M')}
-                  className={`flex-1 py-2 rounded-lg font-bold text-sm ${
+                  className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all active:scale-95 ${
                     processoSelecionado === 'P2M'
-                      ? 'bg-orange-500 text-white'
-                      : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a]'
+                      ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/30'
+                      : 'bg-[#0a0a0a] text-gray-400 border border-[#2a2a2a] hover:border-orange-500/40'
                   }`}
                 >
                   P2M
@@ -647,27 +669,17 @@ export default function DpmoPage() {
                   <button
                     onClick={lerComIA}
                     disabled={processandoIA}
-                    className="bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-bold py-2 px-4 rounded-lg text-sm shadow-lg shadow-purple-500/30 transition-all disabled:opacity-50"
+                    className="group bg-gradient-to-br from-purple-500 to-pink-600 hover:from-purple-400 hover:to-pink-500 text-white font-black py-2 px-4 rounded-lg text-sm shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 transition-all duration-150 hover:-translate-y-0.5 active:scale-95 disabled:opacity-50 flex items-center gap-2"
                   >
-                    🧠 Ler com IA
+                    <span className="group-hover:scale-110 transition-transform">🧠</span> Ler com IA
                   </button>
-                  <button onClick={descartarTudo} className="text-red-400 hover:text-red-300 text-sm">
+                  <button onClick={descartarTudo} className="text-red-400 hover:text-red-300 text-sm transition-colors">
                     🗑️ Descartar
                   </button>
                 </>
               )}
             </div>
           </div>
-
-          {processandoIA && (
-            <div className="bg-purple-500/10 border border-purple-500/40 rounded-lg p-4 mb-3 flex items-center gap-3">
-              <span className="text-2xl animate-pulse">🧠</span>
-              <div className="flex-1">
-                <p className="text-purple-300 font-bold text-sm">Claude Vision analisando os prints...</p>
-                <p className="text-purple-200/80 text-xs">Isso leva uns 5-10 segundos</p>
-              </div>
-            </div>
-          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {prints.map((p, i) => (
@@ -695,10 +707,10 @@ export default function DpmoPage() {
                   const file = e.dataTransfer.files[0];
                   if (file?.type.startsWith('image/')) adicionarPrint(file);
                 }}
-                className="border-2 border-dashed border-[#2a2a2a] hover:border-purple-400/40 rounded-lg p-6 text-center cursor-pointer bg-[#0a0a0a] flex flex-col items-center justify-center min-h-[150px]"
+                className="group border-2 border-dashed border-[#2a2a2a] hover:border-purple-400/60 rounded-lg p-6 text-center cursor-pointer bg-[#0a0a0a] flex flex-col items-center justify-center min-h-[150px] transition-all duration-300 hover:bg-purple-500/5 hover:shadow-[0_0_25px_rgba(168,85,247,0.15)] active:scale-[0.98]"
               >
-                <div className="text-4xl mb-2">📸</div>
-                <p className="text-sm text-white font-bold">Adicionar print</p>
+                <div className="text-4xl mb-2 transition-transform duration-300 group-hover:scale-125 group-hover:-translate-y-1">📸</div>
+                <p className="text-sm text-white font-bold group-hover:text-purple-300 transition-colors">Adicionar print</p>
                 <p className="text-xs text-gray-500">ou Ctrl+V</p>
                 <input
                   ref={fileInputRef}
@@ -818,13 +830,20 @@ export default function DpmoPage() {
               <button
                 onClick={salvarTudo}
                 disabled={salvando || totalSalvaveis === 0}
-                className="bg-[#FFD700] hover:bg-yellow-400 text-black font-bold py-3 px-6 rounded-lg disabled:opacity-40"
+                className="bg-[#FFD700] hover:bg-yellow-400 text-black font-black py-3 px-6 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 shadow-lg shadow-yellow-500/20 hover:shadow-yellow-500/40 hover:-translate-y-0.5 active:scale-[0.99] flex items-center justify-center gap-2"
               >
-                {salvando ? '💾 Salvando...' : `💾 Salvar ${totalSalvaveis} colabs (Total + Semanas)`}
+                {salvando ? (
+                  <>
+                    <span className="inline-block w-5 h-5 border-[3px] border-black/30 border-t-black rounded-full animate-spin"></span>
+                    Salvando...
+                  </>
+                ) : (
+                  `💾 Salvar ${totalSalvaveis} colabs (Total + Semanas)`
+                )}
               </button>
               <button
                 onClick={descartarTudo}
-                className="bg-[#0a0a0a] hover:bg-[#2a2a2a] border border-[#2a2a2a] text-white font-bold py-3 px-6 rounded-lg"
+                className="bg-[#0a0a0a] hover:bg-[#2a2a2a] border border-[#2a2a2a] text-white font-bold py-3 px-6 rounded-lg transition-all active:scale-[0.99]"
               >
                 ❌ Cancelar
               </button>
