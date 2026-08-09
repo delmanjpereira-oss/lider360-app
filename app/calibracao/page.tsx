@@ -710,13 +710,16 @@ export default function CalibracaoPage() {
       amareloMeli: '#FFD700',
       amareloSuave: 'rgba(255, 215, 0, 0.14)',
       amareloBorda: 'rgba(255, 215, 0, 0.5)',
-      // status com bem mais contraste que antes (era 0.1 → agora 0.22)
-      verde: '#6ee7a0',
-      verdeBg: 'rgba(74, 222, 128, 0.22)',
-      vermelho: '#fb8a8a',
-      vermelhoBg: 'rgba(248, 113, 113, 0.22)',
-      cinza: '#6b7280',
-      cinzaBg: 'rgba(82, 82, 82, 0.15)',
+      // 🎨 CÉLULAS DE RESULTADO CLARAS (fundo claro azulado + número escuro) — estilo boletim
+      verde: '#0f7a43',          // número verde escuro (em cima do fundo claro)
+      verdeBg: '#d6f5e3',        // fundo verde claro
+      vermelho: '#b02525',       // número vermelho escuro
+      vermelhoBg: '#fbdcdc',     // fundo vermelho claro
+      cinza: '#8a94a6',          // texto cinza (sem dados)
+      cinzaBg: '#e8ecf4',        // fundo cinza azulado claro (sem dados)
+      idBg: '#eef1f8',           // fundo do ID (branco azulado)
+      idTexto: '#2D3277',        // ID em azul MELI
+      bordaClara: '#c5cee0',     // borda azulada entre células claras
       textoBranco: '#ffffff',
       textoClaro: '#e5e5e5',
       textoMedio: '#a3a3a3',
@@ -749,9 +752,7 @@ export default function CalibracaoPage() {
         ${temIma ? `<th style="padding: 9px 4px; text-align: center; background: ${CORES.fundoHeader}; color: ${CORES.textoClaro}; font-size: 11px; font-weight: 700; border-bottom: 1px solid ${CORES.bordaSutil}; letter-spacing: 1px;">IMA</th>` : ''}
         ${temOcup ? `<th style="padding: 9px 4px; text-align: center; background: ${CORES.fundoHeader}; color: ${CORES.textoClaro}; font-size: 11px; font-weight: 700; border-bottom: 1px solid ${CORES.bordaSutil}; letter-spacing: 1px;">OCUP</th>` : ''}
       `).join('');
-      const tbody = linhasParte.map((l, idx) => {
-        const isPar = idx % 2 === 0;
-        const bgLinha = isPar ? CORES.fundoLinha1 : CORES.fundoLinha2;
+      const tbody = linhasParte.map((l) => {
         const mesesCells = mesesComDados.map((m) => {
           const liqMes = l.medMes[m]?.liq || 0;
           const imaMes = l.medMes[m]?.ima || 0;
@@ -763,14 +764,14 @@ export default function CalibracaoPage() {
           const bgOcup = ocupMes > 0 ? corFundoStatus(ocupMes, metaO) : CORES.cinzaBg;
           const txtOcup = ocupMes > 0 ? corTextoStatus(ocupMes, metaO) : CORES.cinza;
           return `
-            <td style="padding: 12px 6px; text-align: center; background: ${bgLiq}; color: ${txtLiq}; font-family: monospace; font-weight: 700; font-size: 14px; border-left: 1px solid ${CORES.bordaSutil};">${liqMes || '—'}</td>
-            ${temIma ? `<td style="padding: 12px 6px; text-align: center; background: ${bgIma}; color: ${txtIma}; font-family: monospace; font-weight: 700; font-size: 13px;">${imaMes > 0 ? imaMes.toLocaleString('pt-BR') : '—'}</td>` : ''}
-            ${temOcup ? `<td style="padding: 12px 6px; text-align: center; background: ${bgOcup}; color: ${txtOcup}; font-family: monospace; font-weight: 700; font-size: 13px;">${ocupMes > 0 ? ocupMes + '%' : '—'}</td>` : ''}
+            <td style="padding: 12px 6px; text-align: center; background: ${bgLiq}; color: ${txtLiq}; font-family: monospace; font-weight: 800; font-size: 14px; border-left: 1px solid ${CORES.bordaClara};">${liqMes || '—'}</td>
+            ${temIma ? `<td style="padding: 12px 6px; text-align: center; background: ${bgIma}; color: ${txtIma}; font-family: monospace; font-weight: 800; font-size: 13px; border-left: 1px solid ${CORES.bordaClara};">${imaMes > 0 ? imaMes.toLocaleString('pt-BR') : '—'}</td>` : ''}
+            ${temOcup ? `<td style="padding: 12px 6px; text-align: center; background: ${bgOcup}; color: ${txtOcup}; font-family: monospace; font-weight: 800; font-size: 13px; border-left: 1px solid ${CORES.bordaClara};">${ocupMes > 0 ? ocupMes + '%' : '—'}</td>` : ''}
           `;
         }).join('');
         return `
-          <tr style="background: ${bgLinha}; border-bottom: 1px solid ${CORES.bordaSutil};">
-            <td style="padding: 12px; color: ${CORES.textoBranco}; font-weight: 700; font-family: monospace; font-size: 14px; text-align: center; background: ${CORES.fundoHeader}; border-right: 1px solid ${CORES.amareloBorda};">${l.idGroot}</td>
+          <tr style="border-bottom: 1px solid ${CORES.bordaClara};">
+            <td style="padding: 12px; color: ${CORES.idTexto}; font-weight: 800; font-family: monospace; font-size: 14px; text-align: center; background: ${CORES.idBg}; border-right: 1px solid ${CORES.amareloBorda};">${l.idGroot}</td>
             ${mesesCells}
           </tr>
         `;
@@ -847,18 +848,18 @@ export default function CalibracaoPage() {
         ${gerarTabelaHtml(linhasOrdenadas, '')}
       `}
       
-      <!-- LEGENDA -->
+            <!-- LEGENDA -->
       <div style="margin-top: 24px; padding: 16px 24px; background: ${CORES.fundoCard}; border-radius: 8px; border: 1px solid ${CORES.bordaSutil}; display: flex; gap: 40px; justify-content: center; flex-wrap: wrap; font-size: 12px; font-weight: 700; letter-spacing: 1px;">
-        <span style="color: ${CORES.verde}; display: flex; align-items: center; gap: 8px;">
-          <span style="display: inline-block; width: 12px; height: 12px; background: ${CORES.verdeBg}; border: 1px solid ${CORES.verde}; border-radius: 3px;"></span>
+        <span style="color: #6ee7a0; display: flex; align-items: center; gap: 8px;">
+          <span style="display: inline-block; width: 14px; height: 14px; background: ${CORES.verdeBg}; border-radius: 3px;"></span>
           NA META
         </span>
-        <span style="color: ${CORES.vermelho}; display: flex; align-items: center; gap: 8px;">
-          <span style="display: inline-block; width: 12px; height: 12px; background: ${CORES.vermelhoBg}; border: 1px solid ${CORES.vermelho}; border-radius: 3px;"></span>
+        <span style="color: #fb8a8a; display: flex; align-items: center; gap: 8px;">
+          <span style="display: inline-block; width: 14px; height: 14px; background: ${CORES.vermelhoBg}; border-radius: 3px;"></span>
           ABAIXO
         </span>
-        <span style="color: ${CORES.cinza}; display: flex; align-items: center; gap: 8px;">
-          <span style="display: inline-block; width: 12px; height: 12px; background: ${CORES.cinzaBg}; border: 1px solid ${CORES.cinza}; border-radius: 3px;"></span>
+        <span style="color: ${CORES.textoMedio}; display: flex; align-items: center; gap: 8px;">
+          <span style="display: inline-block; width: 14px; height: 14px; background: ${CORES.cinzaBg}; border-radius: 3px;"></span>
           SEM DADOS
         </span>
       </div>
