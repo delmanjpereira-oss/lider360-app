@@ -15,7 +15,16 @@ interface MetasConfig { p2m_base: number; p2m_alinhado_max: number; }
 interface Toast { id: number; tipo: 'success' | 'error' | 'info'; msg: string; }
 interface ConfirmModal { msg: string; onConfirm: () => void; onCancel?: () => void; }
 const ZONA = 'p2m';
-const LAYOUT = { L1_ESQ: 5, L1_DIR: 3, L2_ESQ: 3, L2_DIR: 5 };
+// 🔧 BANCADAS DINÂMICAS
+// Quantidade PADRÃO de cada coluna (usada na 1ª vez, depois vem do banco/config)
+const LAYOUT_DEFAULT = { L1_ESQ: 5, L1_DIR: 3, L2_ESQ: 3, L2_DIR: 5 };
+// LIMITE máximo de bancadas GM por coluna:
+//   lado de FORA de cada linha = 6 · lado de DENTRO (perto da zona central) = 3
+//   K esquerda(fora)=6 · K direita(dentro)=3 · J direita(fora)=6 · J esquerda(dentro)=3
+const LAYOUT_MAX = { L1_ESQ: 6, L1_DIR: 3, L2_ESQ: 3, L2_DIR: 6 };
+// Altura de cada bancada (78px) + gap (8px) — usado pra esteira crescer junto
+const ALTURA_BANCADA = 78;
+const GAP_BANCADA = 8;
 const ALTURA_COLUNA = 422;
 const SUBTIPOS_CATEGORIA = ['Saneante', 'High Value', 'Cosméticos', 'Mapa', 'Saúde', 'Alimento'];
 function maxColabsPorTipo(tipo: string): number {
@@ -127,6 +136,9 @@ export default function LinhaPage() {
   const [menuSinergia, setMenuSinergia] = useState<{ x: number; y: number; aloc: Alocacao } | null>(null);
   const [modoPrint, setModoPrint] = useState(false);
   const [printando, setPrintando] = useState(false);
+  // 🔧 BANCADAS DINÂMICAS: quantidade de cada coluna (vem do banco) + modo edição
+  const [layout, setLayout] = useState<{ L1_ESQ: number; L1_DIR: number; L2_ESQ: number; L2_DIR: number }>(LAYOUT_DEFAULT);
+  const [modoCustomizar, setModoCustomizar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   function toast(tipo: 'success' | 'error' | 'info', msg: string) {
     const id = Date.now() + Math.random();
@@ -190,9 +202,76 @@ export default function LinhaPage() {
     setLoading(true);
     await carregarMetas();
     await carregarNomesLinhas();
+    await carregarLayout();
     await garantirSlotsFixos();
     await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes()]);
     setLoading(false);
+  }
+  // 🔧 BANCADAS DINÂMICAS: lê a quantidade de cada coluna do banco (config).
+  // Se não existir, usa o padrão. Sempre respeita o limite máximo de cada coluna.
+  async function carregarLayout() {
+    const { data } = await supabase.from('config').select('chave, valor')
+      .in('chave', ['qtd_L1_ESQ', 'qtd_L1_DIR', 'qtd_L2_ESQ', 'qtd_L2_DIR']);
+    const map: Record<string, number> = {};
+    (data || []).forEach((c: any) => { map[c.chave] = Number(c.valor) || 0; });
+    const clamp = (chave: keyof typeof LAYOUT_DEFAULT, val: number) =>
+      Math.min(LAYOUT_MAX[chave], Math.max(1, val || LAYOUT_DEFAULT[chave]));
+    setLayout({
+      L1_ESQ: clamp('L1_ESQ', map.qtd_L1_ESQ),
+      L1_DIR: clamp('L1_DIR', map.qtd_L1_DIR),
+      L2_ESQ: clamp('L2_ESQ', map.qtd_L2_ESQ),
+      L2_DIR: clamp('L2_DIR', map.qtd_L2_DIR),
+    });
+  }
+  // Salva a quantidade de uma coluna no banco
+  async function salvarQtdColuna(chave: keyof typeof LAYOUT_DEFAULT, valor: number) {
+    await supabase.from('config').upsert({ chave: 'qtd_' + chave, valor: String(valor) }, { onConflict: 'chave' });
+  }
+  // Mapeia (linha, lado) → chave do layout
+  function chaveColuna(linha: number, lado: string): keyof typeof LAYOUT_DEFAULT {
+    if (linha === 1) return lado === 'esquerdo' ? 'L1_ESQ' : 'L1_DIR';
+    return lado === 'esquerdo' ? 'L2_ESQ' : 'L2_DIR';
+  }
+  // ➕ Adiciona um slot no fim da coluna (respeitando o limite máximo)
+  async function adicionarSlot(linha: number, lado: string) {
+    const chave = chaveColuna(linha, lado);
+    const atual = layout[chave];
+    if (atual >= LAYOUT_MAX[chave]) {
+      toast('error', 'Limite de ' + LAYOUT_MAX[chave] + ' bancadas nesta coluna');
+      return;
+    }
+    const novo = atual + 1;
+    setLayout((prev) => ({ ...prev, [chave]: novo }));
+    await salvarQtdColuna(chave, novo);
+    toast('success', '➕ Bancada adicionada');
+  }
+  // ➖ Remove o ÚLTIMO slot da coluna. Se a última bancada tiver colab, BLOQUEIA.
+  async function removerSlot(linha: number, lado: string) {
+    const chave = chaveColuna(linha, lado);
+    const atual = layout[chave];
+    if (atual <= 1) {
+      toast('error', 'A coluna precisa ter pelo menos 1 bancada');
+      return;
+    }
+    // A bancada da última posição
+    const ultima = getBancada(linha, lado, atual);
+    if (ultima) {
+      const ocupada = alocacoes.some((a) => a.bancada_id === ultima.id);
+      if (ocupada) {
+        toast('error', 'Esvazie a última bancada antes de remover');
+        return;
+      }
+    }
+    const novo = atual - 1;
+    // Se existe bancada nessa posição, apaga do banco pra não virar órfã
+    if (ultima) {
+      const { error } = await supabase.from('layout_bancadas').delete().eq('id', ultima.id);
+      if (error) { toast('error', 'Erro: ' + error.message); return; }
+    }
+    setLayout((prev) => ({ ...prev, [chave]: novo }));
+    await salvarQtdColuna(chave, novo);
+    await Promise.all([carregarBancadas(), carregarAlocacoes()]);
+    toast('success', '➖ Bancada removida');
   }
   async function carregarMetas() {
     const { data } = await supabase.from('config').select('chave, valor').in('chave', ['meta_p2m_base', 'meta_p2m_alinhado_max']);
@@ -462,8 +541,8 @@ export default function LinhaPage() {
     const ciclo: Bancada[] = [];
     const ladoDesce = linha === 1 ? 'esquerdo' : 'direito';
     const ladoSobe = linha === 1 ? 'direito' : 'esquerdo';
-    const qtdDesce = linha === 1 ? LAYOUT.L1_ESQ : LAYOUT.L2_DIR;
-    const qtdSobe = linha === 1 ? LAYOUT.L1_DIR : LAYOUT.L2_ESQ;
+    const qtdDesce = linha === 1 ? layout.L1_ESQ : layout.L2_DIR;
+    const qtdSobe = linha === 1 ? layout.L1_DIR : layout.L2_ESQ;
     // 1) DESCE pelo ladoDesce: do TOPO ao FUNDO (posição 1 → última)
     for (let p = 1; p <= qtdDesce; p++) {
       const b = getBancada(linha, ladoDesce, p);
@@ -638,8 +717,8 @@ export default function LinhaPage() {
     for (const linha of [1, 2]) {
       for (const lado of ['esquerdo', 'direito']) {
         const qtd = linha === 1
-          ? (lado === 'esquerdo' ? LAYOUT.L1_ESQ : LAYOUT.L1_DIR)
-          : (lado === 'esquerdo' ? LAYOUT.L2_ESQ : LAYOUT.L2_DIR);
+          ? (lado === 'esquerdo' ? layout.L1_ESQ : layout.L1_DIR)
+          : (lado === 'esquerdo' ? layout.L2_ESQ : layout.L2_DIR);
         if (qtd < 2) continue;
         const bTopo = getBancada(linha, lado, 1);
         const bUltimo = getBancada(linha, lado, qtd);
@@ -934,15 +1013,40 @@ export default function LinhaPage() {
       </div>
     );
   }
-  function Esteira() {
-    return (<div className="w-[44px] mx-1 rounded-sm border border-[#444]" style={{ minHeight: ALTURA_COLUNA + 'px', background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)' }} aria-hidden="true" />);
+  function Esteira({ altura }: { altura: number }) {
+    return (<div className="w-[44px] mx-1 rounded-sm border border-[#444] transition-all duration-300" style={{ minHeight: altura + 'px', background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)' }} aria-hidden="true" />);
   }
-  function ColunaBancadas({ linha, lado, qtd, alinharFundo = false }: { linha: number; lado: string; qtd: number; alinharFundo?: boolean }) {
+  // Altura de uma coluna com N bancadas (pra esteira crescer junto)
+  function alturaDeColuna(qtd: number): number {
+    return Math.max(ALTURA_COLUNA, qtd * ALTURA_BANCADA + (qtd - 1) * GAP_BANCADA);
+  }
+  function ColunaBancadas({ linha, lado, qtd, alturaColuna, alinharFundo = false }: { linha: number; lado: string; qtd: number; alturaColuna: number; alinharFundo?: boolean }) {
+    const chave = chaveColuna(linha, lado);
+    const noMax = qtd >= LAYOUT_MAX[chave];
+    const noMin = qtd <= 1;
     return (
-      <div className={'flex flex-col gap-2 ' + (alinharFundo ? 'justify-end' : 'justify-start')} style={{ minHeight: ALTURA_COLUNA + 'px' }}>
+      <div className={'flex flex-col gap-2 ' + (alinharFundo ? 'justify-end' : 'justify-start')} style={{ minHeight: alturaColuna + 'px' }}>
         {Array.from({ length: qtd }, (_, i) => (
           <SlotBancada key={linha + '-' + lado + '-' + (i + 1)} linha={linha} lado={lado} posicao={i + 1} />
         ))}
+        {/* ➕➖ Controles de bancada (só no modo customizar) */}
+        {modoCustomizar && !modoPrint && (
+          <div className="flex items-center justify-center gap-1.5 mt-1">
+            <button
+              onClick={() => removerSlot(linha, lado)}
+              disabled={noMin}
+              className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMin ? 'border-[#2a2a2a] text-[#3a3a3a] cursor-not-allowed' : 'border-red-500/40 text-red-400 hover:bg-red-500/15 active:scale-95')}
+              title={noMin ? 'Mínimo 1 bancada' : 'Remover última bancada'}
+            >−</button>
+            <span className="text-[9px] text-gray-500 font-mono w-10 text-center">{qtd}/{LAYOUT_MAX[chave]}</span>
+            <button
+              onClick={() => adicionarSlot(linha, lado)}
+              disabled={noMax}
+              className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMax ? 'border-[#2a2a2a] text-[#3a3a3a] cursor-not-allowed' : 'border-green-500/40 text-green-400 hover:bg-green-500/15 active:scale-95')}
+              title={noMax ? 'Limite de ' + LAYOUT_MAX[chave] + ' bancadas' : 'Adicionar bancada'}
+            >+</button>
+          </div>
+        )}
       </div>
     );
   }
@@ -1089,6 +1193,11 @@ export default function LinhaPage() {
         </div>
         <div className="flex items-center gap-2">
           <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleUploadCSV} className="hidden" />
+          <button onClick={() => setModoCustomizar((v) => !v)}
+            className={'text-xs px-3 py-1.5 rounded border transition active:scale-95 ' + (modoCustomizar ? 'bg-green-500/20 border-green-500/60 text-green-300' : 'bg-[#1a1a1a] border-[#2a2a2a] text-gray-400 hover:border-green-500/40 hover:text-green-300')}
+            title="Adicionar ou remover bancadas nas colunas">
+            {modoCustomizar ? '✓ Editando bancadas' : '⚙️ Customizar'}
+          </button>
           <button onClick={printarLayout} disabled={printando}
             className="bg-blue-500/10 border border-blue-500/50 text-blue-300 text-xs px-3 py-1.5 rounded hover:bg-blue-500/20 transition disabled:opacity-50"
             title="Gera imagem do layout sem ritmos/líquidas pra reportar no grupo">
@@ -1127,9 +1236,9 @@ export default function LinhaPage() {
             <section className="flex flex-col items-center">
               <HeaderLinha linha={1} />
               <div className="flex gap-1 items-stretch">
-                <ColunaBancadas linha={1} lado="esquerdo" qtd={LAYOUT.L1_ESQ} />
-                <Esteira />
-                <ColunaBancadas linha={1} lado="direito" qtd={LAYOUT.L1_DIR} alinharFundo />
+                <ColunaBancadas linha={1} lado="esquerdo" qtd={layout.L1_ESQ} alturaColuna={alturaDeColuna(Math.max(layout.L1_ESQ, layout.L1_DIR))} />
+                <Esteira altura={alturaDeColuna(Math.max(layout.L1_ESQ, layout.L1_DIR))} />
+                <ColunaBancadas linha={1} lado="direito" qtd={layout.L1_DIR} alturaColuna={alturaDeColuna(Math.max(layout.L1_ESQ, layout.L1_DIR))} alinharFundo />
               </div>
               <div className="text-gray-700 text-xs mt-2">↓</div>
             </section>
@@ -1139,9 +1248,9 @@ export default function LinhaPage() {
             <section className="flex flex-col items-center">
               <HeaderLinha linha={2} />
               <div className="flex gap-1 items-stretch">
-                <ColunaBancadas linha={2} lado="esquerdo" qtd={LAYOUT.L2_ESQ} alinharFundo />
-                <Esteira />
-                <ColunaBancadas linha={2} lado="direito" qtd={LAYOUT.L2_DIR} />
+                <ColunaBancadas linha={2} lado="esquerdo" qtd={layout.L2_ESQ} alturaColuna={alturaDeColuna(Math.max(layout.L2_ESQ, layout.L2_DIR))} alinharFundo />
+                <Esteira altura={alturaDeColuna(Math.max(layout.L2_ESQ, layout.L2_DIR))} />
+                <ColunaBancadas linha={2} lado="direito" qtd={layout.L2_DIR} alturaColuna={alturaDeColuna(Math.max(layout.L2_ESQ, layout.L2_DIR))} />
               </div>
               <div className="text-gray-700 text-xs mt-2">↓</div>
             </section>
