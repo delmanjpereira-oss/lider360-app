@@ -403,10 +403,9 @@ export default function BoletimPage() {
         <div className="flex items-center" style={{ paddingTop: '10px', paddingBottom: '10px', paddingLeft: '16px', paddingRight: '16px', backgroundColor: MELI.azul, gap: '10px' }}>
           <span style={{ fontSize: '22px', height: '26px', lineHeight: '26px', display: 'inline-block' }}>{icone}</span>
           <span className="font-black" style={{ fontSize: '18px', color: MELI.amarelo, letterSpacing: '0.03em', height: '26px', lineHeight: '26px', display: 'inline-block' }}>{nome}</span>
-          <span className="flex items-center rounded-full" style={{ marginLeft: 'auto', backgroundColor: 'rgba(255,255,255,0.12)', paddingTop: '4px', paddingBottom: '4px', paddingLeft: '12px', paddingRight: '12px', gap: '6px' }}>
-            <span style={{ fontSize: '14px', height: '20px', lineHeight: '20px', display: 'inline-block' }}>👥</span>
-            <span className="font-black" style={{ fontSize: '15px', color: '#fff', height: '20px', lineHeight: '20px', display: 'inline-block' }}>{qtd}</span>
-            <span className="font-bold" style={{ fontSize: '10px', color: 'rgba(255,255,255,0.7)', height: '20px', lineHeight: '20px', display: 'inline-block' }}>colabs</span>
+          <span className="rounded-full" style={{ marginLeft: 'auto', backgroundColor: 'rgba(255,255,255,0.12)', paddingTop: '5px', paddingBottom: '5px', paddingLeft: '12px', paddingRight: '12px', height: '26px', lineHeight: '16px', display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
+            <span className="font-black" style={{ fontSize: '15px', color: '#fff', lineHeight: '16px', display: 'inline-block', verticalAlign: 'middle' }}>👥 {qtd}</span>
+            <span className="font-bold" style={{ fontSize: '10px', color: 'rgba(255,255,255,0.7)', lineHeight: '16px', display: 'inline-block', verticalAlign: 'middle', marginLeft: '5px' }}>colabs</span>
           </span>
         </div>
         <div className="flex" style={{ padding: '12px', gap: '8px' }}>
