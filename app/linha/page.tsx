@@ -141,6 +141,8 @@ export default function LinhaPage() {
   // ↩️ DESFAZER: guarda o snapshot da última rotação (pra voltar com Ctrl+Z ou botão)
   const [temSnapshot, setTemSnapshot] = useState(false);
   const [desfazendo, setDesfazendo] = useState(false);
+  // 🔐 BANCADAS TRAVADAS: bancadas que não rotacionam (a dupla fica, a galera pula)
+  const [bancadasTravadas, setBancadasTravadas] = useState<Set<number>>(new Set());
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
   const [menuSinergia, setMenuSinergia] = useState<{ x: number; y: number; aloc: Alocacao } | null>(null);
@@ -413,7 +415,7 @@ export default function LinhaPage() {
     await carregarLayout();
     await garantirSlotsFixos();
     await carregarConfigRotAuto();
-    await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes(), carregarRestricoes()]);
+    await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes(), carregarRestricoes(), carregarBancadasTravadas()]);
     verificarSnapshot();
     setLoading(false);
   }
@@ -673,6 +675,29 @@ export default function LinhaPage() {
     await carregarRestricoes();
     toast('success', '🔓 Restrição removida');
     setMenuSinergia(null);
+  }
+  // ============================================================
+  // 🔐 BANCADA TRAVADA — a bancada não rotaciona (a dupla fica parada,
+  // a galera pula). É da POSIÇÃO: quem estiver ali fica, mesmo trocando.
+  // Guardada na tabela 'bancadas_travadas' (bancada_id).
+  // ============================================================
+  async function carregarBancadasTravadas() {
+    const { data } = await supabase.from('bancadas_travadas').select('bancada_id');
+    setBancadasTravadas(new Set((data || []).map((r: any) => r.bancada_id)));
+  }
+  function ehTravada(bancadaId: number): boolean {
+    return bancadasTravadas.has(bancadaId);
+  }
+  async function alternarTravaBancada(bancadaId: number) {
+    if (ehTravada(bancadaId)) {
+      await supabase.from('bancadas_travadas').delete().eq('bancada_id', bancadaId);
+      await carregarBancadasTravadas();
+      toast('success', '🔓 Bancada destravada');
+    } else {
+      await supabase.from('bancadas_travadas').upsert({ bancada_id: bancadaId }, { onConflict: 'bancada_id' });
+      await carregarBancadasTravadas();
+      toast('success', '🔐 Bancada travada (não rotaciona)');
+    }
   }
   // ✅ RITMOS continuam por dia (vêm do CSV diário)
   async function carregarRitmos() {
@@ -1079,13 +1104,16 @@ export default function LinhaPage() {
       if (ciclo.length === 0) continue;
       // capacidade livre de cada bancada = 2 - nº de restrições fixas nela
       // (restrições NÃO rotacionam; ficam paradas onde estão)
+      // bancada TRAVADA = capacidade 0 (ninguém entra, a dupla dela fica)
       const restrPorBancada: Array<Alocacao[]> = ciclo.map((b) =>
         alocacoesFonte.filter((a) => a.bancada_id === b.id && ehRestricao(a.id_groot))
       );
-      const capLivre: number[] = ciclo.map((b, i) => 2 - restrPorBancada[i].length);
-      // ocupantes MÓVEIS (sem restrição) de cada bancada, formando unidades (dupla/solto)
+      const capLivre: number[] = ciclo.map((b, i) => ehTravada(b.id) ? 0 : 2 - restrPorBancada[i].length);
+      // ocupantes MÓVEIS de cada bancada, formando unidades (dupla/solto).
+      // Não entram: quem tem restrição, nem quem está em bancada TRAVADA.
       const unidades: Array<{ alocs: Alocacao[]; tam: number; origem: number }> = [];
       for (let i = 0; i < ciclo.length; i++) {
+        if (ehTravada(ciclo[i].id)) continue; // bancada travada: ocupantes ficam parados
         const moveis = alocacoesFonte.filter((a) => a.bancada_id === ciclo[i].id && !ehRestricao(a.id_groot));
         if (moveis.length >= 2) unidades.push({ alocs: [moveis[0], moveis[1]], tam: 2, origem: i });
         else if (moveis.length === 1) unidades.push({ alocs: [moveis[0]], tam: 1, origem: i });
@@ -1161,9 +1189,10 @@ export default function LinhaPage() {
         }
       }
       const bancadasLinhaIds = ciclo.map((b) => b.id);
-      // remove só as MÓVEIS (restrições ficam paradas, não são tocadas)
+      // remove só as MÓVEIS. Ficam paradas (não removidas): restrições E
+      // ocupantes de bancadas TRAVADAS.
       const idsRemove = alocacoesFonte
-        .filter((a) => bancadasLinhaIds.includes(a.bancada_id) && !ehRestricao(a.id_groot))
+        .filter((a) => bancadasLinhaIds.includes(a.bancada_id) && !ehRestricao(a.id_groot) && !ehTravada(a.bancada_id))
         .map((a) => a.id);
       if (idsRemove.length > 0) {
         await supabase.from('layout_alocacao').delete().in('id', idsRemove);
@@ -1193,6 +1222,7 @@ export default function LinhaPage() {
         const bUltimo = getBancada(linha, lado, qtd);
         if (!bTopo || !bUltimo) continue;
         if (bTopo.tipo_principal !== 'GM' || bUltimo.tipo_principal !== 'GM') continue;
+        if (ehTravada(bTopo.id) || ehTravada(bUltimo.id)) continue; // bancada travada não troca
         // só move MÓVEIS (restrições ficam paradas)
         const alocsTopo = alocacoesFonte.filter((a) => a.bancada_id === bTopo.id && !ehRestricao(a.id_groot));
         const alocsUltimo = alocacoesFonte.filter((a) => a.bancada_id === bUltimo.id && !ehRestricao(a.id_groot));
@@ -1439,6 +1469,7 @@ export default function LinhaPage() {
       isEncaixe ? 'bancada-encaixe' : '',
       isErro ? 'bancada-erro' : '',
       isHover && !isCompativel ? 'ring-2 ring-green-500/80 shadow-xl shadow-green-500/20' : '',
+      ehTravada(b.id) ? 'ring-1 ring-red-500/60' : '',
     ].join(' ');
     return (
       <div
@@ -1459,6 +1490,11 @@ export default function LinhaPage() {
             {isCategoria && alocs.length > 0 && (<span className="text-[8px] text-gray-500 ml-0.5">({alocs.length})</span>)}
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
+            {b.tipo_principal === 'GM' && !modoPrint && (
+              <button onClick={(e) => { e.stopPropagation(); alternarTravaBancada(b.id); }}
+                className={'text-[10px] leading-none ' + (ehTravada(b.id) ? 'text-red-400' : 'text-gray-600 hover:text-red-400')}
+                title={ehTravada(b.id) ? 'Destravar bancada' : 'Travar bancada (não rotaciona)'}>{ehTravada(b.id) ? '🔐' : '🔓'}</button>
+            )}
             {b.tipo_principal === 'CATEGORIA' && !modoPrint && (
               <button onClick={(e) => { e.stopPropagation(); abrirModalEditarSubtipo(b); }}
                 className="text-gray-600 hover:text-white text-[9px] leading-none" title="Editar sub-tipo">✏️</button>
