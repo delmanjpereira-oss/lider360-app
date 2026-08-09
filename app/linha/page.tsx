@@ -995,15 +995,46 @@ export default function LinhaPage() {
     for (const linha of [1, 2]) {
       const ciclo = getCicloLinha(linha, comPesca);
       if (ciclo.length === 0) continue;
-      const ocupantes: Array<{ bancada: Bancada; alocs: Alocacao[] }> = ciclo.map((b) => ({
-        bancada: b,
-        alocs: alocacoesFonte.filter((a) => a.bancada_id === b.id),
-      }));
+      // capacidade livre de cada bancada = 2 - nº de restrições fixas nela
+      // (restrições NÃO rotacionam; ficam paradas onde estão)
+      const restrPorBancada: Array<Alocacao[]> = ciclo.map((b) =>
+        alocacoesFonte.filter((a) => a.bancada_id === b.id && ehRestricao(a.id_groot))
+      );
+      const capLivre: number[] = ciclo.map((b, i) => 2 - restrPorBancada[i].length);
+      // ocupantes MÓVEIS (sem restrição) de cada bancada, formando unidades (dupla/solto)
+      const unidades: Array<{ alocs: Alocacao[]; tam: number; origem: number }> = [];
+      for (let i = 0; i < ciclo.length; i++) {
+        const moveis = alocacoesFonte.filter((a) => a.bancada_id === ciclo[i].id && !ehRestricao(a.id_groot));
+        if (moveis.length >= 2) unidades.push({ alocs: [moveis[0], moveis[1]], tam: 2, origem: i });
+        else if (moveis.length === 1) unidades.push({ alocs: [moveis[0]], tam: 1, origem: i });
+      }
       const novas: Array<{ id_groot: string; bancada_id: number; bancada_fixa_id: number | null; tipo: string }> = [];
-      for (let i = 0; i < ocupantes.length; i++) {
-        const proximaIdx = (i + 1) % ocupantes.length;
-        const proximaBancada = ocupantes[proximaIdx].bancada;
-        for (const aloc of ocupantes[i].alocs) {
+      const capRest = [...capLivre];
+      // aloca cada unidade avançando circular a partir de origem+1,
+      // pulando bancadas que não comportem a unidade inteira (dupla precisa 2 vagas)
+      for (const u of unidades) {
+        let dest = (u.origem + 1) % ciclo.length;
+        let voltas = 0;
+        while (voltas < ciclo.length * 2 && capRest[dest] < u.tam) {
+          dest = (dest + 1) % ciclo.length;
+          voltas++;
+        }
+        if (capRest[dest] < u.tam) {
+          // fallback: nunca some ninguém — coloca em qualquer vaga individual
+          for (const aloc of u.alocs) {
+            let d2 = 0;
+            while (d2 < ciclo.length && capRest[d2] < 1) d2++;
+            if (d2 < ciclo.length) { dest = d2; capRest[d2]--; }
+            const proximaBancada = ciclo[dest];
+            let novoFixoId: number | null = tipoEFixoAutomatico(proximaBancada.tipo_principal) ? proximaBancada.id : aloc.bancada_fixa_id;
+            let novoTipo = tipoEFixoAutomatico(proximaBancada.tipo_principal) ? 'fixo' : (novoFixoId ? 'temporario' : 'fixo');
+            novas.push({ id_groot: aloc.id_groot, bancada_id: proximaBancada.id, bancada_fixa_id: novoFixoId, tipo: novoTipo });
+          }
+          continue;
+        }
+        const proximaBancada = ciclo[dest];
+        capRest[dest] -= u.tam;
+        for (const aloc of u.alocs) {
           let novoFixoId: number | null = null;
           let novoTipo = 'fixo';
           if (tipoEFixoAutomatico(proximaBancada.tipo_principal)) {
@@ -1048,7 +1079,10 @@ export default function LinhaPage() {
         }
       }
       const bancadasLinhaIds = ciclo.map((b) => b.id);
-      const idsRemove = alocacoesFonte.filter((a) => bancadasLinhaIds.includes(a.bancada_id)).map((a) => a.id);
+      // remove só as MÓVEIS (restrições ficam paradas, não são tocadas)
+      const idsRemove = alocacoesFonte
+        .filter((a) => bancadasLinhaIds.includes(a.bancada_id) && !ehRestricao(a.id_groot))
+        .map((a) => a.id);
       if (idsRemove.length > 0) {
         await supabase.from('layout_alocacao').delete().in('id', idsRemove);
       }
@@ -1077,8 +1111,16 @@ export default function LinhaPage() {
         const bUltimo = getBancada(linha, lado, qtd);
         if (!bTopo || !bUltimo) continue;
         if (bTopo.tipo_principal !== 'GM' || bUltimo.tipo_principal !== 'GM') continue;
-        const alocsTopo = alocacoesFonte.filter((a) => a.bancada_id === bTopo.id);
-        const alocsUltimo = alocacoesFonte.filter((a) => a.bancada_id === bUltimo.id);
+        // só move MÓVEIS (restrições ficam paradas)
+        const alocsTopo = alocacoesFonte.filter((a) => a.bancada_id === bTopo.id && !ehRestricao(a.id_groot));
+        const alocsUltimo = alocacoesFonte.filter((a) => a.bancada_id === bUltimo.id && !ehRestricao(a.id_groot));
+        // capacidade livre no destino (descontando restrições que ficam)
+        const restrTopo = alocacoesFonte.filter((a) => a.bancada_id === bTopo.id && ehRestricao(a.id_groot)).length;
+        const restrUltimo = alocacoesFonte.filter((a) => a.bancada_id === bUltimo.id && ehRestricao(a.id_groot)).length;
+        // topo recebe os do último (se couber); último recebe os do topo (se couber)
+        const cabeNoTopo = 2 - restrTopo;
+        const cabeNoUltimo = 2 - restrUltimo;
+        if (alocsUltimo.length > cabeNoTopo || alocsTopo.length > cabeNoUltimo) continue; // não troca se não couber
         for (const a of alocsTopo) {
           await supabase.from('layout_alocacao').update({
             bancada_id: bUltimo.id,
