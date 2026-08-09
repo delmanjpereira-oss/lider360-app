@@ -23,7 +23,7 @@ export async function POST() {
       return NextResponse.json({ sucesso: true, tarefas_geradas: 0 });
     }
     
-    const colabsElegiveis = ctx.colabs.filter(c => 
+    const colabsElegiveis = ctx.colabs.filter((c: any) => 
       c.podeSerSugerido && c.performance.fonteDados !== 'nenhum'
     );
     
@@ -31,7 +31,7 @@ export async function POST() {
       return NextResponse.json({ 
         sucesso: true, 
         tarefas_geradas: 0,
-        motivo: 'Todos colabs já têm tarefa pendente ou recente (14 dias)',
+        motivo: `Todo o time está em dia no ciclo de feedback (${ctx.dataAtual.cicloFeedbackDias || 6} dias). Ninguém venceu o prazo ainda.`,
       });
     }
     
@@ -58,25 +58,30 @@ export async function POST() {
     
     let inseridas = 0;
     for (const tarefa of tarefasParaInserir) {
-      const colab = ctx.colabs.find(c => c.id_groot === tarefa.id_groot);
+      const colab = ctx.colabs.find((c: any) => c.id_groot === tarefa.id_groot);
       if (!colab) continue;
       
-      const dias14atras = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      // 🆕 janela de bloqueio segue o ciclo de feedback (não mais 14 dias fixo)
+      const cicloDias = ctx.dataAtual.cicloFeedbackDias || 6;
+      const diasCicloAtras = new Date(Date.now() - cicloDias * 24 * 60 * 60 * 1000).toISOString();
       const { count } = await supabase
         .from('tarefas')
         .select('id', { count: 'exact', head: true })
         .eq('id_groot', tarefa.id_groot)
-        .or(`status.eq.Pendente,criado_em.gte.${dias14atras}`);
+        .or(`status.eq.Pendente,criado_em.gte.${diasCicloAtras}`);
       
       if ((count || 0) > 0) continue;
       
       const contextoDados = {
         fonteDados: colab.performance.fonteDados,
         performance: colab.performance,
+        ocupacao: colab.ocupacao,
+        ima: colab.ima,
         padroes: colab.padroes,
         presenca: colab.presenca,
         carreira_info: colab.carreira_info,
         acompanhamento: colab.acompanhamento,
+        cicloFeedback: colab.cicloFeedback,
         memoria: colab.memoria,
         aprendizadoColab: colab.aprendizadoColab,
         vieses: colab.vieses,
@@ -152,6 +157,16 @@ Cada tarefa que você sugere pode mudar uma carreira.
 10. Radar de burnout: sinais sutis
 11. Detetive de padrões: vê o invisível
 12. Defensora: considera fatores humanos
+# 📊 OS 3 INDICADORES DE RESULTADO (ANALISE OS TRÊS, SEMPRE)
+Você NÃO analisa só produtividade. Todo colaborador tem 3 indicadores de resultado, e você cruza os três:
+1. LÍQUIDA (produtividade — peças/hora): quanto produz. Meta base = alinhado, acima do teto = supera.
+2. OCUPAÇÃO (%): quão bem aproveita o tempo. Dentro da meta = bom; abaixo = fora (ofensor de ocupação). Só P2M tem ocupação.
+3. IMA / QUALIDADE: erros/qualidade. ATENÇÃO: no IMA, MENOR É MELHOR (tipo DPMO). Abaixo do limite = dentro (bom); acima = fora (qualidade ruim).
+O DIAGNÓSTICO RICO cruza os três. Exemplos:
+- "Líquida OK (batendo a meta), MAS ocupação caiu pra 72% e IMA subiu (qualidade piorando) — está produzindo rápido mas com desperdício de tempo e mais erros."
+- "Ocupação excelente e líquida boa, mas IMA acima do limite — velocidade sem qualidade."
+- "Tudo dentro (líquida, ocupação e IMA) — referência, reconhecer."
+NUNCA analise só um indicador se tiver dados dos outros. O poder do seu diagnóstico está em conectar os três.
 # 🧠 APRENDIZADO REAL
 Você TEM MEMÓRIA das tarefas anteriores.
 Você VÊ o que funcionou e o que não.
@@ -160,9 +175,15 @@ QUANDO O TL DEU UM FEEDBACK ANTES:
 - Se MELHOROU → use estratégia parecida em casos similares
 - Se PIOROU → mude abordagem
 - Se NEUTRO → aprofunde, talvez mude ângulo
+# 🔄 VOCÊ É UMA IA VIVA (acompanha e aprende)
+Seu trabalho é ACOMPANHAR o time com CONSTÂNCIA, não só gerar tarefa solta.
+- Cada colaborador tem um CICLO de feedback (ex: 6 dias). Quando o ciclo vence, ele precisa de nova atenção.
+- Depois que o TL dá um feedback e ESCREVE o que falou, você LÊ, GUARDA e APRENDE com aquele colaborador específico.
+- Você acompanha se o feedback funcionou: melhorou? caiu? manteve? E ajusta.
+- Priorize quem está há mais tempo sem atenção (venceu o ciclo ou nunca recebeu).
 # 🌟 SUA ESTRELA-GUIA (o que define seu sucesso)
 Seu sucesso NÃO é gerar tarefas bonitas. É MEXER O PONTEIRO no acumulado do mês:
-- O painel de OFENSORES precisa DIMINUIR mês a mês.
+- O painel de OFENSORES precisa DIMINUIR mês a mês (nas 3 dimensões: líquida, ocupação, qualidade).
 - Mais gente precisa migrar pra ALINHADO e SUPERA.
 - Priorize quem está PERTO de mudar de faixa (quick wins) — sem NUNCA abandonar os casos profundos.
 - Reconhecer quem está bem MANTÉM a pessoa lá: recuo de bom desempenho também é perda.
@@ -180,14 +201,14 @@ Seu sucesso NÃO é gerar tarefas bonitas. É MEXER O PONTEIRO no acumulado do m
 - Cada colaborador é DIFERENTE: a mesma estratégia não serve pra todos. Calibre pelo perfil, pela memória e pelo que o TL registrou.
 - Se algo funcionou com um perfil, repita em perfis parecidos. Se falhou, mude o ângulo — não insista no que já não deu certo.
 # COMO ESCREVER
-DIAGNÓSTICO: dados + padrão + tempo + memória
+DIAGNÓSTICO: dados dos 3 indicadores (líquida + ocupação + IMA) + padrão + tempo + memória
 ANÁLISE: vai além do número, considera contexto humano
 HIPÓTESE: especulação humana e empática
-AÇÃO: estratégia em PASSOS com COACHING
+A�ÃO: estratégia em PASSOS com COACHING
 # REGRAS DE OURO
 1. NÃO duplicar (já filtrado)
 2. EQUILIBRAR tipos (reconhecimento, coaching, prevenção)
-3. PROFUNDIDADE: dado + padrão + estratégia
+3. PROFUNDIDADE: dados dos 3 indicadores + padrão + estratégia
 4. HUMANIDADE: pessoa por trás do número
 5. USAR APRENDIZADO: aplicar o que funcionou no time
 # FORMATO
@@ -195,9 +216,9 @@ Responda APENAS JSON válido:
 [
   {
     "id_groot": "1710556",
-    "tipo": "Reconhecimento Estratégico" | "Acompanhamento de Evolução" | "Antecipação de Queda" | "Coaching Preventivo" | "Cuidado de Bem-Estar" | "Oportunidade de Carreira" | "Quebra de Padrão" | "Reconhecimento Invisível",
+    "tipo": "Reconhecimento Estratégico" | "Acompanhamento de Evolução" | "Antecipação de Queda" | "Coaching Preventivo" | "Cuidado de Bem-Estar" | "Oportunidade de Carreira" | "Quebra de Padrão" | "Reconhecimento Invisível" | "Alerta de Ocupação" | "Alerta de Qualidade (IMA)",
     "prioridade": "critica" | "alta" | "media" | "baixa",
-    "diagnostico": "Análise rica COM NÚMEROS + PADRÕES + TEMPO + REFERÊNCIA HISTÓRICA",
+    "diagnostico": "Análise rica CRUZANDO líquida + ocupação + IMA + PADRÕES + TEMPO + REFERÊNCIA HISTÓRICA",
     "analise_ia": "Sua interpretação ESTRATÉGICA",
     "hipotese": "Especulação HUMANA",
     "acao_sugerida": "Estratégia em PASSOS com COACHING",
@@ -212,7 +233,6 @@ function construirPrompt(colabs: any[], saudeTime: any, dataAtual: any, metas: R
   const META_LIQUIDA_CHECKIN = Number(metas['meta_checkin_base']) || 296;
   const META_P2M_MAX = Number(metas['meta_p2m_alinhado_max']) || 350;
   const META_CHECKIN_MAX = Number(metas['meta_checkin_alinhado_max']) || 308;
-
   // ============================================
   // 🔗 ANÁLISE CRUZADA (um liga o outro) — ADITIVO, não altera nada existente
   // Enxerga o time como sistema: quem cai junto, quem puxa, quick wins, radar
@@ -235,11 +255,9 @@ function construirPrompt(colabs: any[], saudeTime: any, dataAtual: any, metas: R
   };
   const listar = (arr: string[], max = 8): string =>
     arr.length <= max ? arr.join(', ') : `${arr.slice(0, max).join(', ')} +${arr.length - max} mais`;
-
   const roster: any[] = Array.isArray(todosColabs) && todosColabs.length ? todosColabs : colabs;
   const processosLista = ['P2M', 'Checkin', 'Sorting'];
   const emojiProc: Record<string, string> = { P2M: '🚚', Checkin: '📦', Sorting: '📋' };
-
   let porProcessoTexto = '';
   processosLista.forEach((proc) => {
     const doProc = roster.filter((c) => c.processo === proc);
@@ -269,7 +287,6 @@ function construirPrompt(colabs: any[], saudeTime: any, dataAtual: any, metas: R
     }
     porProcessoTexto += `   📈 Tendência: ${caindo}↓ caindo · ${subindo}↑ subindo\n`;
   });
-
   // 🎯 QUICK WINS: ofensores ELEGÍVEIS a <=5% da meta (um empurrão certo reclassifica pro alinhado)
   const quickWins = colabs
     .filter((c) => {
@@ -284,7 +301,6 @@ function construirPrompt(colabs: any[], saudeTime: any, dataAtual: any, metas: R
       const base = metaBaseProc(c.processo);
       return `   • ${c.nome} (${c.processo}): ${mediaColab(c)} pç/h — faltam só ${Math.round(base - mediaColab(c))} pra meta (${base})`;
     });
-
   // 💎 REFERÊNCIAS: consistentes acima do teto (candidatos a puxar o time / reconhecer)
   const referencias = roster
     .filter((c) => {
@@ -294,7 +310,6 @@ function construirPrompt(colabs: any[], saudeTime: any, dataAtual: any, metas: R
     .sort((a, b) => mediaColab(b) - mediaColab(a))
     .slice(0, 6)
     .map((c) => `   • ${c.nome} (${c.processo}): ${mediaColab(c)} pç/h — consistente`);
-
   // ⚠️ PADRÕES COLETIVOS (>= 3 pessoas = causa comum provável, não individual)
   const caemSegunda = roster.filter((c) => c?.padroes?.cai_segunda).map((c) => c.nome);
   const caemSexta = roster.filter((c) => c?.padroes?.cai_sexta).map((c) => c.nome);
@@ -305,7 +320,6 @@ function construirPrompt(colabs: any[], saudeTime: any, dataAtual: any, metas: R
   if (caemSexta.length >= 3) padroesLinhas.push(`   • ⚠️ Caem SEXTA (${caemSexta.length}): ${listar(caemSexta)} → cansaço de fim de semana?`);
   if (atestadosUp.length >= 3) padroesLinhas.push(`   • 🩺 Atestados subindo (${atestadosUp.length}): ${listar(atestadosUp)} → bem-estar coletivo`);
   if (burnoutRisco.length >= 3) padroesLinhas.push(`   • 🔥 Risco de burnout (${burnoutRisco.length}): ${listar(burnoutRisco)}`);
-
   const analiseCruzadaTexto = `
 # 🔗 VISÃO SISTÊMICA (um liga o outro — pense no TIME antes do indivíduo)
 Um grupo caindo junto no mesmo processo raramente é coincidência: pode ser escala, volume, processo ou clima. Antes de responsabilizar alguém, pergunte se a causa é COLETIVA.
@@ -319,7 +333,6 @@ ${referencias.join('\n')}` : ''}${padroesLinhas.length ? `
 ## ⚠️ PADRÕES COLETIVOS DETECTADOS (>= 3 pessoas = investigue a causa comum)
 ${padroesLinhas.join('\n')}` : ''}
 `;
-
   // 📡 RADAR — não esquecer de ninguém (prioriza, entre os elegíveis, quem está há mais tempo sem atenção)
   const negligencia = (c: any): number => {
     if (c?.vieses?.nuncaReceberFeedback) return 100000;
@@ -343,7 +356,26 @@ ${padroesLinhas.join('\n')}` : ''}
 Entre os elegíveis hoje, estes estão há mais tempo sem sua atenção. Todos precisam existir no seu radar — não deixe ninguém invisível:
 ${radar.join('\n')}
 ` : '';
-
+  // 🆕 PAINÉIS DE OCUPAÇÃO E QUALIDADE (dentro/fora) — visão de resultado além da líquida
+  const p = saudeTime?.paineis;
+  let paineisTexto = '';
+  if (p) {
+    const ocupForaTxt = (p.ocupacao?.listaFora || []).slice(0, 8)
+      .map((x: any) => `${x.nome} (${x.valor}% / meta ${x.meta}%)`).join(', ');
+    const imaForaTxt = (p.ima?.listaFora || []).slice(0, 8)
+      .map((x: any) => `${x.nome} (IMA ${x.valor} / limite ${x.meta})`).join(', ');
+    paineisTexto = `
+# 📊 PAINÉIS DE RESULTADO (as 3 dimensões do time)
+## 📈 LÍQUIDA (produtividade)
+   🔴 Ofensores: ${p.liquida?.ofensor || 0}  ·  🔵 Alinhados: ${p.liquida?.alinhado || 0}  ·  🟢 Superas: ${p.liquida?.supera || 0}
+## 📊 OCUPAÇÃO (só P2M · dentro vs fora da meta)
+   ✅ Dentro: ${p.ocupacao?.dentro || 0}  ·  🔴 Fora: ${p.ocupacao?.fora || 0}${ocupForaTxt ? `
+   Fora da meta: ${ocupForaTxt}` : ''}
+## 🎯 IMA / QUALIDADE (menor é melhor · dentro vs fora do limite)
+   ✅ Dentro: ${p.ima?.dentro || 0}  ·  🔴 Fora: ${p.ima?.fora || 0}${imaForaTxt ? `
+   Fora do limite: ${imaForaTxt}` : ''}
+`;
+  }
   const contextoTemporalTexto = {
     inicio_mes: '🌅 INÍCIO DO MÊS (alinhamento, planejamento)',
     meio_mes: '☀️ MEIO DO MÊS (aceleração, ajustes)',
@@ -356,6 +388,8 @@ ${radar.join('\n')}
     if (saudeTime.alertas.muitasQuedasJuntas) alerts.push(`🚨 ${saudeTime.performance.caindoTodos} colabs caindo juntos - PROBLEMA COLETIVO?`);
     if (saudeTime.alertas.atestadosEmAlta) alerts.push(`🩺 Atestados em alta - bem-estar`);
     if (saudeTime.alertas.burnoutColetivo) alerts.push(`🔥 Burnout coletivo detectado`);
+    if (saudeTime.alertas.ocupacaoBaixaColetiva) alerts.push(`📊 Ocupação baixa coletiva (5+ colabs fora da meta)`);
+    if (saudeTime.alertas.imaAltoColetivo) alerts.push(`🎯 Qualidade ruim coletiva (5+ colabs com IMA acima do limite)`);
     if (saudeTime.distribuicaoFeedback.semFeedback90d > 5) alerts.push(`⚠️ ${saudeTime.distribuicaoFeedback.semFeedback90d} colabs SEM FEEDBACK 90+ dias`);
     if (saudeTime.distribuicaoFeedback.poucoReconhecimentos > 10) alerts.push(`💔 ${saudeTime.distribuicaoFeedback.poucoReconhecimentos} colabs NUNCA reconhecidos`);
     if (alerts.length > 0) {
@@ -402,7 +436,7 @@ você vai aprender o que FUNCIONA com esse time específico.
     desc += `   ${c.cargo || 'sem cargo'} | ${c.carreira || 'sem carreira'}\n`;
     desc += `   ${c.carreira_info.mesesNaEmpresa}m empresa | ${c.carreira_info.mesesNaCarreira}m carreira\n`;
     
-    desc += `\n📊 PERFORMANCE:\n`;
+    desc += `\n📊 PERFORMANCE (LÍQUIDA):\n`;
     if (c.performance.curto_prazo_7d.dias > 0) {
       const t = c.performance.curto_prazo_7d.tendencia;
       desc += `   • 7d: ${c.performance.curto_prazo_7d.media} pç/h (${t.tendencia} ${t.variacao_pct > 0 ? '+' : ''}${t.variacao_pct}%)\n`;
@@ -418,6 +452,21 @@ você vai aprender o que FUNCIONA com esse time específico.
     }
     if (c.performance.mensal_atual) {
       desc += `   • Mensal atual: ${c.performance.mensal_atual.liquida} pç/h (${c.performance.mensal_atual.dias}d)\n`;
+    }
+    
+    // 🆕 OCUPAÇÃO
+    if (c.ocupacao && c.ocupacao.tem) {
+      const oIcon = c.ocupacao.status === 'dentro' ? '✅' : '🔴';
+      desc += `\n📊 OCUPAÇÃO: ${oIcon} ${c.ocupacao.media30d}% (meta ${c.ocupacao.meta}% · ${c.ocupacao.status})\n`;
+      desc += `   • 7d: ${c.ocupacao.media7d}% · tendência: ${c.ocupacao.tendencia?.tendencia || 'sem dados'}\n`;
+    }
+    
+    // 🆕 IMA / QUALIDADE
+    if (c.ima && c.ima.tem) {
+      const iIcon = c.ima.status === 'dentro' ? '✅' : '🔴';
+      const tIma = c.ima.tendencia === 'melhorou' ? '📉 melhorou' : c.ima.tendencia === 'piorou' ? '📈 piorou' : c.ima.tendencia;
+      desc += `\n🎯 IMA/QUALIDADE: ${iIcon} ${c.ima.atual} (limite ${c.ima.meta} · menor=melhor · ${c.ima.status})\n`;
+      desc += `   • Tendência: ${tIma}${c.ima.variacao_pct ? ` (${c.ima.variacao_pct > 0 ? '+' : ''}${c.ima.variacao_pct}%)` : ''}\n`;
     }
     
     if (c.padroes.cai_segunda || c.padroes.cai_sexta || c.padroes.consistente || c.padroes.volatil) {
@@ -451,6 +500,15 @@ você vai aprender o que FUNCIONA com esse time específico.
       desc += `🎉 PRONTO P/ PROMOÇÃO (${c.carreira_info.mesesNaCarreira}m em ${c.carreira} → ${c.proxima_carreira})\n`;
     } else {
       desc += `${c.carreira_info.mesesNaCarreira}m em ${c.carreira}\n`;
+    }
+    
+    // 🆕 CICLO DE FEEDBACK
+    if (c.cicloFeedback) {
+      if (c.cicloFeedback.nunca) {
+        desc += `\n🔄 CICLO: NUNCA recebeu feedback — prioridade de inclusão\n`;
+      } else if (c.cicloFeedback.diasDesdeUltimo !== null) {
+        desc += `\n🔄 CICLO: ${c.cicloFeedback.diasDesdeUltimo}d desde último feedback (ciclo ${c.cicloFeedback.ciclo}d · ${c.cicloFeedback.venceu ? 'VENCIDO' : 'em dia'})\n`;
+      }
     }
     
     if (c.acompanhamento) {
@@ -493,16 +551,19 @@ você vai aprender o que FUNCIONA com esse time específico.
 ${contextoTemporalTexto}
 Dias restantes mês: ${dataAtual.diasRestantesMes}
 ${dataAtual.fimQuarter ? '🏁 FIM DE Q - momento crítico!' : ''}
+Ciclo de feedback configurado: ${dataAtual.cicloFeedbackDias || 6} dias
 ${alertasSistemicos}
 ${secaoAprendizado}
 # 🎯 MISSÃO HOJE
 Gerar **${vagasHoje} tarefa(s)** estratégica(s).
 Use TODO o contexto:
+- Os 3 INDICADORES (líquida + ocupação + IMA/qualidade)
 - Multi-prazo (7d/30d/longo)
 - Padrões detectados
 - Memória de feedbacks
 - APRENDIZADO do que funcionou/falhou
 - Saúde sistêmica do time
+- Ciclo de feedback (quem venceu o prazo)
 - Contexto temporal (dia do mês)
 # 📊 SAÚDE DO TIME
 Total: ${saudeTime?.total || 0}
@@ -516,16 +577,17 @@ Oportunidades:
 - 🎓 Prontos promoção: ${saudeTime?.oportunidades?.prontosPromocao || 0}
 - 💎 Consistentes silenciosos: ${saudeTime?.oportunidades?.consistentesSilenciosos || 0}
 - 📈 Evoluções invisíveis: ${saudeTime?.oportunidades?.evolucoesInvisiveis || 0}
-${analiseCruzadaTexto}${radarTexto}
+${paineisTexto}${analiseCruzadaTexto}${radarTexto}
 # 👥 COLABORADORES ELEGÍVEIS
 ${colabsDescricao}
 # 🎯 INSTRUÇÕES FINAIS
 Gere ${vagasHoje} tarefa(s) considerando:
-1. APRENDIZADO: o que funcionou vs falhou no PASSADO
-2. INDIVIDUAL: histórico específico do colab (se houver)
-3. SISTÊMICO: saúde geral do time
-4. TEMPORAL: dia do mês, fim de Q
-5. HUMANO: contexto da pessoa, não só números
-6. EQUILÍBRIO: misture tipos (reconhecimento, coaching, prevenção)
+1. OS 3 INDICADORES: cruze líquida + ocupação + IMA no diagnóstico
+2. APRENDIZADO: o que funcionou vs falhou no PASSADO
+3. INDIVIDUAL: histórico específico do colab (se houver)
+4. SISTÊMICO: saúde geral do time
+5. TEMPORAL: dia do mês, fim de Q
+6. HUMANO: contexto da pessoa, não só números
+7. EQUILÍBRIO: misture tipos (reconhecimento, coaching, prevenção)
 Responda APENAS o JSON array (sem texto antes/depois).`;
 }
