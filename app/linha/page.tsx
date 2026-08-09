@@ -135,6 +135,9 @@ export default function LinhaPage() {
   const [rotAutoTipo, setRotAutoTipo] = useState<0 | 1 | 2 | 3>(0);
   const [rotAutoUltima, setRotAutoUltima] = useState<string | null>(null);
   const jaVerificouRotAuto = useRef(false);
+  // 🔒 RESTRIÇÃO: pessoas que não rotacionam (ficam fixas em E1/D1, transbordando E2/D2)
+  const [restricoes, setRestricoes] = useState<Set<string>>(new Set());
+  const [modalRestricao, setModalRestricao] = useState<{ idGroot: string; nome: string } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
   const [menuSinergia, setMenuSinergia] = useState<{ x: number; y: number; aloc: Alocacao } | null>(null);
@@ -391,7 +394,7 @@ export default function LinhaPage() {
     await carregarLayout();
     await garantirSlotsFixos();
     await carregarConfigRotAuto();
-    await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes()]);
+    await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes(), carregarRestricoes()]);
     setLoading(false);
   }
   // ============================================================
@@ -573,6 +576,83 @@ export default function LinhaPage() {
       return proc === 'P2M' && stat === 'ativo';
     });
     setColabs(filtrados);
+  }
+  // ============================================================
+  // 🔒 RESTRIÇÃO — pessoas que não rotacionam
+  // Ficam fixas nas colunas de FORA, nas 2 primeiras bancadas:
+  // E1/E2 (Linha O = linha 1) e D1/D2 (Linha N = linha 2).
+  // Guardadas na tabela 'restricoes' (id_groot).
+  // ============================================================
+  async function carregarRestricoes() {
+    const { data } = await supabase.from('restricoes').select('id_groot');
+    setRestricoes(new Set((data || []).map((r: any) => r.id_groot)));
+  }
+  function ehRestricao(idGroot: string): boolean {
+    return restricoes.has(idGroot);
+  }
+  // bancadas da zona de restrição de uma coluna: [E1,E2] ou [D1,D2]
+  function bancadasZonaRestricao(coluna: 'E' | 'D'): Bancada[] {
+    // E = coluna esquerda da Linha O (linha 1); D = coluna direita da Linha N (linha 2)
+    const linha = coluna === 'E' ? 1 : 2;
+    const lado = coluna === 'E' ? 'esquerdo' : 'direito';
+    const b1 = getBancada(linha, lado, 1);
+    const b2 = getBancada(linha, lado, 2);
+    return [b1, b2].filter(Boolean) as Bancada[];
+  }
+  // conta quantas restrições já ocupam a zona (E ou D)
+  function contarRestricoesZona(coluna: 'E' | 'D'): number {
+    const ids = new Set(bancadasZonaRestricao(coluna).map((b) => b.id));
+    return alocacoes.filter((a) => ids.has(a.bancada_id) && ehRestricao(a.id_groot)).length;
+  }
+  // acha a próxima vaga livre pra restrição na zona (E1 primeiro, depois E2)
+  function proximaVagaRestricao(coluna: 'E' | 'D'): Bancada | null {
+    const zona = bancadasZonaRestricao(coluna);
+    for (const b of zona) {
+      const ocupantes = alocacoes.filter((a) => a.bancada_id === b.id).length;
+      if (ocupantes < 2) return b; // tem vaga
+    }
+    return null; // zona cheia
+  }
+  async function marcarRestricao(idGroot: string, coluna: 'E' | 'D') {
+    // valida se cabe na zona (E1/E2 ou D1/D2 = máx 4 pessoas, mas só conta restrições?)
+    const totalRestr = contarRestricoesZona(coluna);
+    if (totalRestr >= 4) {
+      toast('error', 'Zona ' + coluna + ' já está cheia de restrições (E1+E2)');
+      setModalRestricao(null);
+      return;
+    }
+    const vaga = proximaVagaRestricao(coluna);
+    if (!vaga) {
+      toast('error', 'Sem vaga livre na zona ' + coluna + ' (E1/E2 lotadas)');
+      setModalRestricao(null);
+      return;
+    }
+    // 1) marca como restrição no banco
+    await supabase.from('restricoes').upsert({ id_groot: idGroot }, { onConflict: 'id_groot' });
+    // 2) remove a alocação atual da pessoa (de onde ela estiver)
+    const alocAtual = alocacoes.find((a) => a.id_groot === idGroot);
+    if (alocAtual) {
+      await supabase.from('layout_alocacao').delete().eq('id', alocAtual.id);
+    }
+    // 3) aloca ela na vaga de restrição (fixa)
+    const hoje = new Date().toISOString().split('T')[0];
+    await supabase.from('layout_alocacao').insert({
+      bancada_id: vaga.id,
+      id_groot: idGroot,
+      tipo_alocacao: 'fixo',
+      bancada_fixa_id: vaga.id,
+      data_referencia: hoje,
+    });
+    await carregarRestricoes();
+    await carregarAlocacoes();
+    toast('success', '🔒 Restrição marcada na zona ' + coluna);
+    setModalRestricao(null);
+  }
+  async function desmarcarRestricao(idGroot: string) {
+    await supabase.from('restricoes').delete().eq('id_groot', idGroot);
+    await carregarRestricoes();
+    toast('success', '🔓 Restrição removida');
+    setMenuSinergia(null);
   }
   // ✅ RITMOS continuam por dia (vêm do CSV diário)
   async function carregarRitmos() {
@@ -1121,6 +1201,8 @@ export default function LinhaPage() {
     const liquida = ritmo?.liquida;
     const eFixoAqui = aloc.bancada_fixa_id === bancadaAtual.id && aloc.bancada_id === bancadaAtual.id;
     const eTemporario = aloc.tipo_alocacao === 'temporario';
+    const eRestr = ehRestricao(aloc.id_groot);
+    const bordaRestr = eRestr ? ' border-green-500 ring-1 ring-green-500/40' : '';
     const isDragging = draggingId === aloc.id_groot;
     const isAtivo = cardAtivo === aloc.id_groot;
     const dragHandlers = {
@@ -1129,7 +1211,6 @@ export default function LinhaPage() {
       onDragEnd: () => { setDraggingId(null); setHoverBancada(null); },
       onDoubleClick: (e: React.MouseEvent) => { e.stopPropagation(); setCardAtivo(isAtivo ? null : aloc.id_groot); },
       onContextMenu: (e: React.MouseEvent) => {
-        if (!eTemporario) return;
         e.preventDefault();
         e.stopPropagation();
         setMenuSinergia({ x: e.clientX, y: e.clientY, aloc });
@@ -1140,11 +1221,12 @@ export default function LinhaPage() {
       return (
         <div {...dragHandlers} title={titulo}
           data-flip-key={'colab-' + aloc.id_groot}
-          className={'relative group ' + cor.borda + ' ' + cor.bg + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in cursor-grab active:cursor-grabbing card-hover flex-shrink-0' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
+          className={'relative group ' + (eRestr ? 'border-green-500 bg-green-500/5' : cor.borda + ' ' + cor.bg) + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in cursor-grab active:cursor-grabbing card-hover flex-shrink-0' + bordaRestr + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
             <span className="text-[10px] text-white truncate">{nomeExibido(c, colabs)}</span>
-            {eFixoAqui && !modoPrint && <span className="text-[9px] badge-fixo" title="Fixo">📍</span>}
+            {eRestr && !modoPrint && <span className="text-[9px]" title="Restrição">🔒</span>}
+            {eFixoAqui && !eRestr && !modoPrint && <span className="text-[9px] badge-fixo" title="Fixo">📍</span>}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             {!modoPrint && (liquida != null && liquida > 0 ? (<span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>) : (<span className="text-gray-600 text-[10px]">—</span>))}
@@ -1160,8 +1242,9 @@ export default function LinhaPage() {
     return (
       <div {...dragHandlers} title={titulo}
         data-flip-key={'colab-' + aloc.id_groot}
-        className={'relative group flex-1 h-full rounded border ' + (modoPrint ? 'border-gray-700 bg-[#1a1a1a]' : cor.borda + ' ' + cor.bg) + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
-        {eFixoAqui && !modoPrint && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
+        className={'relative group flex-1 h-full rounded border ' + (modoPrint ? 'border-gray-700 bg-[#1a1a1a]' : eRestr ? 'border-green-500 bg-green-500/5' : cor.borda + ' ' + cor.bg) + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + bordaRestr + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
+        {eRestr && !modoPrint && (<span className="absolute top-0 left-0.5 text-[8px]" title="Restrição">🔒</span>)}
+        {eFixoAqui && !eRestr && !modoPrint && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
         {modoPrint ? (
           <span className="text-[11px] font-bold text-white text-center px-1 leading-tight">{nomeExibido(c, colabs)}</span>
         ) : (
@@ -1549,35 +1632,77 @@ export default function LinhaPage() {
         const labelOrigem = bancadaOrigem
           ? bancadaOrigem.tipo_principal + ' L' + bancadaOrigem.linha + (bancadaOrigem.lado !== 'centro' ? ' ' + bancadaOrigem.lado : '')
           : 'origem';
+        const eTemp = menuSinergia.aloc.tipo_alocacao === 'temporario' || (menuSinergia.aloc.bancada_fixa_id != null && menuSinergia.aloc.bancada_fixa_id !== menuSinergia.aloc.bancada_id);
+        const jaRestricao = ehRestricao(menuSinergia.aloc.id_groot);
         return (
           <>
             <div className="fixed inset-0 z-[95]" onClick={() => setMenuSinergia(null)} onContextMenu={(e) => { e.preventDefault(); setMenuSinergia(null); }} />
             <div
               className="fixed z-[96] bg-[#1a1a1a] border border-yellow-500/40 rounded-md shadow-2xl py-1 min-w-[200px] slide-in"
-              style={{ left: Math.min(menuSinergia.x, window.innerWidth - 220) + 'px', top: Math.min(menuSinergia.y, window.innerHeight - 120) + 'px' }}
+              style={{ left: Math.min(menuSinergia.x, window.innerWidth - 220) + 'px', top: Math.min(menuSinergia.y, window.innerHeight - 160) + 'px' }}
             >
               <div className="px-3 py-1 border-b border-[#2a2a2a]">
                 <div className="text-[10px] text-yellow-400/80 font-bold">{c?.nome}</div>
-                <div className="text-[9px] text-gray-500">em sinergia</div>
+                <div className="text-[9px] text-gray-500">{jaRestricao ? '🔒 restrição' : eTemp ? 'em sinergia' : 'alocado'}</div>
               </div>
-              <button
-                onClick={() => { voltarOrigem(menuSinergia.aloc); setMenuSinergia(null); }}
-                className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
-              >
-                <span>↩️</span>
-                <span>Voltar pra origem <span className="text-gray-500">({labelOrigem})</span></span>
-              </button>
-              <button
-                onClick={() => { fixarAqui(menuSinergia.aloc); setMenuSinergia(null); }}
-                className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
-              >
-                <span>📍</span>
-                <span>Fixar aqui</span>
-              </button>
+              {eTemp && (
+                <button
+                  onClick={() => { voltarOrigem(menuSinergia.aloc); setMenuSinergia(null); }}
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
+                >
+                  <span>↩️</span>
+                  <span>Voltar pra origem <span className="text-gray-500">({labelOrigem})</span></span>
+                </button>
+              )}
+              {eTemp && (
+                <button
+                  onClick={() => { fixarAqui(menuSinergia.aloc); setMenuSinergia(null); }}
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
+                >
+                  <span>📍</span>
+                  <span>Fixar aqui</span>
+                </button>
+              )}
+              {!jaRestricao ? (
+                <button
+                  onClick={() => { const nm = c?.nome || ''; const id = menuSinergia.aloc.id_groot; setMenuSinergia(null); setModalRestricao({ idGroot: id, nome: nm }); }}
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-green-400 hover:bg-green-500/10 transition flex items-center gap-2 border-t border-[#2a2a2a]"
+                >
+                  <span>🔒</span>
+                  <span>Marcar restrição</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => { desmarcarRestricao(menuSinergia.aloc.id_groot); }}
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-red-500/10 transition flex items-center gap-2 border-t border-[#2a2a2a]"
+                >
+                  <span>🔓</span>
+                  <span>Desmarcar restrição</span>
+                </button>
+              )}
             </div>
           </>
         );
       })()}
+      {modalRestricao && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[97] p-4" onClick={() => setModalRestricao(null)}>
+          <div className="bg-[#1a1a1a] border border-green-500/40 rounded-lg p-5 max-w-xs w-full slide-in" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-bold text-green-400 mb-1">🔒 Marcar Restrição</h2>
+            <p className="text-[11px] text-gray-400 mb-4">{modalRestricao.nome} vai ficar fixa (não rotaciona). Escolha a coluna:</p>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <button onClick={() => marcarRestricao(modalRestricao.idGroot, 'E')}
+                className="py-3 rounded border border-green-500/40 bg-green-500/10 text-green-300 text-xs font-bold hover:bg-green-500/20 transition">
+                Coluna E<div className="text-[9px] text-gray-400 font-normal mt-0.5">Linha O (esquerda)</div>
+              </button>
+              <button onClick={() => marcarRestricao(modalRestricao.idGroot, 'D')}
+                className="py-3 rounded border border-green-500/40 bg-green-500/10 text-green-300 text-xs font-bold hover:bg-green-500/20 transition">
+                Coluna D<div className="text-[9px] text-gray-400 font-normal mt-0.5">Linha N (direita)</div>
+              </button>
+            </div>
+            <button onClick={() => setModalRestricao(null)} className="w-full text-[10px] text-gray-500 hover:text-white transition py-1">Cancelar</button>
+          </div>
+        </div>
+      )}
       {confirmModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[90] p-4"
           onClick={() => setConfirmModal(null)}>
