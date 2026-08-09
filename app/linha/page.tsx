@@ -217,7 +217,7 @@ export default function LinhaPage() {
     const AZUL3 = '#0F1E6B';
     const AMARELO = '#FFE600';
     const DOURADO = '#F5C518';
-    const H_BANCADA = 108;
+    const H_BANCADA = 114;
     const GAP = 14;
     const PREP = ['de', 'da', 'do', 'dos', 'das', 'e'];
     const nomePng = (c: { nome: string }) => {
@@ -275,7 +275,7 @@ export default function LinhaPage() {
       const badge = num ? `<span style="font-size:12px;font-weight:900;color:${AZUL};line-height:1;flex-shrink:0;">${num}</span>` : '';
       const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;line-height:1;"> · ${b.subtipo}</span>` : '';
       return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;">
-        <div style="height:26px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:4px;padding:0 10px;"><span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:${c.label};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${b.tipo_principal}${sub}</span>${badge}</div>
+        <div style="height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:4px;padding:4px 10px 0 10px;"><span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:${c.label};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${b.tipo_principal}${sub}</span>${badge}</div>
         <div style="flex:1;min-height:0;padding:0 10px 8px 10px;display:flex;flex-direction:column;">${corpo}</div>
       </div>`;
     };
