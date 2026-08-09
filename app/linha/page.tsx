@@ -200,20 +200,21 @@ export default function LinhaPage() {
     const AZUL2 = '#3A4199';
     const AMARELO = '#FFE600';
     const AMARELO2 = '#FFC400';
+    const H_BANCADA = 96;  // altura FIXA de toda bancada (mantém tudo alinhado)
+    const GAP = 12;
     const PREP = ['de', 'da', 'do', 'dos', 'das', 'e'];
-    // Nome pro PNG: primeiro nome + inicial do sobrenome significativo (pula "de/da/do")
     const nomePng = (c: { nome: string }) => {
       const partes = c.nome.trim().split(/\s+/);
       if (partes.length === 1) return partes[0];
-      const sobren = partes.slice(1);
-      const sig = sobren.find((s) => !PREP.includes(s.toLowerCase())) || sobren[0];
+      const sob = partes.slice(1);
+      const sig = sob.find((s) => !PREP.includes(s.toLowerCase())) || sob[0];
       return partes[0] + ' ' + sig[0].toUpperCase() + '.';
     };
     const iniciaisPng = (c: { nome: string }) => {
       const partes = c.nome.trim().split(/\s+/);
       if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
-      const sobren = partes.slice(1);
-      const sig = sobren.find((s) => !PREP.includes(s.toLowerCase())) || sobren[0];
+      const sob = partes.slice(1);
+      const sig = sob.find((s) => !PREP.includes(s.toLowerCase())) || sob[0];
       return (partes[0][0] + sig[0]).toUpperCase();
     };
     const corDe = (tipo: string) => {
@@ -223,60 +224,65 @@ export default function LinhaPage() {
       return { faixa: '#9AA2AF', label: '#5B6472', soft: '#F8F9FB', avatar: '#9AA2AF' };
     };
     const cardPessoa = (col: { nome: string }, c: { avatar: string }) =>
-      `<div style="flex:1;min-width:0;background:#fff;border:1px solid #EAEDF1;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 5px;min-height:52px;box-shadow:0 1px 2px rgba(16,24,40,.04);">
-        <div style="width:22px;height:22px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:9px;font-weight:800;color:#fff;letter-spacing:.3px;">${iniciaisPng(col)}</span></div>
-        <span style="font-size:11.5px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.1;white-space:nowrap;">${nomePng(col)}</span>
-      </div>`;
+      `<div style="flex:1;min-width:0;background:#fff;border:1px solid #EAEDF1;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px 4px;box-shadow:0 1px 2px rgba(16,24,40,.04);"><div style="width:20px;height:20px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:8px;font-weight:800;color:#fff;">${iniciaisPng(col)}</span></div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.05;white-space:nowrap;">${nomePng(col)}</span></div>`;
     const bancadaHTML = (b: Bancada, num: number) => {
       const c = corDe(b.tipo_principal);
+      // alocação real (quem está fisicamente na bancada) + sinergias (fixos aqui, alocados em outro lugar)
       const ocupantes = alocacoes.filter((a) => a.bancada_id === b.id);
-      const cols = ocupantes.map((a) => getColab(a.id_groot)).filter(Boolean) as { nome: string }[];
-      const isCat = b.tipo_principal === 'CATEGORIA';
+      const sinergias = alocacoes.filter((a) => a.bancada_fixa_id === b.id && a.bancada_id !== b.id);
+      const cols = [...ocupantes, ...sinergias].map((a) => getColab(a.id_groot)).filter(Boolean) as { nome: string }[];
       const corpo = cols.length === 0
-        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;min-height:52px;"><span style="font-size:10px;color:#C4CAD3;font-weight:600;letter-spacing:1px;">VAZIA</span></div>`
-        : (isCat
-            ? `<div style="display:flex;flex-direction:column;gap:5px;">${cols.map((x) => cardPessoa(x, c)).join('')}</div>`
-            : `<div style="display:flex;gap:5px;">${cols.map((x) => cardPessoa(x, c)).join('')}</div>`);
-      const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;"> · ${b.subtipo}</span>` : '';
-      const numTxt = num ? `<span style="font-size:9px;font-weight:800;color:${c.label};opacity:.55;">${num}</span>` : '';
-      return `<div style="width:158px;background:${c.soft};border:1px solid #EAEDF1;border-radius:12px;box-shadow:0 2px 6px rgba(16,24,40,.06);overflow:hidden;box-sizing:border-box;">
-        <div style="height:4px;background:${c.faixa};"></div>
-        <div style="padding:7px 8px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font-size:10px;font-weight:800;letter-spacing:.6px;color:${c.label};">${b.tipo_principal}${sub}</span>${numTxt}</div>
+        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;"><span style="font-size:10px;color:#C4CAD3;font-weight:600;letter-spacing:1px;">VAZIA</span></div>`
+        : `<div style="flex:1;display:flex;gap:4px;">${cols.map((x) => cardPessoa(x, c)).join('')}</div>`;
+      const numTxt = num ? `<span style="font-size:9px;font-weight:800;color:${c.label};opacity:.5;">${num}</span>` : '';
+      return `<div style="width:170px;height:${H_BANCADA}px;background:${c.soft};border:1px solid #EAEDF1;border-radius:12px;box-shadow:0 2px 5px rgba(16,24,40,.06);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;">
+        <div style="height:4px;background:${c.faixa};flex-shrink:0;"></div>
+        <div style="padding:6px 8px;display:flex;flex-direction:column;flex:1;min-height:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;flex-shrink:0;"><span style="font-size:10px;font-weight:800;letter-spacing:.5px;color:${c.label};">${b.tipo_principal}${b.subtipo ? ' · ' + b.subtipo : ''}</span>${numTxt}</div>
           ${corpo}
         </div>
       </div>`;
     };
-    const colunaHTML = (linha: number, lado: string, qtd: number) => {
+    const espacador = () => `<div style="width:170px;height:${H_BANCADA}px;"></div>`;
+    const colunaHTML = (linha: number, lado: string, qtd: number, qtdMax: number, alinharFundo: boolean) => {
       let slots = '';
+      // pra alinhar no fundo: empurra com espaçadores invisíveis em cima
+      if (alinharFundo) { for (let k = 0; k < qtdMax - qtd; k++) slots += espacador(); }
       for (let p = 1; p <= qtd; p++) {
         const b = getBancada(linha, lado, p);
-        slots += b ? bancadaHTML(b, p) : `<div style="width:158px;min-height:80px;border:2px dashed #E8EBEF;border-radius:12px;box-sizing:border-box;"></div>`;
+        slots += b ? bancadaHTML(b, p) : `<div style="width:170px;height:${H_BANCADA}px;border:2px dashed #E8EBEF;border-radius:12px;box-sizing:border-box;"></div>`;
       }
-      return `<div style="display:flex;flex-direction:column;gap:11px;">${slots}</div>`;
+      return `<div style="display:flex;flex-direction:column;gap:${GAP}px;">${slots}</div>`;
     };
-    const esteiraHTML = () =>
-      `<div style="width:34px;align-self:stretch;border-radius:8px;background:linear-gradient(180deg,#EEF1F5,#E3E7EC);border:1px solid #DADFE6;box-shadow:inset 0 2px 6px rgba(16,24,40,.06);position:relative;overflow:hidden;"><div style="position:absolute;inset:0;background-image:repeating-linear-gradient(180deg,transparent 0,transparent 14px,#D2D8E0 14px,#D2D8E0 16px);opacity:.6;"></div></div>`;
+    const esteiraHTML = (qtdMax: number) => {
+      const h = qtdMax * H_BANCADA + (qtdMax - 1) * GAP;
+      return `<div style="width:32px;height:${h}px;border-radius:8px;background:linear-gradient(180deg,#EEF1F5,#E3E7EC);border:1px solid #DADFE6;box-shadow:inset 0 2px 6px rgba(16,24,40,.06);position:relative;overflow:hidden;flex-shrink:0;"><div style="position:absolute;inset:0;background-image:repeating-linear-gradient(180deg,transparent 0,transparent 16px,#D2D8E0 16px,#D2D8E0 18px);opacity:.5;"></div></div>`;
+    };
     const centralHTML = () => {
       const cel = (linha: number, pos: number) => {
         const b = bancadas.find((x) => x.linha === linha && x.lado === 'centro' && x.posicao === pos);
-        return b ? bancadaHTML(b, 0) : `<div style="width:158px;min-height:80px;border:2px dashed #E8EBEF;border-radius:12px;box-sizing:border-box;"></div>`;
+        return b ? bancadaHTML(b, 0) : `<div style="width:170px;height:${H_BANCADA}px;border:2px dashed #E8EBEF;border-radius:12px;box-sizing:border-box;"></div>`;
       };
       return `<div style="display:flex;flex-direction:column;align-items:center;">
         <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;padding:4px 14px;background:#fff;border:1px solid #EAEDF1;border-radius:20px;box-shadow:0 1px 3px rgba(16,24,40,.06);"><span style="font-size:11px;font-weight:800;letter-spacing:1.5px;color:#8A6100;text-transform:uppercase;">Zona Central</span></div>
-        <div style="border:2px dashed #DDE2E8;border-radius:16px;background:linear-gradient(135deg,#FCFCFD,#F7F8FA);padding:16px;display:grid;grid-template-columns:158px 158px;gap:11px;">${cel(1, 1)}${cel(2, 1)}${cel(1, 2)}${cel(2, 2)}</div>
+        <div style="border:2px dashed #DDE2E8;border-radius:16px;background:linear-gradient(135deg,#FCFCFD,#F7F8FA);padding:14px;display:grid;grid-template-columns:170px 170px;gap:${GAP}px;">${cel(1, 1)}${cel(2, 1)}${cel(1, 2)}${cel(2, 2)}</div>
       </div>`;
     };
-    const linhaHTML = (linha: number, nome: string, espelhar: boolean) => {
+    const linhaHTML = (linha: number, nome: string) => {
       const qEsq = linha === 1 ? layout.L1_ESQ : layout.L2_ESQ;
       const qDir = linha === 1 ? layout.L1_DIR : layout.L2_DIR;
-      const cE = colunaHTML(linha, 'esquerdo', qEsq);
-      const cD = colunaHTML(linha, 'direito', qDir);
-      const est = esteiraHTML();
-      const cols = espelhar ? `${cD}${est}${cE}` : `${cE}${est}${cD}`;
+      const qMax = Math.max(qEsq, qDir);
+      // igual à tela: Linha 1 (O) alinha a DIREITA no fundo; Linha 2 (N) alinha a ESQUERDA no fundo
+      const fundoEsq = linha === 2;
+      const fundoDir = linha === 1;
+      const cE = colunaHTML(linha, 'esquerdo', qEsq, qMax, fundoEsq);
+      const cD = colunaHTML(linha, 'direito', qDir, qMax, fundoDir);
+      const est = esteiraHTML(qMax);
+      // MESMA ordem visual da tela nas duas linhas: esquerda | esteira | direita
+      const cols = `${cE}${est}${cD}`;
       return `<div style="display:flex;flex-direction:column;align-items:center;">
         <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:14px;"><div style="width:8px;height:8px;border-radius:2px;background:${AMARELO2};"></div><span style="font-size:16px;font-weight:900;letter-spacing:3px;color:#1A1D23;text-transform:uppercase;">${nome}</span><div style="width:8px;height:8px;border-radius:2px;background:${AMARELO2};"></div></div>
-        <div style="display:flex;gap:7px;align-items:flex-start;">${cols}</div>
+        <div style="display:flex;gap:8px;align-items:flex-start;">${cols}</div>
       </div>`;
     };
     const livresList = colabsLivres();
@@ -285,7 +291,7 @@ export default function LinhaPage() {
         ? `<div style="color:#B4BAC4;font-size:12px;font-style:italic;text-align:center;padding:16px 0;">Todos alocados</div>`
         : livresList.map((c) =>
             `<div style="background:#fff;border:1px solid #EAEDF1;border-radius:10px;padding:7px 9px;margin-bottom:7px;display:flex;align-items:center;gap:8px;box-shadow:0 1px 2px rgba(16,24,40,.04);"><div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#FFE600,#FFC400);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:9px;font-weight:800;color:#5A4A00;">${iniciaisPng(c)}</span></div><span style="font-size:12px;font-weight:700;color:#1A1D23;white-space:nowrap;">${nomePng(c)}</span></div>`).join('');
-      return `<div style="width:186px;flex-shrink:0;background:linear-gradient(180deg,#FAFBFC,#F4F6F8);border:1px solid #EAEDF1;border-radius:16px;padding:14px;align-self:stretch;box-shadow:0 2px 8px rgba(16,24,40,.04);">
+      return `<div style="width:186px;flex-shrink:0;background:linear-gradient(180deg,#FAFBFC,#F4F6F8);border:1px solid #EAEDF1;border-radius:16px;padding:14px;box-shadow:0 2px 8px rgba(16,24,40,.04);">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #EAEDF1;"><span style="font-size:12px;font-weight:900;letter-spacing:1px;color:#4B5563;text-transform:uppercase;">Reservas</span><span style="font-size:12px;font-weight:900;color:#fff;background:${AZUL};border-radius:8px;padding:2px 9px;">${livresList.length}</span></div>
         ${cards}
       </div>`;
@@ -318,9 +324,9 @@ export default function LinhaPage() {
       <div style="display:flex;gap:26px;padding:30px 32px;align-items:flex-start;background:linear-gradient(180deg,#fff,#FAFBFC);">
         ${reservasHTML()}
         <div style="flex:1;display:flex;gap:30px;align-items:flex-start;justify-content:space-around;">
-          ${linhaHTML(1, nomesLinhas.linha1, false)}
+          ${linhaHTML(1, nomesLinhas.linha1)}
           ${centralHTML()}
-          ${linhaHTML(2, nomesLinhas.linha2, true)}
+          ${linhaHTML(2, nomesLinhas.linha2)}
         </div>
       </div>
       <div style="padding:16px 32px;border-top:1px solid #EEF1F5;background:${AZUL};display:flex;justify-content:space-between;align-items:center;">
