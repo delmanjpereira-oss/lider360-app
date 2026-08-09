@@ -131,6 +131,10 @@ export default function LinhaPage() {
   const [modalSubtipo, setModalSubtipo] = useState<string>('');
   const [modalRotacao, setModalRotacao] = useState(false);
   const [rotacionando, setRotacionando] = useState(false);
+  // 🔄 ROTAÇÃO AUTOMÁTICA: qual das 3 rotações roda sozinha ao abrir (0=desligada)
+  const [rotAutoTipo, setRotAutoTipo] = useState<0 | 1 | 2 | 3>(0);
+  const [rotAutoUltima, setRotAutoUltima] = useState<string | null>(null);
+  const jaVerificouRotAuto = useRef(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
   const [menuSinergia, setMenuSinergia] = useState<{ x: number; y: number; aloc: Alocacao } | null>(null);
@@ -365,6 +369,12 @@ export default function LinhaPage() {
     return wrap.firstElementChild as HTMLElement;
   }
   useEffect(() => { carregarTudo(); }, []);
+  // dispara a rotação automática quando os dados terminam de carregar
+  useEffect(() => {
+    if (!loading && bancadas.length > 0 && rotAutoTipo !== 0 && !jaVerificouRotAuto.current) {
+      verificarRotacaoAutomatica();
+    }
+  }, [loading, bancadas.length, rotAutoTipo, rotAutoUltima]);
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') {
@@ -380,8 +390,93 @@ export default function LinhaPage() {
     await carregarNomesLinhas();
     await carregarLayout();
     await garantirSlotsFixos();
+    await carregarConfigRotAuto();
     await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes()]);
     setLoading(false);
+  }
+  // ============================================================
+  // 🔄 ROTAÇÃO AUTOMÁTICA — gira sozinha ao abrir o app
+  // Config no Supabase (tabela 'config', chaves rot_auto_tipo e rot_auto_ultima).
+  // Recupera dias perdidos: conta dias úteis (seg-sáb, pula domingo) desde
+  // a última rotação até hoje e gira esse tanto de vezes. Trava por dia.
+  // ============================================================
+  async function carregarConfigRotAuto() {
+    const { data } = await supabase.from('config').select('chave, valor')
+      .in('chave', ['rot_auto_tipo', 'rot_auto_ultima']);
+    const map: Record<string, string> = {};
+    (data || []).forEach((c: any) => { map[c.chave] = c.valor; });
+    const tipo = Number(map.rot_auto_tipo) as 0 | 1 | 2 | 3;
+    setRotAutoTipo(tipo === 1 || tipo === 2 || tipo === 3 ? tipo : 0);
+    setRotAutoUltima(map.rot_auto_ultima || null);
+  }
+  async function salvarConfigRotAuto(tipo: 0 | 1 | 2 | 3, ultima: string | null) {
+    // upsert das duas chaves na tabela config
+    await supabase.from('config').upsert(
+      [
+        { chave: 'rot_auto_tipo', valor: String(tipo) },
+        { chave: 'rot_auto_ultima', valor: ultima || '' },
+      ],
+      { onConflict: 'chave' }
+    );
+    setRotAutoTipo(tipo);
+    setRotAutoUltima(ultima);
+  }
+  // conta dias úteis (seg-sáb) entre a última rotação (exclusivo) e hoje (inclusivo)
+  function diasUteisPerdidos(dataUltima: string, dataHoje: string): number {
+    const ultima = new Date(dataUltima + 'T00:00:00');
+    const hoje = new Date(dataHoje + 'T00:00:00');
+    let count = 0;
+    const cursor = new Date(ultima);
+    cursor.setDate(cursor.getDate() + 1);
+    while (cursor <= hoje) {
+      if (cursor.getDay() !== 0) count++; // 0 = domingo, não conta
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return count;
+  }
+  function hojeStr(): string {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  // roda 1x após o carregamento, quando bancadas/alocações já estão prontas
+  async function verificarRotacaoAutomatica() {
+    if (jaVerificouRotAuto.current) return;
+    if (rotAutoTipo === 0) return; // desligada
+    if (bancadas.length === 0) return; // ainda não carregou
+    const hoje = hojeStr();
+    const hojeDate = new Date(hoje + 'T00:00:00');
+    if (hojeDate.getDay() === 0) return; // domingo não gira
+    // quantas rotações faltam aplicar?
+    let giros = 0;
+    if (!rotAutoUltima) {
+      giros = 1; // primeira vez: gira 1x e marca hoje
+    } else {
+      if (rotAutoUltima === hoje) return; // já girou hoje
+      giros = diasUteisPerdidos(rotAutoUltima, hoje);
+    }
+    if (giros <= 0) { return; }
+    jaVerificouRotAuto.current = true;
+    // aplica os giros em sequência (silencioso, sem toast nem animação)
+    for (let i = 0; i < giros; i++) {
+      // lê alocações FRESCAS do banco (não do estado React, que não atualiza no loop)
+      const { data: alocsFrescas } = await supabase.from('layout_alocacao').select('*');
+      const fonte = (alocsFrescas || []) as Alocacao[];
+      if (rotAutoTipo === 3) await rotacaoNivelar(fonte);
+      else await rotacaoCiclo(rotAutoTipo === 2, fonte);
+      // após cada giro, os ocupantes viram fixos da bancada atual
+      const { data: alocsAtuais } = await supabase.from('layout_alocacao').select('id, bancada_id');
+      if (alocsAtuais && alocsAtuais.length > 0) {
+        await Promise.all(
+          alocsAtuais.map((a: any) =>
+            supabase.from('layout_alocacao')
+              .update({ bancada_fixa_id: a.bancada_id, tipo_alocacao: 'fixo' })
+              .eq('id', a.id)
+          )
+        );
+      }
+    }
+    await salvarConfigRotAuto(rotAutoTipo, hoje);
+    await carregarAlocacoes();
   }
   // 🔧 BANCADAS DINÂMICAS: lê a quantidade de cada coluna do banco (config).
   // Se não existir, usa o padrão. Sempre respeita o limite máximo de cada coluna.
@@ -814,14 +909,15 @@ export default function LinhaPage() {
       setModalRotacao(false);
     }
   }
-  async function rotacaoCiclo(comPesca: boolean) {
+  async function rotacaoCiclo(comPesca: boolean, alocsParam?: Alocacao[]) {
+    const alocacoesFonte = alocsParam || alocacoes;
     const hoje = new Date().toISOString().split('T')[0];
     for (const linha of [1, 2]) {
       const ciclo = getCicloLinha(linha, comPesca);
       if (ciclo.length === 0) continue;
       const ocupantes: Array<{ bancada: Bancada; alocs: Alocacao[] }> = ciclo.map((b) => ({
         bancada: b,
-        alocs: alocacoes.filter((a) => a.bancada_id === b.id),
+        alocs: alocacoesFonte.filter((a) => a.bancada_id === b.id),
       }));
       const novas: Array<{ id_groot: string; bancada_id: number; bancada_fixa_id: number | null; tipo: string }> = [];
       for (let i = 0; i < ocupantes.length; i++) {
@@ -872,7 +968,7 @@ export default function LinhaPage() {
         }
       }
       const bancadasLinhaIds = ciclo.map((b) => b.id);
-      const idsRemove = alocacoes.filter((a) => bancadasLinhaIds.includes(a.bancada_id)).map((a) => a.id);
+      const idsRemove = alocacoesFonte.filter((a) => bancadasLinhaIds.includes(a.bancada_id)).map((a) => a.id);
       if (idsRemove.length > 0) {
         await supabase.from('layout_alocacao').delete().in('id', idsRemove);
       }
@@ -889,7 +985,8 @@ export default function LinhaPage() {
       }
     }
   }
-  async function rotacaoNivelar() {
+  async function rotacaoNivelar(alocsParam?: Alocacao[]) {
+    const alocacoesFonte = alocsParam || alocacoes;
     for (const linha of [1, 2]) {
       for (const lado of ['esquerdo', 'direito']) {
         const qtd = linha === 1
@@ -900,8 +997,8 @@ export default function LinhaPage() {
         const bUltimo = getBancada(linha, lado, qtd);
         if (!bTopo || !bUltimo) continue;
         if (bTopo.tipo_principal !== 'GM' || bUltimo.tipo_principal !== 'GM') continue;
-        const alocsTopo = alocacoes.filter((a) => a.bancada_id === bTopo.id);
-        const alocsUltimo = alocacoes.filter((a) => a.bancada_id === bUltimo.id);
+        const alocsTopo = alocacoesFonte.filter((a) => a.bancada_id === bTopo.id);
+        const alocsUltimo = alocacoesFonte.filter((a) => a.bancada_id === bUltimo.id);
         for (const a of alocsTopo) {
           await supabase.from('layout_alocacao').update({
             bancada_id: bUltimo.id,
@@ -1516,6 +1613,29 @@ export default function LinhaPage() {
                 <div className="text-xs font-bold text-white mb-0.5">Rotação 3 · Nivelar Dia</div>
                 <div className="text-[10px] text-gray-500">Topo ↔ Último (mesmo lado)</div>
               </button>
+            </div>
+            <div className="mt-4 pt-3 border-t border-[#2a2a2a]">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[11px] font-bold text-yellow-400">⭐ Rotação Automática</div>
+                {rotAutoTipo !== 0 && (
+                  <button onClick={() => salvarConfigRotAuto(0, rotAutoUltima)} disabled={rotacionando}
+                    className="text-[9px] text-gray-500 hover:text-red-400 transition">desligar</button>
+                )}
+              </div>
+              <div className="text-[9px] text-gray-500 mb-2 leading-relaxed">Escolha 1 rotação pra girar sozinha ao abrir o app (seg–sáb, domingo não). Recupera dias que ficaram sem abrir.</div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[1, 2, 3].map((t) => (
+                  <button key={t} onClick={() => salvarConfigRotAuto(t as 1 | 2 | 3, rotAutoUltima)} disabled={rotacionando}
+                    className={'py-2 px-1 rounded text-[10px] font-bold border transition disabled:opacity-50 ' + (rotAutoTipo === t ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300' : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')}>
+                    {rotAutoTipo === t ? '⭐ ' : ''}Rot {t}
+                  </button>
+                ))}
+              </div>
+              {rotAutoTipo !== 0 && (
+                <div className="text-[9px] text-green-400/80 mt-2 text-center">
+                  ✓ Rotação {rotAutoTipo} ativa{rotAutoUltima ? ' · última: ' + rotAutoUltima.split('-').reverse().join('/') : ''}
+                </div>
+              )}
             </div>
             <button onClick={() => setModalRotacao(false)} disabled={rotacionando}
               className="w-full mt-3 text-[10px] text-gray-500 hover:text-white transition py-1 disabled:opacity-50">Cancelar</button>
