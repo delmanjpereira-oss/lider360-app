@@ -49,11 +49,30 @@ type ProdutividadeMensalLinha = {
   unidades_total: number;
   dias_trabalhados: number;
 };
+// 🆕 OCUPAÇÃO (ocupacao_p2m) — só P2M tem
+type OcupacaoLinha = {
+  id_groot: string;
+  data_referencia: string;
+  ocupacao_pct: number;
+};
+// 🆕 IMA / QUALIDADE (ima_manual) — mensal, menor é melhor
+type ImaLinha = {
+  id_groot: string;
+  processo: string;
+  mes: number;
+  ano: number;
+  ima: number;
+};
 type MetasConfig = {
   checkinBase: number;
   checkinAlinhadoMax: number;
   p2mBase: number;
   p2mAlinhadoMax: number;
+  // 🆕 metas de ocupação e IMA
+  ocupacaoP2M: number;
+  ocupacaoCheckin: number;
+  imaP2M: number;
+  imaCheckin: number;
 };
 type MonitorItem = {
   idGroot: string;
@@ -69,6 +88,18 @@ type MonitorItem = {
   tendencia?: 'subindo' | 'caindo' | 'estavel' | 'sem_base';
   variacaoPct?: number;
   mediaAnterior?: number;
+};
+// 🆕 item dos painéis de ocupação e IMA (dentro/fora)
+type IndicadorItem = {
+  idGroot: string;
+  id: number;
+  nome: string;
+  processo: string;
+  valor: number;   // ocupação (%) ou IMA
+  meta: number;
+  dentro: boolean;
+  dias?: number;   // qtd de registros considerados (ocupação)
+  mesRef?: string; // mês/ano de referência (IMA)
 };
 type ChatMensagem = {
   papel: 'user' | 'assistant';
@@ -115,6 +146,8 @@ const EMOJI_TIPO: Record<string, string> = {
   'Oportunidade de Carreira': '🎯',
   'Quebra de Padrão': '🔍',
   'Reconhecimento Invisível': '💎',
+  'Alerta de Ocupação': '📊',
+  'Alerta de Qualidade (IMA)': '🎯',
 };
 const SUGESTOES_CHAT = [
   '🚨 Quem precisa de atenção urgente hoje?',
@@ -135,11 +168,18 @@ export default function CopilotoPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [historico, setHistorico] = useState<HistoricoSimples[]>([]);
   const [produtividadeMensal, setProdutividadeMensal] = useState<ProdutividadeMensalLinha[]>([]);
+  // 🆕 dados de ocupação e IMA
+  const [ocupacaoData, setOcupacaoData] = useState<OcupacaoLinha[]>([]);
+  const [imaData, setImaData] = useState<ImaLinha[]>([]);
   const [metasConfig, setMetasConfig] = useState<MetasConfig>({
     checkinBase: 296,
     checkinAlinhadoMax: 308,
     p2mBase: 329,
     p2mAlinhadoMax: 350,
+    ocupacaoP2M: 80,
+    ocupacaoCheckin: 75,
+    imaP2M: 1567,
+    imaCheckin: 1567,
   });
   const [loading, setLoading] = useState(true);
   const [analisando, setAnalisando] = useState(false);
@@ -173,13 +213,16 @@ export default function CopilotoPage() {
   
   const carregarDados = useCallback(async () => {
     try {
-      const [tarsResp, colabsResp, histResp, mensalResp, finalizadas, configResp] = await Promise.all([
+      const [tarsResp, colabsResp, histResp, mensalResp, finalizadas, configResp, ocupResp, imaResp] = await Promise.all([
         supabase.from('tarefas').select('*').eq('status', 'Pendente').order('criado_em', { ascending: false }),
         supabase.from('colaboradores').select('id, id_groot, nome, processo, status').eq('status', 'Ativo'),
         supabase.from('historico').select('id_groot, data_referencia, prod_liquida, status_meta, impacto_net').order('data_referencia', { ascending: false }),
         supabase.from('produtividade_mensal').select('id_groot, mes, ano, processo, prod_liquida_media, unidades_total, dias_trabalhados').order('ano', { ascending: false }).order('mes', { ascending: false }),
         supabase.from('tarefas').select('*').eq('status', 'Finalizada').not('classificacao_aprendizado', 'is', null).order('finalizada_em', { ascending: false }).limit(30),
         supabase.from('config').select('chave, valor'),
+        // 🆕 ocupação (últimos 30 dias) e IMA (mais recentes)
+        supabase.from('ocupacao_p2m').select('id_groot, data_referencia, ocupacao_pct').gte('data_referencia', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]).order('data_referencia', { ascending: false }),
+        supabase.from('ima_manual').select('id_groot, processo, mes, ano, ima').order('ano', { ascending: false }).order('mes', { ascending: false }),
       ]);
       
       if (tarsResp.data) setTarefas(tarsResp.data as any);
@@ -187,6 +230,8 @@ export default function CopilotoPage() {
       if (histResp.data) setHistorico(histResp.data as any);
       if (mensalResp.data) setProdutividadeMensal(mensalResp.data as any);
       if (finalizadas.data) setTarefasFinalizadas(finalizadas.data as any);
+      if (ocupResp.data) setOcupacaoData(ocupResp.data as any);
+      if (imaResp.data) setImaData(imaResp.data as any);
       
       // 🆕 Lê metas REAIS do config
       if (configResp.data) {
@@ -199,6 +244,10 @@ export default function CopilotoPage() {
           checkinAlinhadoMax: map.meta_checkin_alinhado_max || 308,
           p2mBase: map.meta_p2m_base || 329,
           p2mAlinhadoMax: map.meta_p2m_alinhado_max || 350,
+          ocupacaoP2M: map.meta_ocupacao_p2m || 80,
+          ocupacaoCheckin: map.meta_ocupacao_checkin || 75,
+          imaP2M: map.meta_ima_p2m || 1567,
+          imaCheckin: map.meta_ima_checkin || 1567,
         });
         console.log('📊 Metas carregadas:', {
           P2M: `${map.meta_p2m_base}-${map.meta_p2m_alinhado_max}`,
@@ -357,10 +406,8 @@ export default function CopilotoPage() {
   // ============================================
   const JANELA_DIAS = 30;
   const META_TENDENCIA_DIAS = 15;
-
   const hojeMs = Date.now();
   const umDiaMs = 24 * 60 * 60 * 1000;
-
   // Índice: histórico por colaborador, com a data já em ms (uma vez só)
   const histPorColab: Record<string, { ms: number; liquida: number }[]> = {};
   historico.forEach((h) => {
@@ -370,14 +417,12 @@ export default function CopilotoPage() {
     if (!histPorColab[h.id_groot]) histPorColab[h.id_groot] = [];
     histPorColab[h.id_groot].push({ ms, liquida: h.prod_liquida });
   });
-
   function mediaEntre(registros: { ms: number; liquida: number }[], deMs: number, ateMs: number): { media: number; dias: number } {
     const dentro = registros.filter((r) => r.ms >= deMs && r.ms < ateMs);
     if (dentro.length === 0) return { media: 0, dias: 0 };
     const soma = dentro.reduce((s, r) => s + r.liquida, 0);
     return { media: Math.round(soma / dentro.length), dias: dentro.length };
   }
-
   // Calcula, por colaborador: média da janela (30d) + tendência (15 vs 15)
   const janelaPorId: Record<string, {
     media: number;
@@ -386,19 +431,16 @@ export default function CopilotoPage() {
     variacaoPct: number;
     mediaAnterior: number;
   }> = {};
-
   Object.entries(histPorColab).forEach(([idGroot, registros]) => {
     // Janela principal: últimos 30 dias
     const inicioJanela = hojeMs - JANELA_DIAS * umDiaMs;
     const janela = mediaEntre(registros, inicioJanela, hojeMs + umDiaMs);
     if (janela.dias === 0) return; // sem dado recente, não entra no painel
-
     // Tendência: últimos 15d vs os 15d anteriores
     const inicioRecente = hojeMs - META_TENDENCIA_DIAS * umDiaMs;
     const recente = mediaEntre(registros, inicioRecente, hojeMs + umDiaMs);
     const inicioAnterior = hojeMs - 2 * META_TENDENCIA_DIAS * umDiaMs;
     const anterior = mediaEntre(registros, inicioAnterior, inicioRecente);
-
     let tendencia: 'subindo' | 'caindo' | 'estavel' | 'sem_base' = 'sem_base';
     let variacaoPct = 0;
     if (recente.dias >= 2 && anterior.dias >= 2 && anterior.media > 0) {
@@ -407,7 +449,6 @@ export default function CopilotoPage() {
       else if (variacaoPct < -3) tendencia = 'caindo';
       else tendencia = 'estavel';
     }
-
     janelaPorId[idGroot] = {
       media: janela.media,
       dias: janela.dias,
@@ -416,17 +457,14 @@ export default function CopilotoPage() {
       mediaAnterior: anterior.media,
     };
   });
-
   const ultimoStatusPorId: Record<string, HistoricoSimples> = {};
   historico.forEach((h) => {
     if (!ultimoStatusPorId[h.id_groot]) ultimoStatusPorId[h.id_groot] = h;
   });
-
   const monitor = { ofensores: [] as MonitorItem[], alinhados: [] as MonitorItem[], superas: [] as MonitorItem[] };
   colaboradores.forEach((c) => {
     const janela = janelaPorId[c.id_groot];
     const ultimoDiario = ultimoStatusPorId[c.id_groot];
-
     if (janela) {
       const liquida = janela.media;
       const status = determinarStatusPorMeta(liquida, c.processo || '');
@@ -469,7 +507,6 @@ export default function CopilotoPage() {
       else if (status === 'Supera') monitor.superas.push(item);
     }
   });
-
   // Ofensores: prioriza quem está CAINDO (urgente) e com mais dias abaixo
   const pesoTendencia = (t?: string) => (t === 'caindo' ? 0 : t === 'estavel' ? 1 : t === 'subindo' ? 2 : 1);
   monitor.ofensores.sort((a, b) => {
@@ -482,6 +519,74 @@ export default function CopilotoPage() {
   monitor.superas.sort((a, b) => (b.variacaoPct || 0) - (a.variacaoPct || 0));
 
   // ============================================
+  // 🆕 MONITOR DE OCUPAÇÃO (dentro/fora) — só P2M tem ocupação
+  // Média dos últimos 30 dias por colaborador. Dentro = média >= meta.
+  // ============================================
+  const ocupPorColab: Record<string, number[]> = {};
+  ocupacaoData.forEach((o) => {
+    const v = Number(o.ocupacao_pct) || 0;
+    if (v <= 0) return;
+    if (!ocupPorColab[o.id_groot]) ocupPorColab[o.id_groot] = [];
+    ocupPorColab[o.id_groot].push(v);
+  });
+  const monitorOcupacao = { dentro: [] as IndicadorItem[], fora: [] as IndicadorItem[] };
+  colaboradores.forEach((c) => {
+    const valores = ocupPorColab[c.id_groot];
+    if (!valores || valores.length === 0) return; // sem ocupação (ex: Checkin) → não entra
+    const media = Math.round((valores.reduce((s, v) => s + v, 0) / valores.length) * 10) / 10;
+    const meta = c.processo === 'P2M' ? metasConfig.ocupacaoP2M : metasConfig.ocupacaoCheckin;
+    const dentro = media >= meta;
+    const item: IndicadorItem = {
+      idGroot: c.id_groot,
+      id: c.id,
+      nome: c.nome,
+      processo: c.processo || '-',
+      valor: media,
+      meta,
+      dentro,
+      dias: valores.length,
+    };
+    if (dentro) monitorOcupacao.dentro.push(item);
+    else monitorOcupacao.fora.push(item);
+  });
+  // fora primeiro os mais distantes da meta; dentro os melhores primeiro
+  monitorOcupacao.fora.sort((a, b) => (a.meta - a.valor) - (b.meta - b.valor)).reverse();
+  monitorOcupacao.dentro.sort((a, b) => b.valor - a.valor);
+
+  // ============================================
+  // 🆕 MONITOR DE IMA / QUALIDADE (dentro/fora) — MENOR é melhor
+  // Usa o registro mais recente de cada colab. Dentro = IMA <= meta.
+  // ============================================
+  const imaMaisRecentePorColab: Record<string, ImaLinha> = {};
+  imaData.forEach((i) => {
+    // imaData vem ordenado ano desc, mes desc → o primeiro de cada colab é o mais recente
+    if (!imaMaisRecentePorColab[i.id_groot]) imaMaisRecentePorColab[i.id_groot] = i;
+  });
+  const monitorIma = { dentro: [] as IndicadorItem[], fora: [] as IndicadorItem[] };
+  colaboradores.forEach((c) => {
+    const reg = imaMaisRecentePorColab[c.id_groot];
+    if (!reg) return; // sem IMA → não entra
+    const valor = Number(reg.ima) || 0;
+    if (valor <= 0) return;
+    const meta = c.processo === 'P2M' ? metasConfig.imaP2M : metasConfig.imaCheckin;
+    const dentro = valor <= meta; // menor é melhor
+    const item: IndicadorItem = {
+      idGroot: c.id_groot,
+      id: c.id,
+      nome: c.nome,
+      processo: c.processo || '-',
+      valor,
+      meta,
+      dentro,
+      mesRef: `${String(reg.mes).padStart(2, '0')}/${reg.ano}`,
+    };
+    if (dentro) monitorIma.dentro.push(item);
+    else monitorIma.fora.push(item);
+  });
+  // fora primeiro os que mais estouram a meta; dentro os melhores (menores) primeiro
+  monitorIma.fora.sort((a, b) => (b.valor - b.meta) - (a.valor - a.meta));
+  monitorIma.dentro.sort((a, b) => a.valor - b.valor);
+  // ============================================
   // 🫀 PLACAR DE EVOLUÇÃO DO TIME (o "coração")
   // Compara ofensores de AGORA (janela atual) vs ~30 dias atrás.
   // Precisa de histórico de ~60 dias; se não tiver, mostra "aguardando".
@@ -490,10 +595,8 @@ export default function CopilotoPage() {
     // classificação de 30 dias atrás: janela [hoje-60d, hoje-30d]
     const fimAntigo = hojeMs - JANELA_DIAS * umDiaMs;
     const inicioAntigo = hojeMs - 2 * JANELA_DIAS * umDiaMs;
-
     let ofensoresAntes = 0;
     let temBaseAntiga = false;
-
     colaboradores.forEach((c) => {
       const registros = histPorColab[c.id_groot];
       if (!registros) return;
@@ -504,7 +607,6 @@ export default function CopilotoPage() {
         if (status === 'Abaixo') ofensoresAntes++;
       }
     });
-
     const ofensoresAgora = monitor.ofensores.length;
     return {
       temBase: temBaseAntiga,
@@ -610,7 +712,6 @@ export default function CopilotoPage() {
   
   function abrirTarefa(t: TarefaCopiloto) { setTarefaAberta(t); }
   function fecharTarefa() { setTarefaAberta(null); }
-
   // 🆕 Badge visual de tendência (seta + variação) pra usar nos cards
   function badgeTendencia(item: MonitorItem) {
     const t = item.tendencia;
@@ -635,7 +736,6 @@ export default function CopilotoPage() {
       </span>
     );
   }
-
   function abrirFinalizacao(t: TarefaCopiloto) {
     setTarefaAberta(null);
     setTarefaParaFinalizar(t);
@@ -769,7 +869,6 @@ export default function CopilotoPage() {
                   )}
                 </div>
               </div>
-
               <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                 📊 Monitoramento Operacional
                 <span className="text-xs text-gray-500 font-normal">
@@ -869,6 +968,138 @@ export default function CopilotoPage() {
                   </div>
                 </div>
               </div>
+
+              {/* ============================================ */}
+              {/* 🆕 PAINEL OCUPAÇÃO (dentro/fora) — só P2M */}
+              {/* ============================================ */}
+              {(monitorOcupacao.dentro.length > 0 || monitorOcupacao.fora.length > 0) && (
+                <>
+                  <h2 className="text-lg font-bold text-white mt-8 mb-4 flex items-center gap-2">
+                    📊 Ocupação (Totefullness)
+                    <span className="text-xs text-gray-500 font-normal">
+                      · P2M · meta {metasConfig.ocupacaoP2M}% · média 30d
+                    </span>
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* FORA DA META */}
+                    <div className="bg-red-500/5 border border-red-500/30 rounded-2xl overflow-hidden">
+                      <div className="bg-red-500/20 px-4 py-3 border-b border-red-500/30 flex items-center justify-between">
+                        <h3 className="font-black text-red-300">🔴 Fora da meta</h3>
+                        <span className="text-2xl font-black text-red-300">{monitorOcupacao.fora.length}</span>
+                      </div>
+                      <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                        {monitorOcupacao.fora.length === 0 ? (
+                          <p className="text-center text-gray-500 text-sm py-6">Todos dentro 🎉</p>
+                        ) : (
+                          monitorOcupacao.fora.map((o) => (
+                            <Link key={o.idGroot} href={`/meu-time/${o.id}`} className="block bg-[#0a0a0a] hover:bg-[#1a1a1a] border border-[#2a2a2a] hover:border-red-500/30 rounded-lg p-3 transition-all">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-red-500/30 flex items-center justify-center text-red-300 font-bold text-xs">{iniciais(o.nome)}</div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-white truncate">{o.nome}</p>
+                                  <p className="text-xs text-gray-500">{o.processo}{o.dias ? ` · ${o.dias}d` : ''}</p>
+                                </div>
+                                <span className="text-sm font-black text-red-300">{o.valor}%</span>
+                              </div>
+                            </Link>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    {/* DENTRO DA META */}
+                    <div className="bg-green-500/5 border border-green-500/30 rounded-2xl overflow-hidden">
+                      <div className="bg-green-500/20 px-4 py-3 border-b border-green-500/30 flex items-center justify-between">
+                        <h3 className="font-black text-green-300">✅ Dentro da meta</h3>
+                        <span className="text-2xl font-black text-green-300">{monitorOcupacao.dentro.length}</span>
+                      </div>
+                      <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                        {monitorOcupacao.dentro.length === 0 ? (
+                          <p className="text-center text-gray-500 text-sm py-6">Ninguém dentro ainda</p>
+                        ) : (
+                          monitorOcupacao.dentro.map((o) => (
+                            <Link key={o.idGroot} href={`/meu-time/${o.id}`} className="block bg-[#0a0a0a] hover:bg-[#1a1a1a] border border-[#2a2a2a] hover:border-green-500/30 rounded-lg p-3 transition-all">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-green-500/30 flex items-center justify-center text-green-300 font-bold text-xs">{iniciais(o.nome)}</div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-white truncate">{o.nome}</p>
+                                  <p className="text-xs text-gray-500">{o.processo}{o.dias ? ` · ${o.dias}d` : ''}</p>
+                                </div>
+                                <span className="text-sm font-black text-green-300">{o.valor}%</span>
+                              </div>
+                            </Link>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* ============================================ */}
+              {/* 🆕 PAINEL IMA / QUALIDADE (dentro/fora) */}
+              {/* ============================================ */}
+              {(monitorIma.dentro.length > 0 || monitorIma.fora.length > 0) && (
+                <>
+                  <h2 className="text-lg font-bold text-white mt-8 mb-4 flex items-center gap-2">
+                    🎯 Qualidade (IMA)
+                    <span className="text-xs text-gray-500 font-normal">
+                      · limite P2M {metasConfig.imaP2M} · Checkin {metasConfig.imaCheckin} · menor é melhor
+                    </span>
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* FORA DO LIMITE (IMA alto) */}
+                    <div className="bg-red-500/5 border border-red-500/30 rounded-2xl overflow-hidden">
+                      <div className="bg-red-500/20 px-4 py-3 border-b border-red-500/30 flex items-center justify-between">
+                        <h3 className="font-black text-red-300">🔴 Fora do limite</h3>
+                        <span className="text-2xl font-black text-red-300">{monitorIma.fora.length}</span>
+                      </div>
+                      <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                        {monitorIma.fora.length === 0 ? (
+                          <p className="text-center text-gray-500 text-sm py-6">Todos dentro 🎉</p>
+                        ) : (
+                          monitorIma.fora.map((o) => (
+                            <Link key={o.idGroot} href={`/meu-time/${o.id}`} className="block bg-[#0a0a0a] hover:bg-[#1a1a1a] border border-[#2a2a2a] hover:border-red-500/30 rounded-lg p-3 transition-all">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-red-500/30 flex items-center justify-center text-red-300 font-bold text-xs">{iniciais(o.nome)}</div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-white truncate">{o.nome}</p>
+                                  <p className="text-xs text-gray-500">{o.processo}{o.mesRef ? ` · ${o.mesRef}` : ''}</p>
+                                </div>
+                                <span className="text-sm font-black text-red-300">{o.valor}</span>
+                              </div>
+                            </Link>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    {/* DENTRO DO LIMITE (IMA bom) */}
+                    <div className="bg-green-500/5 border border-green-500/30 rounded-2xl overflow-hidden">
+                      <div className="bg-green-500/20 px-4 py-3 border-b border-green-500/30 flex items-center justify-between">
+                        <h3 className="font-black text-green-300">✅ Dentro do limite</h3>
+                        <span className="text-2xl font-black text-green-300">{monitorIma.dentro.length}</span>
+                      </div>
+                      <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                        {monitorIma.dentro.length === 0 ? (
+                          <p className="text-center text-gray-500 text-sm py-6">Ninguém dentro ainda</p>
+                        ) : (
+                          monitorIma.dentro.map((o) => (
+                            <Link key={o.idGroot} href={`/meu-time/${o.id}`} className="block bg-[#0a0a0a] hover:bg-[#1a1a1a] border border-[#2a2a2a] hover:border-green-500/30 rounded-lg p-3 transition-all">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-green-500/30 flex items-center justify-center text-green-300 font-bold text-xs">{iniciais(o.nome)}</div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-white truncate">{o.nome}</p>
+                                  <p className="text-xs text-gray-500">{o.processo}{o.mesRef ? ` · ${o.mesRef}` : ''}</p>
+                                </div>
+                                <span className="text-sm font-black text-green-300">{o.valor}</span>
+                              </div>
+                            </Link>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
           
@@ -1181,12 +1412,14 @@ export default function CopilotoPage() {
                     <p className="text-gray-400">Abaixo: &lt; {metasConfig.p2mBase} pç/h</p>
                     <p className="text-gray-400">Alinhado: {metasConfig.p2mBase} - {metasConfig.p2mAlinhadoMax} pç/h</p>
                     <p className="text-gray-400">Supera: &gt; {metasConfig.p2mAlinhadoMax} pç/h</p>
+                    <p className="text-gray-500 mt-2 text-xs">Ocupação: ≥ {metasConfig.ocupacaoP2M}% · IMA: ≤ {metasConfig.imaP2M}</p>
                   </div>
                   <div>
                     <p className="text-cyan-300 font-bold mb-1">📦 Checkin</p>
                     <p className="text-gray-400">Abaixo: &lt; {metasConfig.checkinBase} pç/h</p>
                     <p className="text-gray-400">Alinhado: {metasConfig.checkinBase} - {metasConfig.checkinAlinhadoMax} pç/h</p>
                     <p className="text-gray-400">Supera: &gt; {metasConfig.checkinAlinhadoMax} pç/h</p>
+                    <p className="text-gray-500 mt-2 text-xs">IMA: ≤ {metasConfig.imaCheckin}</p>
                   </div>
                 </div>
               </div>
