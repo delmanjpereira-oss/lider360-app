@@ -15,14 +15,8 @@ interface MetasConfig { p2m_base: number; p2m_alinhado_max: number; }
 interface Toast { id: number; tipo: 'success' | 'error' | 'info'; msg: string; }
 interface ConfirmModal { msg: string; onConfirm: () => void; onCancel?: () => void; }
 const ZONA = 'p2m';
-// 🔧 BANCADAS DINÂMICAS
-// Quantidade PADRÃO de cada coluna (usada na 1ª vez, depois vem do banco/config)
 const LAYOUT_DEFAULT = { L1_ESQ: 5, L1_DIR: 3, L2_ESQ: 3, L2_DIR: 5 };
-// LIMITE máximo de bancadas GM por coluna:
-//   lado de FORA de cada linha = 6 · lado de DENTRO (perto da zona central) = 3
-//   K esquerda(fora)=6 · K direita(dentro)=3 · J direita(fora)=6 · J esquerda(dentro)=3
 const LAYOUT_MAX = { L1_ESQ: 6, L1_DIR: 3, L2_ESQ: 3, L2_DIR: 6 };
-// Altura de cada bancada (78px) + gap (8px) — usado pra esteira crescer junto
 const ALTURA_BANCADA = 78;
 const GAP_BANCADA = 8;
 const ALTURA_COLUNA = 422;
@@ -63,8 +57,6 @@ function corTipo(tipo: string) {
   }
 }
 function primeiroNome(nome: string) { return nome.trim().split(/\s+/)[0]; }
-// 🏷️ Desambigua nomes: se vários colabs compartilham o primeiro nome,
-// retorna "Victor J.P." em vez de só "Victor"
 function nomeExibido(colab: { id_groot: string; nome: string }, todos: { id_groot: string; nome: string }[]): string {
   const primeiro = primeiroNome(colab.nome);
   const homonimos = todos.filter((c) =>
@@ -131,40 +123,30 @@ export default function LinhaPage() {
   const [modalSubtipo, setModalSubtipo] = useState<string>('');
   const [modalRotacao, setModalRotacao] = useState(false);
   const [rotacionando, setRotacionando] = useState(false);
-  // 🔄 ROTAÇÃO AUTOMÁTICA: qual das 3 rotações roda sozinha ao abrir (0=desligada)
   const [rotAutoTipo, setRotAutoTipo] = useState<0 | 1 | 2 | 3>(0);
   const [rotAutoUltima, setRotAutoUltima] = useState<string | null>(null);
   const jaVerificouRotAuto = useRef(false);
-  // 🔒 RESTRIÇÃO: pessoas que não rotacionam (ficam fixas em E1/D1, transbordando E2/D2)
   const [restricoes, setRestricoes] = useState<Set<string>>(new Set());
   const [modalRestricao, setModalRestricao] = useState<{ idGroot: string; nome: string } | null>(null);
-  // ↩️ DESFAZER: guarda o snapshot da última rotação (pra voltar com Ctrl+Z ou botão)
   const [temSnapshot, setTemSnapshot] = useState(false);
   const [desfazendo, setDesfazendo] = useState(false);
-  // 🔐 BANCADAS TRAVADAS: bancadas que não rotacionam (a dupla fica, a galera pula)
   const [bancadasTravadas, setBancadasTravadas] = useState<Set<number>>(new Set());
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
   const [menuSinergia, setMenuSinergia] = useState<{ x: number; y: number; aloc: Alocacao } | null>(null);
   const [modoPrint, setModoPrint] = useState(false);
   const [printando, setPrintando] = useState(false);
-  // 🔧 BANCADAS DINÂMICAS: quantidade de cada coluna (vem do banco) + modo edição
   const [layout, setLayout] = useState<{ L1_ESQ: number; L1_DIR: number; L2_ESQ: number; L2_DIR: number }>(LAYOUT_DEFAULT);
   const [modoCustomizar, setModoCustomizar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   function toast(tipo: 'success' | 'error' | 'info', msg: string) {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, tipo, msg }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+    setTimeout(() => { setToasts((prev) => prev.filter((t) => t.id !== id)); }, 4000);
   }
-  function confirmar(msg: string, onConfirm: () => void) {
-    setConfirmModal({ msg, onConfirm });
-  }
-  // 📸 Gera o PNG "Alocação Time DEL P2M" — layout de exportação próprio,
-  // bonito, alinhado (esquadro), identidade MELI, com reservas.
-  // NÃO fotografa a tela (que é preta); monta um container claro à parte.
+  function confirmar(msg: string, onConfirm: () => void) { setConfirmModal({ msg, onConfirm }); }
+  // 📸 PNG DE EXPORTAÇÃO — com bancadas TRAVADAS (🔒 TRAVADA + borda vermelha)
+  // e pessoas com RESTRIÇÃO (🔒 no card + borda verde)
   async function printarLayout() {
     setPrintando(true);
     try {
@@ -181,14 +163,11 @@ export default function LinhaPage() {
       }
       const container = construirLayoutExportacao();
       document.body.appendChild(container);
-      // reseta o scroll pro topo (evita o html2canvas somar offset e jogar tudo pra baixo)
       const scrollYAntes = window.scrollY;
       const scrollXAntes = window.scrollX;
       window.scrollTo(0, 0);
-      // torna o container visível (mas atrás de tudo) só durante a captura
       container.style.opacity = '1';
       container.style.zIndex = '-9999';
-      // espera imagens (logo) carregarem
       await new Promise((r) => setTimeout(r, 250));
       const larguraReal = container.offsetWidth;
       const alturaReal = container.offsetHeight;
@@ -221,8 +200,6 @@ export default function LinhaPage() {
       setPrintando(false);
     }
   }
-
-  // Monta o HTML do PNG de exportação (retorna um elemento pronto pra fotografar)
   function construirLayoutExportacao(): HTMLElement {
     const AZUL = '#1B2A8F';
     const AZUL2 = '#2536B0';
@@ -239,7 +216,6 @@ export default function LinhaPage() {
       const sig = sob.find((s) => !PREP.includes(s.toLowerCase())) || sob[0];
       return partes[0] + ' ' + sig[0].toUpperCase() + '.';
     };
-    // Nome COMPLETO pra Pesca (primeiro nome + sobrenome inteiro), pra distinguir os "Matheus"
     const nomeCompletoPng = (c: { nome: string }) => {
       const partes = c.nome.trim().split(/\s+/);
       if (partes.length === 1) return partes[0];
@@ -248,7 +224,6 @@ export default function LinhaPage() {
       return partes[0] + ' ' + sig;
     };
     const ICON_PEOPLE = (cor: string, sz: number) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><path d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 14c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z" fill="${cor}"/></svg>`;
-    // Avatar: círculo com ícone de pessoa (branco)
     const ICON_AVATAR = (sz: number) => `<svg width="${Math.round(sz * 0.62)}" height="${Math.round(sz * 0.62)}" viewBox="0 0 24 24" fill="none"><path d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 14c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z" fill="#fff"/></svg>`;
     const corDe = (tipo: string) => {
       if (tipo === 'GM') return { label: '#8A6100', avatar: '#F5C518', bd: '#F5C518', grad: 'linear-gradient(180deg,#FFFFFF 0%,#FFFDF3 100%)' };
@@ -256,37 +231,29 @@ export default function LinhaPage() {
       if (tipo === 'CATEGORIA') return { label: '#6B27B8', avatar: '#8B3FE8', bd: '#8B3FE8', grad: 'linear-gradient(180deg,#FFFFFF 0%,#FBF7FF 100%)' };
       return { label: '#5B6472', avatar: '#9AA2AF', bd: '#D2D8E0', grad: 'linear-gradient(180deg,#FFFFFF 0%,#F8F9FB 100%)' };
     };
-    // cardPessoa: avatar com ÍCONE de pessoa; nome completo se for Pesca
-    const cardPessoa = (col: { nome: string }, c: { avatar: string }, nomeCompleto = false) =>
-      `<div style="flex:1;min-width:0;background:linear-gradient(180deg,#FFFFFF,#FAFBFC);border:1px solid #ECEEF1;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px 4px;box-shadow:0 3px 5px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.8);"><div style="width:24px;height:24px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 4px rgba(16,24,40,.15),inset 0 1px 1px rgba(255,255,255,.3);">${ICON_AVATAR(24)}</div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:13px;white-space:nowrap;">${nomeCompleto ? nomeCompletoPng(col) : nomePng(col)}</span></div>`;
-    // Número contínuo da bancada seguindo o FLUXO da rotação:
-    // desce um lado (1..N do topo ao fundo), sobe o outro (N+1.. do fundo ao topo)
-    const numeroBancada = (linha: number, lado: string, posicao: number): number => {
-      const ladoDesce = linha === 1 ? 'esquerdo' : 'direito';
-      const ladoSobe = linha === 1 ? 'direito' : 'esquerdo';
-      const qtdDesce = linha === 1 ? layout.L1_ESQ : layout.L2_DIR;
-      const qtdSobe = linha === 1 ? layout.L1_DIR : layout.L2_ESQ;
-      if (lado === ladoDesce) {
-        return posicao; // desce: topo=1 ... fundo=N
-      }
-      if (lado === ladoSobe) {
-        // sobe: fundo = qtdDesce+1, subindo até o topo
-        return qtdDesce + (qtdSobe - posicao + 1);
-      }
-      return posicao;
-    };
+    // ✅ MUDANÇA 1: cardPessoa recebe temRestricao → borda verde + cadeado 🔒
+    const cardPessoa = (col: { nome: string }, c: { avatar: string }, nomeCompleto = false, temRestricao = false) =>
+      `<div style="flex:1;min-width:0;background:${temRestricao ? 'linear-gradient(180deg,#F2FBF5,#E9F9EF)' : 'linear-gradient(180deg,#FFFFFF,#FAFBFC)'};border:${temRestricao ? '2px solid #16A34A' : '1px solid #ECEEF1'};border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px 4px;box-shadow:0 3px 5px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.8);position:relative;">${temRestricao ? '<span style="position:absolute;top:3px;left:4px;font-size:10px;line-height:1;">🔒</span>' : ''}<div style="width:24px;height:24px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 4px rgba(16,24,40,.15),inset 0 1px 1px rgba(255,255,255,.3);">${ICON_AVATAR(24)}</div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:13px;white-space:nowrap;">${nomeCompleto ? nomeCompletoPng(col) : nomePng(col)}</span></div>`;
+    // ✅ MUDANÇA 2: bancadaHTML detecta travada → borda vermelha + selo "🔒 TRAVADA"
     const bancadaHTML = (b: Bancada, num: number) => {
       const c = corDe(b.tipo_principal);
       const ehPesca = b.tipo_principal === 'PESCA';
+      const travada = ehTravada(b.id);
       const ocupantes = alocacoes.filter((a) => a.bancada_id === b.id);
       const sinergias = alocacoes.filter((a) => a.bancada_fixa_id === b.id && a.bancada_id !== b.id);
-      const cols = [...ocupantes, ...sinergias].map((a) => getColab(a.id_groot)).filter(Boolean) as { nome: string }[];
-      const corpo = cols.length === 0
+      const listaAlocs = [...ocupantes, ...sinergias];
+      // cada card passa a restrição da PESSOA (casado por alocação, não por posição)
+      const corpo = listaAlocs.length === 0
         ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;position:relative;z-index:1;"><span style="font-size:11px;color:#C4CAD3;font-weight:700;letter-spacing:2px;line-height:1;">VAZIA</span></div>`
-        : `<div style="flex:1;display:flex;gap:6px;align-items:center;position:relative;z-index:1;">${cols.map((x) => cardPessoa(x, c, ehPesca)).join('')}</div>`;
+        : `<div style="flex:1;display:flex;gap:6px;align-items:center;position:relative;z-index:1;">${listaAlocs.map((a) => { const x = getColab(a.id_groot); return x ? cardPessoa(x, c, ehPesca, ehRestricao(a.id_groot)) : ''; }).join('')}</div>`;
       const badge = num ? `<span style="font-size:13px;font-weight:900;color:${AZUL};line-height:1;flex-shrink:0;">${num}</span>` : '';
       const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;line-height:1;"> · ${b.subtipo}</span>` : '';
-      return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);box-sizing:border-box;display:flex;flex-direction:column;padding:11px 11px 11px 11px;position:relative;">
+      const bordaCor = travada ? '#DC2626' : c.bd;
+      const seloTravada = travada
+        ? `<div style="position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:linear-gradient(180deg,#EF4444,#DC2626);color:#fff;font-size:9px;font-weight:900;letter-spacing:.8px;padding:3px 10px;border-radius:8px;box-shadow:0 3px 8px rgba(220,38,38,.4);white-space:nowrap;z-index:3;display:flex;align-items:center;gap:3px;">🔒 TRAVADA</div>`
+        : '';
+      return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${bordaCor};border-radius:14px;box-shadow:${travada ? '0 6px 16px rgba(220,38,38,.18),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9)' : '0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9)'};box-sizing:border-box;display:flex;flex-direction:column;padding:11px 11px 11px 11px;position:relative;">
+        ${seloTravada}
         <div style="flex-shrink:0;display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:9px;position:relative;z-index:2;"><span style="font-size:11px;font-weight:800;letter-spacing:.6px;color:${c.label};line-height:1;flex-shrink:0;white-space:nowrap;">${b.tipo_principal}${sub}</span>${badge}</div>
         ${corpo}
       </div>`;
@@ -301,9 +268,17 @@ export default function LinhaPage() {
       }
       return `<div style="display:flex;flex-direction:column;gap:${GAP}px;">${slots}</div>`;
     };
+    const numeroBancada = (linha: number, lado: string, posicao: number): number => {
+      const ladoDesce = linha === 1 ? 'esquerdo' : 'direito';
+      const ladoSobe = linha === 1 ? 'direito' : 'esquerdo';
+      const qtdDesce = linha === 1 ? layout.L1_ESQ : layout.L2_DIR;
+      const qtdSobe = linha === 1 ? layout.L1_DIR : layout.L2_ESQ;
+      if (lado === ladoDesce) return posicao;
+      if (lado === ladoSobe) return qtdDesce + (qtdSobe - posicao + 1);
+      return posicao;
+    };
     const esteiraHTML = (qtdMax: number) => {
       const h = qtdMax * H_BANCADA + (qtdMax - 1) * GAP;
-      // Esteira de ROLETES (cilindros transversais) com trilhos escuros - estilo CD industrial
       const nRoletes = Math.max(1, Math.round((h - 6) / 15));
       let roletes = '';
       for (let i = 0; i < nRoletes; i++) {
@@ -331,8 +306,7 @@ export default function LinhaPage() {
       const cE = colunaHTML(linha, 'esquerdo', qEsq, qMax, fundoEsq);
       const cD = colunaHTML(linha, 'direito', qDir, qMax, fundoDir);
       const est = esteiraHTML(qMax);
-      const cols = `${cE}${est}${cD}`;
-      return `<div style="display:flex;flex-direction:column;align-items:center;">${tituloLinha(nome)}<div style="display:flex;gap:10px;align-items:flex-start;">${cols}</div></div>`;
+      return `<div style="display:flex;flex-direction:column;align-items:center;">${tituloLinha(nome)}<div style="display:flex;gap:10px;align-items:flex-start;">${cE}${est}${cD}</div></div>`;
     };
     const livresList = colabsLivres();
     const reservasHTML = () => {
@@ -348,6 +322,14 @@ export default function LinhaPage() {
     const totalAlocados = alocacoes.length;
     const dataExt = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
     const cap = dataExt.charAt(0).toUpperCase() + dataExt.slice(1);
+    // ✅ LEGENDA no PNG: explica os dois sinais visuais
+    const legendaHTML = `<div style="display:flex;gap:14px;padding:10px 34px;border-bottom:1px solid #E8EBF0;background:rgba(255,255,255,.6);">
+      <span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#F5C518;"></span> GM</span>
+      <span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#2D6BE8;"></span> Pesca</span>
+      <span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#8B3FE8;"></span> Categoria</span>
+      <span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#B91C1C;"><span style="width:14px;height:14px;border-radius:4px;background:#DC2626;"></span> 🔒 Travada (não rotaciona)</span>
+      <span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#15803D;"><span style="width:14px;height:14px;border-radius:4px;background:#16A34A;"></span> 🔒 Restrição (pessoa fixa)</span>
+    </div>`;
     const wrap = document.createElement('div');
     wrap.style.cssText = 'position:absolute;top:0;left:0;z-index:-9999;opacity:0;pointer-events:none;';
     wrap.innerHTML = `<div style="width:1600px;background:linear-gradient(180deg,#FFFFFF,#F4F6FA);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
@@ -363,7 +345,7 @@ export default function LinhaPage() {
           <div style="background:${AMARELO};border-radius:16px;padding:11px 20px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 12px rgba(255,230,0,.3);">${ICON_PEOPLE(AZUL, 22)}<div><div style="font-size:26px;font-weight:900;color:${AZUL};line-height:1;">${livresList.length}</div><div style="font-size:10px;color:#8A7A00;text-transform:uppercase;letter-spacing:1px;margin-top:2px;font-weight:700;">Reservas</div></div></div>
         </div>
       </div>
-      <div style="display:flex;gap:22px;padding:14px 34px;border-bottom:1px solid #E8EBF0;background:rgba(255,255,255,.6);"><span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#F5C518;"></span> GM</span><span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#2D6BE8;"></span> Pesca</span><span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#8B3FE8;"></span> Categoria</span></div>
+      ${legendaHTML}
       <div style="display:flex;gap:28px;padding:32px 34px;align-items:flex-start;">
         ${reservasHTML()}
         <div style="flex:1;display:flex;gap:28px;align-items:flex-start;justify-content:space-around;">
@@ -377,7 +359,6 @@ export default function LinhaPage() {
     return wrap.firstElementChild as HTMLElement;
   }
   useEffect(() => { carregarTudo(); }, []);
-  // dispara a rotação automática quando os dados terminam de carregar
   useEffect(() => {
     if (!loading && bancadas.length > 0 && rotAutoTipo !== 0 && !jaVerificouRotAuto.current) {
       verificarRotacaoAutomatica();
@@ -385,24 +366,17 @@ export default function LinhaPage() {
   }, [loading, bancadas.length, rotAutoTipo, rotAutoUltima]);
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setCardAtivo(null); setDraggingId(null); setModalRotacao(false); setConfirmModal(null); setMenuSinergia(null);
-      }
+      if (e.key === 'Escape') { setCardAtivo(null); setDraggingId(null); setModalRotacao(false); setConfirmModal(null); setMenuSinergia(null); }
     }
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
-  // Ctrl+Z / Cmd+Z desfaz a última rotação (se houver snapshot)
   useEffect(() => {
     function handleUndo(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
-        // não interfere se estiver digitando num campo
         const alvo = e.target as HTMLElement;
         if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA')) return;
-        if (temSnapshot && !desfazendo && !rotacionando) {
-          e.preventDefault();
-          desfazerRotacao();
-        }
+        if (temSnapshot && !desfazendo && !rotacionando) { e.preventDefault(); desfazerRotacao(); }
       }
     }
     window.addEventListener('keydown', handleUndo);
@@ -419,15 +393,8 @@ export default function LinhaPage() {
     verificarSnapshot();
     setLoading(false);
   }
-  // ============================================================
-  // 🔄 ROTAÇÃO AUTOMÁTICA — gira sozinha ao abrir o app
-  // Config no Supabase (tabela 'config', chaves rot_auto_tipo e rot_auto_ultima).
-  // Recupera dias perdidos: conta dias úteis (seg-sáb, pula domingo) desde
-  // a última rotação até hoje e gira esse tanto de vezes. Trava por dia.
-  // ============================================================
   async function carregarConfigRotAuto() {
-    const { data } = await supabase.from('config').select('chave, valor')
-      .in('chave', ['rot_auto_tipo', 'rot_auto_ultima']);
+    const { data } = await supabase.from('config').select('chave, valor').in('chave', ['rot_auto_tipo', 'rot_auto_ultima']);
     const map: Record<string, string> = {};
     (data || []).forEach((c: any) => { map[c.chave] = c.valor; });
     const tipo = Number(map.rot_auto_tipo) as 0 | 1 | 2 | 3;
@@ -435,131 +402,83 @@ export default function LinhaPage() {
     setRotAutoUltima(map.rot_auto_ultima || null);
   }
   async function salvarConfigRotAuto(tipo: 0 | 1 | 2 | 3, ultima: string | null) {
-    // upsert das duas chaves na tabela config
-    await supabase.from('config').upsert(
-      [
-        { chave: 'rot_auto_tipo', valor: String(tipo) },
-        { chave: 'rot_auto_ultima', valor: ultima || '' },
-      ],
-      { onConflict: 'chave' }
-    );
+    await supabase.from('config').upsert([{ chave: 'rot_auto_tipo', valor: String(tipo) }, { chave: 'rot_auto_ultima', valor: ultima || '' }], { onConflict: 'chave' });
     setRotAutoTipo(tipo);
     setRotAutoUltima(ultima);
   }
-  // conta dias úteis (seg-sáb) entre a última rotação (exclusivo) e hoje (inclusivo)
   function diasUteisPerdidos(dataUltima: string, dataHoje: string): number {
     const ultima = new Date(dataUltima + 'T00:00:00');
     const hoje = new Date(dataHoje + 'T00:00:00');
     let count = 0;
     const cursor = new Date(ultima);
     cursor.setDate(cursor.getDate() + 1);
-    while (cursor <= hoje) {
-      if (cursor.getDay() !== 0) count++; // 0 = domingo, não conta
-      cursor.setDate(cursor.getDate() + 1);
-    }
+    while (cursor <= hoje) { if (cursor.getDay() !== 0) count++; cursor.setDate(cursor.getDate() + 1); }
     return count;
   }
   function hojeStr(): string {
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
-  // roda 1x após o carregamento, quando bancadas/alocações já estão prontas
   async function verificarRotacaoAutomatica() {
     if (jaVerificouRotAuto.current) return;
-    if (rotAutoTipo === 0) return; // desligada
-    if (bancadas.length === 0) return; // ainda não carregou
+    if (rotAutoTipo === 0) return;
+    if (bancadas.length === 0) return;
     const hoje = hojeStr();
     const hojeDate = new Date(hoje + 'T00:00:00');
-    if (hojeDate.getDay() === 0) return; // domingo não gira
-    // quantas rotações faltam aplicar?
+    if (hojeDate.getDay() === 0) return;
     let giros = 0;
-    if (!rotAutoUltima) {
-      giros = 1; // primeira vez: gira 1x e marca hoje
-    } else {
-      if (rotAutoUltima === hoje) return; // já girou hoje
+    if (!rotAutoUltima) { giros = 1; } else {
+      if (rotAutoUltima === hoje) return;
       giros = diasUteisPerdidos(rotAutoUltima, hoje);
     }
-    if (giros <= 0) { return; }
+    if (giros <= 0) return;
     jaVerificouRotAuto.current = true;
-    // aplica os giros em sequência (silencioso, sem toast nem animação)
     for (let i = 0; i < giros; i++) {
-      // lê alocações FRESCAS do banco (não do estado React, que não atualiza no loop)
       const { data: alocsFrescas } = await supabase.from('layout_alocacao').select('*');
       const fonte = (alocsFrescas || []) as Alocacao[];
       if (rotAutoTipo === 3) await rotacaoNivelar(fonte);
       else await rotacaoCiclo(rotAutoTipo === 2, fonte);
-      // após cada giro, os ocupantes viram fixos da bancada atual
       const { data: alocsAtuais } = await supabase.from('layout_alocacao').select('id, bancada_id');
       if (alocsAtuais && alocsAtuais.length > 0) {
-        await Promise.all(
-          alocsAtuais.map((a: any) =>
-            supabase.from('layout_alocacao')
-              .update({ bancada_fixa_id: a.bancada_id, tipo_alocacao: 'fixo' })
-              .eq('id', a.id)
-          )
-        );
+        await Promise.all(alocsAtuais.map((a: any) => supabase.from('layout_alocacao').update({ bancada_fixa_id: a.bancada_id, tipo_alocacao: 'fixo' }).eq('id', a.id)));
       }
     }
     await salvarConfigRotAuto(rotAutoTipo, hoje);
     await carregarAlocacoes();
   }
-  // 🔧 BANCADAS DINÂMICAS: lê a quantidade de cada coluna do banco (config).
-  // Se não existir, usa o padrão. Sempre respeita o limite máximo de cada coluna.
   async function carregarLayout() {
-    const { data } = await supabase.from('config').select('chave, valor')
-      .in('chave', ['qtd_L1_ESQ', 'qtd_L1_DIR', 'qtd_L2_ESQ', 'qtd_L2_DIR']);
+    const { data } = await supabase.from('config').select('chave, valor').in('chave', ['qtd_L1_ESQ', 'qtd_L1_DIR', 'qtd_L2_ESQ', 'qtd_L2_DIR']);
     const map: Record<string, number> = {};
     (data || []).forEach((c: any) => { map[c.chave] = Number(c.valor) || 0; });
-    const clamp = (chave: keyof typeof LAYOUT_DEFAULT, val: number) =>
-      Math.min(LAYOUT_MAX[chave], Math.max(1, val || LAYOUT_DEFAULT[chave]));
-    setLayout({
-      L1_ESQ: clamp('L1_ESQ', map.qtd_L1_ESQ),
-      L1_DIR: clamp('L1_DIR', map.qtd_L1_DIR),
-      L2_ESQ: clamp('L2_ESQ', map.qtd_L2_ESQ),
-      L2_DIR: clamp('L2_DIR', map.qtd_L2_DIR),
-    });
+    const clamp = (chave: keyof typeof LAYOUT_DEFAULT, val: number) => Math.min(LAYOUT_MAX[chave], Math.max(1, val || LAYOUT_DEFAULT[chave]));
+    setLayout({ L1_ESQ: clamp('L1_ESQ', map.qtd_L1_ESQ), L1_DIR: clamp('L1_DIR', map.qtd_L1_DIR), L2_ESQ: clamp('L2_ESQ', map.qtd_L2_ESQ), L2_DIR: clamp('L2_DIR', map.qtd_L2_DIR) });
   }
-  // Salva a quantidade de uma coluna no banco
   async function salvarQtdColuna(chave: keyof typeof LAYOUT_DEFAULT, valor: number) {
     await supabase.from('config').upsert({ chave: 'qtd_' + chave, valor: String(valor) }, { onConflict: 'chave' });
   }
-  // Mapeia (linha, lado) → chave do layout
   function chaveColuna(linha: number, lado: string): keyof typeof LAYOUT_DEFAULT {
     if (linha === 1) return lado === 'esquerdo' ? 'L1_ESQ' : 'L1_DIR';
     return lado === 'esquerdo' ? 'L2_ESQ' : 'L2_DIR';
   }
-  // ➕ Adiciona um slot no fim da coluna (respeitando o limite máximo)
   async function adicionarSlot(linha: number, lado: string) {
     const chave = chaveColuna(linha, lado);
     const atual = layout[chave];
-    if (atual >= LAYOUT_MAX[chave]) {
-      toast('error', 'Limite de ' + LAYOUT_MAX[chave] + ' bancadas nesta coluna');
-      return;
-    }
+    if (atual >= LAYOUT_MAX[chave]) { toast('error', 'Limite de ' + LAYOUT_MAX[chave] + ' bancadas nesta coluna'); return; }
     const novo = atual + 1;
     setLayout((prev) => ({ ...prev, [chave]: novo }));
     await salvarQtdColuna(chave, novo);
     toast('success', '➕ Bancada adicionada');
   }
-  // ➖ Remove o ÚLTIMO slot da coluna. Se a última bancada tiver colab, BLOQUEIA.
   async function removerSlot(linha: number, lado: string) {
     const chave = chaveColuna(linha, lado);
     const atual = layout[chave];
-    if (atual <= 1) {
-      toast('error', 'A coluna precisa ter pelo menos 1 bancada');
-      return;
-    }
-    // A bancada da última posição
+    if (atual <= 1) { toast('error', 'A coluna precisa ter pelo menos 1 bancada'); return; }
     const ultima = getBancada(linha, lado, atual);
     if (ultima) {
       const ocupada = alocacoes.some((a) => a.bancada_id === ultima.id);
-      if (ocupada) {
-        toast('error', 'Esvazie a última bancada antes de remover');
-        return;
-      }
+      if (ocupada) { toast('error', 'Esvazie a última bancada antes de remover'); return; }
     }
     const novo = atual - 1;
-    // Se existe bancada nessa posição, apaga do banco pra não virar órfã
     if (ultima) {
       const { error } = await supabase.from('layout_bancadas').delete().eq('id', ultima.id);
       if (error) { toast('error', 'Erro: ' + error.message); return; }
@@ -582,16 +501,12 @@ export default function LinhaPage() {
     setNomesLinhas({ linha1: map.nome_linha_1 || 'Linha 1', linha2: map.nome_linha_2 || 'Linha 2' });
   }
   async function salvarNomeLinha(linha: number, nome: string) {
-    const chave = 'nome_linha_' + linha;
-    await supabase.from('config').upsert({ chave, valor: nome }, { onConflict: 'chave' });
+    await supabase.from('config').upsert({ chave: 'nome_linha_' + linha, valor: nome }, { onConflict: 'chave' });
     setNomesLinhas((prev) => ({ ...prev, [linha === 1 ? 'linha1' : 'linha2']: nome }));
     setEditandoLinha(null);
   }
   async function carregarColabs() {
-    const { data } = await supabase
-      .from('colaboradores')
-      .select('id_groot, nome, processo, status')
-      .order('nome');
+    const { data } = await supabase.from('colaboradores').select('id_groot, nome, processo, status').order('nome');
     const filtrados = (data || []).filter((c: any) => {
       const proc = (c.processo || '').trim().toUpperCase();
       const stat = (c.status || '').trim().toLowerCase();
@@ -599,72 +514,37 @@ export default function LinhaPage() {
     });
     setColabs(filtrados);
   }
-  // ============================================================
-  // 🔒 RESTRIÇÃO — pessoas que não rotacionam
-  // Ficam fixas nas colunas de FORA, nas 2 primeiras bancadas:
-  // E1/E2 (Linha O = linha 1) e D1/D2 (Linha N = linha 2).
-  // Guardadas na tabela 'restricoes' (id_groot).
-  // ============================================================
   async function carregarRestricoes() {
     const { data } = await supabase.from('restricoes').select('id_groot');
     setRestricoes(new Set((data || []).map((r: any) => r.id_groot)));
   }
-  function ehRestricao(idGroot: string): boolean {
-    return restricoes.has(idGroot);
-  }
-  // bancadas da zona de restrição de uma coluna: [E1,E2] ou [D1,D2]
+  function ehRestricao(idGroot: string): boolean { return restricoes.has(idGroot); }
   function bancadasZonaRestricao(coluna: 'E' | 'D'): Bancada[] {
-    // E = coluna esquerda da Linha O (linha 1); D = coluna direita da Linha N (linha 2)
     const linha = coluna === 'E' ? 1 : 2;
     const lado = coluna === 'E' ? 'esquerdo' : 'direito';
     const b1 = getBancada(linha, lado, 1);
     const b2 = getBancada(linha, lado, 2);
     return [b1, b2].filter(Boolean) as Bancada[];
   }
-  // conta quantas restrições já ocupam a zona (E ou D)
   function contarRestricoesZona(coluna: 'E' | 'D'): number {
     const ids = new Set(bancadasZonaRestricao(coluna).map((b) => b.id));
     return alocacoes.filter((a) => ids.has(a.bancada_id) && ehRestricao(a.id_groot)).length;
   }
-  // acha a próxima vaga livre pra restrição na zona (E1 primeiro, depois E2)
   function proximaVagaRestricao(coluna: 'E' | 'D'): Bancada | null {
     const zona = bancadasZonaRestricao(coluna);
-    for (const b of zona) {
-      const ocupantes = alocacoes.filter((a) => a.bancada_id === b.id).length;
-      if (ocupantes < 2) return b; // tem vaga
-    }
-    return null; // zona cheia
+    for (const b of zona) { const ocupantes = alocacoes.filter((a) => a.bancada_id === b.id).length; if (ocupantes < 2) return b; }
+    return null;
   }
   async function marcarRestricao(idGroot: string, coluna: 'E' | 'D') {
-    // valida se cabe na zona (E1/E2 ou D1/D2 = máx 4 pessoas, mas só conta restrições?)
     const totalRestr = contarRestricoesZona(coluna);
-    if (totalRestr >= 4) {
-      toast('error', 'Zona ' + coluna + ' já está cheia de restrições (E1+E2)');
-      setModalRestricao(null);
-      return;
-    }
+    if (totalRestr >= 4) { toast('error', 'Zona ' + coluna + ' já está cheia de restrições'); setModalRestricao(null); return; }
     const vaga = proximaVagaRestricao(coluna);
-    if (!vaga) {
-      toast('error', 'Sem vaga livre na zona ' + coluna + ' (E1/E2 lotadas)');
-      setModalRestricao(null);
-      return;
-    }
-    // 1) marca como restrição no banco
+    if (!vaga) { toast('error', 'Sem vaga livre na zona ' + coluna); setModalRestricao(null); return; }
     await supabase.from('restricoes').upsert({ id_groot: idGroot }, { onConflict: 'id_groot' });
-    // 2) remove a alocação atual da pessoa (de onde ela estiver)
     const alocAtual = alocacoes.find((a) => a.id_groot === idGroot);
-    if (alocAtual) {
-      await supabase.from('layout_alocacao').delete().eq('id', alocAtual.id);
-    }
-    // 3) aloca ela na vaga de restrição (fixa)
+    if (alocAtual) { await supabase.from('layout_alocacao').delete().eq('id', alocAtual.id); }
     const hoje = new Date().toISOString().split('T')[0];
-    await supabase.from('layout_alocacao').insert({
-      bancada_id: vaga.id,
-      id_groot: idGroot,
-      tipo_alocacao: 'fixo',
-      bancada_fixa_id: vaga.id,
-      data_referencia: hoje,
-    });
+    await supabase.from('layout_alocacao').insert({ bancada_id: vaga.id, id_groot: idGroot, tipo_alocacao: 'fixo', bancada_fixa_id: vaga.id, data_referencia: hoje });
     await carregarRestricoes();
     await carregarAlocacoes();
     toast('success', '🔒 Restrição marcada na zona ' + coluna);
@@ -676,18 +556,11 @@ export default function LinhaPage() {
     toast('success', '🔓 Restrição removida');
     setMenuSinergia(null);
   }
-  // ============================================================
-  // 🔐 BANCADA TRAVADA — a bancada não rotaciona (a dupla fica parada,
-  // a galera pula). É da POSIÇÃO: quem estiver ali fica, mesmo trocando.
-  // Guardada na tabela 'bancadas_travadas' (bancada_id).
-  // ============================================================
   async function carregarBancadasTravadas() {
     const { data } = await supabase.from('bancadas_travadas').select('bancada_id');
     setBancadasTravadas(new Set((data || []).map((r: any) => r.bancada_id)));
   }
-  function ehTravada(bancadaId: number): boolean {
-    return bancadasTravadas.has(bancadaId);
-  }
+  function ehTravada(bancadaId: number): boolean { return bancadasTravadas.has(bancadaId); }
   async function alternarTravaBancada(bancadaId: number) {
     if (ehTravada(bancadaId)) {
       await supabase.from('bancadas_travadas').delete().eq('bancada_id', bancadaId);
@@ -699,7 +572,6 @@ export default function LinhaPage() {
       toast('success', '🔐 Bancada travada (não rotaciona)');
     }
   }
-  // ✅ RITMOS continuam por dia (vêm do CSV diário)
   async function carregarRitmos() {
     const hoje = new Date().toISOString().split('T')[0];
     const { data } = await supabase.from('ritmo_atual').select('id_groot, ritmo_pct, unidades, horas').eq('data_referencia', hoje);
@@ -711,45 +583,22 @@ export default function LinhaPage() {
     });
     setRitmos(map);
   }
-  // 🔑 OPÇÃO A: BANCADAS PERMANENTES - SEM filtro de data
   async function carregarBancadas() {
-    const { data } = await supabase
-      .from('layout_bancadas')
-      .select('*')
-      .eq('zona', ZONA)
-      .order('posicao');
+    const { data } = await supabase.from('layout_bancadas').select('*').eq('zona', ZONA).order('posicao');
     setBancadas(data || []);
   }
-  // 🔑 OPÇÃO A: ALOCAÇÕES PERMANENTES - SEM filtro de data
   async function carregarAlocacoes() {
-    const { data } = await supabase
-      .from('layout_alocacao')
-      .select('*');
+    const { data } = await supabase.from('layout_alocacao').select('*');
     setAlocacoes(data || []);
   }
-  // 🔑 OPÇÃO A: SLOTS FIXOS verificam existência permanente (sem data)
-  // Só cria se realmente não existir nenhum slot fixo da Zona Central
   async function garantirSlotsFixos() {
-    const { data: existentes } = await supabase
-      .from('layout_bancadas')
-      .select('id, linha, posicao')
-      .eq('zona', ZONA)
-      .eq('lado', 'centro')
-      .eq('fixo_categoria', true);
+    const { data: existentes } = await supabase.from('layout_bancadas').select('id, linha, posicao').eq('zona', ZONA).eq('lado', 'centro').eq('fixo_categoria', true);
     const jaTem = new Set((existentes || []).map((b: any) => b.linha + '-' + b.posicao));
-    const slotsFixos = [
-      { linha: 1, posicao: 1, tipo_principal: 'PESCA' },
-      { linha: 1, posicao: 2, tipo_principal: 'CATEGORIA' },
-      { linha: 2, posicao: 1, tipo_principal: 'PESCA' },
-      { linha: 2, posicao: 2, tipo_principal: 'CATEGORIA' },
-    ];
+    const slotsFixos = [{ linha: 1, posicao: 1, tipo_principal: 'PESCA' }, { linha: 1, posicao: 2, tipo_principal: 'CATEGORIA' }, { linha: 2, posicao: 1, tipo_principal: 'PESCA' }, { linha: 2, posicao: 2, tipo_principal: 'CATEGORIA' }];
     const aCriar = slotsFixos.filter((s) => !jaTem.has(s.linha + '-' + s.posicao));
     if (aCriar.length === 0) return;
     const hoje = new Date().toISOString().split('T')[0];
-    await supabase.from('layout_bancadas').insert(aCriar.map((s) => ({
-      zona: ZONA, linha: s.linha, lado: 'centro', posicao: s.posicao,
-      tipo_principal: s.tipo_principal, subtipo: null, fixo_categoria: true, data_referencia: hoje,
-    })));
+    await supabase.from('layout_bancadas').insert(aCriar.map((s) => ({ zona: ZONA, linha: s.linha, lado: 'centro', posicao: s.posicao, tipo_principal: s.tipo_principal, subtipo: null, fixo_categoria: true, data_referencia: hoje })));
   }
   function limparRitmos() {
     confirmar('Limpar TODOS os ritmos do dia?', async () => {
@@ -760,9 +609,8 @@ export default function LinhaPage() {
       await carregarRitmos();
     });
   }
-  // 🔑 NOVO: Limpar TODAS as alocações (botão "Limpar Time")
   function limparTodasAlocacoes() {
-    confirmar('Tirar TODOS os colabs das bancadas? Eles voltam pra lista de livres. (Não afeta bancadas nem ritmos.)', async () => {
+    confirmar('Tirar TODOS os colabs das bancadas?', async () => {
       const { error } = await supabase.from('layout_alocacao').delete().neq('id', 0);
       if (error) { toast('error', 'Erro: ' + error.message); return; }
       toast('success', '✅ Time esvaziado');
@@ -800,12 +648,8 @@ export default function LinhaPage() {
         if (idxHoras !== -1 && cols[idxHoras]) {
           const raw = cols[idxHoras].trim();
           let h = 0;
-          if (raw.includes(':')) {
-            const parts = raw.split(':').map((p) => parseInt(p, 10) || 0);
-            h = (parts[0] || 0) + ((parts[1] || 0) / 60) + ((parts[2] || 0) / 3600);
-          } else {
-            h = parseFloat(raw.replace(',', '.'));
-          }
+          if (raw.includes(':')) { const parts = raw.split(':').map((p) => parseInt(p, 10) || 0); h = (parts[0] || 0) + ((parts[1] || 0) / 60) + ((parts[2] || 0) / 3600); }
+          else { h = parseFloat(raw.replace(',', '.')); }
           if (!isNaN(h) && h > 0) reg.horas = h;
         }
         registros.push(reg);
@@ -823,16 +667,11 @@ export default function LinhaPage() {
   }
   async function criarBancadaGM(linha: number, lado: string, posicao: number) {
     const hoje = new Date().toISOString().split('T')[0];
-    const { error } = await supabase.from('layout_bancadas').insert({
-      zona: ZONA, linha, lado, posicao, tipo_principal: 'GM', subtipo: null, fixo_categoria: false, data_referencia: hoje,
-    });
+    const { error } = await supabase.from('layout_bancadas').insert({ zona: ZONA, linha, lado, posicao, tipo_principal: 'GM', subtipo: null, fixo_categoria: false, data_referencia: hoje });
     if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarBancadas();
   }
-  function abrirModalEditarSubtipo(b: Bancada) {
-    setModal({ linha: b.linha, lado: b.lado, posicao: b.posicao, bancadaExistente: b });
-    setModalSubtipo(b.subtipo || '');
-  }
+  function abrirModalEditarSubtipo(b: Bancada) { setModal({ linha: b.linha, lado: b.lado, posicao: b.posicao, bancadaExistente: b }); setModalSubtipo(b.subtipo || ''); }
   function fecharModal() { setModal(null); setModalSubtipo(''); }
   async function salvarModal() {
     if (!modal || !modal.bancadaExistente) return;
@@ -850,29 +689,19 @@ export default function LinhaPage() {
       await Promise.all([carregarBancadas(), carregarAlocacoes()]);
     });
   }
-  // 🔑 OPÇÃO A: aloca/move colab — sempre remove qualquer alocação anterior dele
   async function alocarColab(idGroot: string, bancada: Bancada) {
     const hoje = new Date().toISOString().split('T')[0];
     const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
     const maxColabs = maxColabsPorTipo(bancada.tipo_principal);
-    if (atuais.length >= maxColabs) {
-      setErroBancada(bancada.id);
-      setTimeout(() => setErroBancada(null), 400);
-      toast('error', 'Bancada cheia');
-      return;
-    }
+    if (atuais.length >= maxColabs) { setErroBancada(bancada.id); setTimeout(() => setErroBancada(null), 400); toast('error', 'Bancada cheia'); return; }
     const alocAtual = alocacoes.find((a) => a.id_groot === idGroot);
     let bancadaFixaId: number | null = null;
     if (alocAtual?.bancada_fixa_id) bancadaFixaId = alocAtual.bancada_fixa_id;
     else if (tipoEFixoAutomatico(bancada.tipo_principal)) bancadaFixaId = bancada.id;
     let tipoAlocacao = 'fixo';
     if (bancadaFixaId && bancadaFixaId !== bancada.id) tipoAlocacao = 'temporario';
-    // SEM filtro de data - garante 1 alocação só por colab
     await supabase.from('layout_alocacao').delete().eq('id_groot', idGroot);
-    const { error } = await supabase.from('layout_alocacao').insert({
-      bancada_id: bancada.id, id_groot: idGroot,
-      tipo_alocacao: tipoAlocacao, bancada_fixa_id: bancadaFixaId, data_referencia: hoje,
-    });
+    const { error } = await supabase.from('layout_alocacao').insert({ bancada_id: bancada.id, id_groot: idGroot, tipo_alocacao: tipoAlocacao, bancada_fixa_id: bancadaFixaId, data_referencia: hoje });
     if (error) { toast('error', 'Erro: ' + error.message); return; }
     setEncaixeBancada(bancada.id);
     setTimeout(() => setEncaixeBancada(null), 500);
@@ -897,15 +726,9 @@ export default function LinhaPage() {
     const bancadaOrigem = bancadas.find((b) => b.id === aloc.bancada_fixa_id);
     if (!bancadaOrigem) { toast('error', 'Bancada de origem não encontrada'); return; }
     const ocupacaoOrigem = alocacoes.filter((a) => a.bancada_id === bancadaOrigem.id && a.id !== aloc.id).length;
-    if (ocupacaoOrigem >= maxColabsPorTipo(bancadaOrigem.tipo_principal)) {
-      toast('error', 'Bancada de origem está cheia');
-      return;
-    }
+    if (ocupacaoOrigem >= maxColabsPorTipo(bancadaOrigem.tipo_principal)) { toast('error', 'Bancada de origem está cheia'); return; }
     const posicoesAntes = capturarPosicoesCards();
-    const { error } = await supabase
-      .from('layout_alocacao')
-      .update({ bancada_id: bancadaOrigem.id, tipo_alocacao: 'fixo' })
-      .eq('id', aloc.id);
+    const { error } = await supabase.from('layout_alocacao').update({ bancada_id: bancadaOrigem.id, tipo_alocacao: 'fixo' }).eq('id', aloc.id);
     if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarAlocacoes();
     await new Promise((r) => setTimeout(r, 50));
@@ -913,44 +736,20 @@ export default function LinhaPage() {
     toast('success', '↩️ Voltou pra origem');
   }
   async function fixarAqui(aloc: Alocacao) {
-    const { error } = await supabase
-      .from('layout_alocacao')
-      .update({ bancada_fixa_id: aloc.bancada_id, tipo_alocacao: 'fixo' })
-      .eq('id', aloc.id);
+    const { error } = await supabase.from('layout_alocacao').update({ bancada_fixa_id: aloc.bancada_id, tipo_alocacao: 'fixo' }).eq('id', aloc.id);
     if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarAlocacoes();
     toast('success', '📍 Fixado aqui');
   }
-  function getBancada(linha: number, lado: string, posicao: number) {
-    return bancadas.find((b) => b.zona === ZONA && b.linha === linha && b.lado === lado && b.posicao === posicao);
-  }
-  // ============================================================
-  // 🎯 ROTAÇÃO CORRIGIDA — o sentido do ciclo estava invertido.
-  // Agora: DESCE por um lado (topo→fundo), cruza embaixo,
-  // SOBE pelo outro (fundo→topo), e a Pesca/Categoria ficam
-  // no FIM do ciclo (a "ponte" do topo que volta pro começo).
-  //
-  // Linha 1 (K): desce ESQUERDA, sobe DIREITA, pesca/cat no fim
-  // Linha 2 (J): desce DIREITA, sobe ESQUERDA (espelhado)
-  // ============================================================
+  function getBancada(linha: number, lado: string, posicao: number) { return bancadas.find((b) => b.zona === ZONA && b.linha === linha && b.lado === lado && b.posicao === posicao); }
   function getCicloLinha(linha: number, comPesca: boolean): Bancada[] {
     const ciclo: Bancada[] = [];
     const ladoDesce = linha === 1 ? 'esquerdo' : 'direito';
     const ladoSobe = linha === 1 ? 'direito' : 'esquerdo';
     const qtdDesce = linha === 1 ? layout.L1_ESQ : layout.L2_DIR;
     const qtdSobe = linha === 1 ? layout.L1_DIR : layout.L2_ESQ;
-    // 1) DESCE pelo ladoDesce: do TOPO ao FUNDO (posição 1 → última)
-    for (let p = 1; p <= qtdDesce; p++) {
-      const b = getBancada(linha, ladoDesce, p);
-      if (b && b.tipo_principal === 'GM') ciclo.push(b);
-    }
-    // 2) SOBE pelo ladoSobe: do FUNDO ao TOPO (última → posição 1)
-    //    (o cruzamento de baixo acontece aqui: fundo do ladoDesce → fundo do ladoSobe)
-    for (let p = qtdSobe; p >= 1; p--) {
-      const b = getBancada(linha, ladoSobe, p);
-      if (b && b.tipo_principal === 'GM') ciclo.push(b);
-    }
-    // 3) PESCA e CATEGORIA no FIM (a ponte do topo, que fecha o ciclo pro começo)
+    for (let p = 1; p <= qtdDesce; p++) { const b = getBancada(linha, ladoDesce, p); if (b && b.tipo_principal === 'GM') ciclo.push(b); }
+    for (let p = qtdSobe; p >= 1; p--) { const b = getBancada(linha, ladoSobe, p); if (b && b.tipo_principal === 'GM') ciclo.push(b); }
     const cat = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'CATEGORIA');
     const pesca = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'PESCA');
     if (comPesca && pesca) ciclo.push(pesca);
@@ -962,16 +761,11 @@ export default function LinhaPage() {
     return (data || []).length;
   }
   async function registrarPesca(idGroot: string, linha: number) {
-    await supabase.from('rotacao_pesca_historico').insert({
-      id_groot: idGroot, linha, data_pesca: new Date().toISOString().split('T')[0],
-    });
+    await supabase.from('rotacao_pesca_historico').insert({ id_groot: idGroot, linha, data_pesca: new Date().toISOString().split('T')[0] });
   }
   function capturarPosicoesCards(): Map<string, DOMRect> {
     const map = new Map<string, DOMRect>();
-    document.querySelectorAll('[data-flip-key]').forEach((el) => {
-      const key = (el as HTMLElement).dataset.flipKey;
-      if (key) map.set(key, el.getBoundingClientRect());
-    });
+    document.querySelectorAll('[data-flip-key]').forEach((el) => { const key = (el as HTMLElement).dataset.flipKey; if (key) map.set(key, el.getBoundingClientRect()); });
     return map;
   }
   function animarFLIP(posicoesAntes: Map<string, DOMRect>) {
@@ -993,29 +787,15 @@ export default function LinhaPage() {
           elemento.style.transition = 'transform 700ms cubic-bezier(0.34, 1.56, 0.64, 1)';
           elemento.style.transform = 'translate(0px, 0px)';
           elemento.classList.add('flip-flash');
-          setTimeout(() => {
-            elemento.style.transition = '';
-            elemento.style.transform = '';
-            elemento.classList.remove('flip-flash');
-          }, 800);
+          setTimeout(() => { elemento.style.transition = ''; elemento.style.transform = ''; elemento.classList.remove('flip-flash'); }, 800);
         });
       });
     });
   }
-  // ============================================================
-  // ↩️ DESFAZER ROTAÇÃO — salva um snapshot antes de cada rotação
-  // Guarda no banco (tabela 'rotacao_snapshot') pra funcionar mesmo
-  // depois de recarregar. Só 1 nível (a última rotação).
-  // ============================================================
   async function salvarSnapshot() {
-    // captura todas as alocações atuais
     const { data: alocsAtuais } = await supabase.from('layout_alocacao').select('*');
     const snap = JSON.stringify(alocsAtuais || []);
-    // grava (substitui o snapshot anterior — só 1 nível)
-    await supabase.from('rotacao_snapshot').upsert(
-      { id: 1, dados: snap, criado_em: new Date().toISOString() },
-      { onConflict: 'id' }
-    );
+    await supabase.from('rotacao_snapshot').upsert({ id: 1, dados: snap, criado_em: new Date().toISOString() }, { onConflict: 'id' });
     setTemSnapshot(true);
   }
   async function verificarSnapshot() {
@@ -1027,30 +807,14 @@ export default function LinhaPage() {
     setDesfazendo(true);
     try {
       const { data } = await supabase.from('rotacao_snapshot').select('dados').eq('id', 1);
-      if (!data || data.length === 0) {
-        toast('info', 'Nada pra desfazer');
-        setDesfazendo(false);
-        return;
-      }
+      if (!data || data.length === 0) { toast('info', 'Nada pra desfazer'); setDesfazendo(false); return; }
       const snap: Alocacao[] = JSON.parse(data[0].dados);
       const posicoesAntes = capturarPosicoesCards();
-      // apaga todas as alocações atuais e recria as do snapshot
       const { data: atuais } = await supabase.from('layout_alocacao').select('id');
-      if (atuais && atuais.length > 0) {
-        await supabase.from('layout_alocacao').delete().in('id', atuais.map((a: any) => a.id));
-      }
+      if (atuais && atuais.length > 0) { await supabase.from('layout_alocacao').delete().in('id', atuais.map((a: any) => a.id)); }
       if (snap.length > 0) {
-        await supabase.from('layout_alocacao').insert(
-          snap.map((a) => ({
-            bancada_id: a.bancada_id,
-            id_groot: a.id_groot,
-            tipo_alocacao: a.tipo_alocacao,
-            bancada_fixa_id: a.bancada_fixa_id,
-            data_referencia: a.data_referencia,
-          }))
-        );
+        await supabase.from('layout_alocacao').insert(snap.map((a) => ({ bancada_id: a.bancada_id, id_groot: a.id_groot, tipo_alocacao: a.tipo_alocacao, bancada_fixa_id: a.bancada_fixa_id, data_referencia: a.data_referencia })));
       }
-      // consome o snapshot (desfazer é 1 nível só)
       await supabase.from('rotacao_snapshot').delete().eq('id', 1);
       setTemSnapshot(false);
       await carregarAlocacoes();
@@ -1066,23 +830,13 @@ export default function LinhaPage() {
   async function aplicarRotacao(tipo: 1 | 2 | 3) {
     setRotacionando(true);
     try {
-      await salvarSnapshot(); // guarda o estado ANTES de rotacionar (pra desfazer)
+      await salvarSnapshot();
       const posicoesAntes = capturarPosicoesCards();
       if (tipo === 3) await rotacaoNivelar();
       else await rotacaoCiclo(tipo === 2);
-      // Após rotação: todos viram fixos da bancada atual (sem sinergia residual)
-      const { data: alocsAtuais } = await supabase
-        .from('layout_alocacao')
-        .select('id, bancada_id');
+      const { data: alocsAtuais } = await supabase.from('layout_alocacao').select('id, bancada_id');
       if (alocsAtuais && alocsAtuais.length > 0) {
-        await Promise.all(
-          alocsAtuais.map((a: any) =>
-            supabase
-              .from('layout_alocacao')
-              .update({ bancada_fixa_id: a.bancada_id, tipo_alocacao: 'fixo' })
-              .eq('id', a.id)
-          )
-        );
+        await Promise.all(alocsAtuais.map((a: any) => supabase.from('layout_alocacao').update({ bancada_fixa_id: a.bancada_id, tipo_alocacao: 'fixo' }).eq('id', a.id)));
       }
       await carregarAlocacoes();
       await new Promise((r) => setTimeout(r, 50));
@@ -1102,35 +856,22 @@ export default function LinhaPage() {
     for (const linha of [1, 2]) {
       const ciclo = getCicloLinha(linha, comPesca);
       if (ciclo.length === 0) continue;
-      // capacidade livre de cada bancada = 2 - nº de restrições fixas nela
-      // (restrições NÃO rotacionam; ficam paradas onde estão)
-      // bancada TRAVADA = capacidade 0 (ninguém entra, a dupla dela fica)
-      const restrPorBancada: Array<Alocacao[]> = ciclo.map((b) =>
-        alocacoesFonte.filter((a) => a.bancada_id === b.id && ehRestricao(a.id_groot))
-      );
+      const restrPorBancada: Array<Alocacao[]> = ciclo.map((b) => alocacoesFonte.filter((a) => a.bancada_id === b.id && ehRestricao(a.id_groot)));
       const capLivre: number[] = ciclo.map((b, i) => ehTravada(b.id) ? 0 : 2 - restrPorBancada[i].length);
-      // ocupantes MÓVEIS de cada bancada, formando unidades (dupla/solto).
-      // Não entram: quem tem restrição, nem quem está em bancada TRAVADA.
       const unidades: Array<{ alocs: Alocacao[]; tam: number; origem: number }> = [];
       for (let i = 0; i < ciclo.length; i++) {
-        if (ehTravada(ciclo[i].id)) continue; // bancada travada: ocupantes ficam parados
+        if (ehTravada(ciclo[i].id)) continue;
         const moveis = alocacoesFonte.filter((a) => a.bancada_id === ciclo[i].id && !ehRestricao(a.id_groot));
         if (moveis.length >= 2) unidades.push({ alocs: [moveis[0], moveis[1]], tam: 2, origem: i });
         else if (moveis.length === 1) unidades.push({ alocs: [moveis[0]], tam: 1, origem: i });
       }
       const novas: Array<{ id_groot: string; bancada_id: number; bancada_fixa_id: number | null; tipo: string }> = [];
       const capRest = [...capLivre];
-      // aloca cada unidade avançando circular a partir de origem+1,
-      // pulando bancadas que não comportem a unidade inteira (dupla precisa 2 vagas)
       for (const u of unidades) {
         let dest = (u.origem + 1) % ciclo.length;
         let voltas = 0;
-        while (voltas < ciclo.length * 2 && capRest[dest] < u.tam) {
-          dest = (dest + 1) % ciclo.length;
-          voltas++;
-        }
+        while (voltas < ciclo.length * 2 && capRest[dest] < u.tam) { dest = (dest + 1) % ciclo.length; voltas++; }
         if (capRest[dest] < u.tam) {
-          // fallback: nunca some ninguém — coloca em qualquer vaga individual
           for (const aloc of u.alocs) {
             let d2 = 0;
             while (d2 < ciclo.length && capRest[d2] < 1) d2++;
@@ -1147,19 +888,9 @@ export default function LinhaPage() {
         for (const aloc of u.alocs) {
           let novoFixoId: number | null = null;
           let novoTipo = 'fixo';
-          if (tipoEFixoAutomatico(proximaBancada.tipo_principal)) {
-            novoFixoId = proximaBancada.id;
-            novoTipo = 'fixo';
-          } else {
-            novoFixoId = aloc.bancada_fixa_id;
-            novoTipo = novoFixoId ? 'temporario' : 'fixo';
-          }
-          novas.push({
-            id_groot: aloc.id_groot,
-            bancada_id: proximaBancada.id,
-            bancada_fixa_id: novoFixoId,
-            tipo: novoTipo,
-          });
+          if (tipoEFixoAutomatico(proximaBancada.tipo_principal)) { novoFixoId = proximaBancada.id; novoTipo = 'fixo'; }
+          else { novoFixoId = aloc.bancada_fixa_id; novoTipo = novoFixoId ? 'temporario' : 'fixo'; }
+          novas.push({ id_groot: aloc.id_groot, bancada_id: proximaBancada.id, bancada_fixa_id: novoFixoId, tipo: novoTipo });
         }
       }
       if (comPesca) {
@@ -1170,43 +901,23 @@ export default function LinhaPage() {
           const indoCat = novas.filter((n) => n.bancada_id === ciclo[idxCat].id);
           const candidatos = [...indoPesca, ...indoCat];
           if (candidatos.length === 2) {
-            const c1 = candidatos[0];
-            const c2 = candidatos[1];
+            const c1 = candidatos[0]; const c2 = candidatos[1];
             const v1 = await getHistoricoPesca(c1.id_groot, linha);
             const v2 = await getHistoricoPesca(c2.id_groot, linha);
-            let paraPesca: typeof c1;
-            let paraCat: typeof c2;
-            if (v1 < v2) { paraPesca = c1; paraCat = c2; }
-            else if (v2 < v1) { paraPesca = c2; paraCat = c1; }
+            let paraPesca: typeof c1; let paraCat: typeof c2;
+            if (v1 < v2) { paraPesca = c1; paraCat = c2; } else if (v2 < v1) { paraPesca = c2; paraCat = c1; }
             else { paraPesca = Math.random() < 0.5 ? c1 : c2; paraCat = paraPesca === c1 ? c2 : c1; }
-            paraPesca.bancada_id = ciclo[idxPesca].id;
-            paraPesca.bancada_fixa_id = ciclo[idxPesca].id;
-            paraPesca.tipo = 'fixo';
-            paraCat.bancada_id = ciclo[idxCat].id;
-            paraCat.tipo = paraCat.bancada_fixa_id ? 'temporario' : 'fixo';
+            paraPesca.bancada_id = ciclo[idxPesca].id; paraPesca.bancada_fixa_id = ciclo[idxPesca].id; paraPesca.tipo = 'fixo';
+            paraCat.bancada_id = ciclo[idxCat].id; paraCat.tipo = paraCat.bancada_fixa_id ? 'temporario' : 'fixo';
             await registrarPesca(paraPesca.id_groot, linha);
           }
         }
       }
       const bancadasLinhaIds = ciclo.map((b) => b.id);
-      // remove só as MÓVEIS. Ficam paradas (não removidas): restrições E
-      // ocupantes de bancadas TRAVADAS.
-      const idsRemove = alocacoesFonte
-        .filter((a) => bancadasLinhaIds.includes(a.bancada_id) && !ehRestricao(a.id_groot) && !ehTravada(a.bancada_id))
-        .map((a) => a.id);
-      if (idsRemove.length > 0) {
-        await supabase.from('layout_alocacao').delete().in('id', idsRemove);
-      }
+      const idsRemove = alocacoesFonte.filter((a) => bancadasLinhaIds.includes(a.bancada_id) && !ehRestricao(a.id_groot) && !ehTravada(a.bancada_id)).map((a) => a.id);
+      if (idsRemove.length > 0) { await supabase.from('layout_alocacao').delete().in('id', idsRemove); }
       if (novas.length > 0) {
-        await supabase.from('layout_alocacao').insert(
-          novas.map((n) => ({
-            bancada_id: n.bancada_id,
-            id_groot: n.id_groot,
-            tipo_alocacao: n.tipo,
-            bancada_fixa_id: n.bancada_fixa_id,
-            data_referencia: hoje,
-          }))
-        );
+        await supabase.from('layout_alocacao').insert(novas.map((n) => ({ bancada_id: n.bancada_id, id_groot: n.id_groot, tipo_alocacao: n.tipo, bancada_fixa_id: n.bancada_fixa_id, data_referencia: hoje })));
       }
     }
   }
@@ -1214,51 +925,29 @@ export default function LinhaPage() {
     const alocacoesFonte = alocsParam || alocacoes;
     for (const linha of [1, 2]) {
       for (const lado of ['esquerdo', 'direito']) {
-        const qtd = linha === 1
-          ? (lado === 'esquerdo' ? layout.L1_ESQ : layout.L1_DIR)
-          : (lado === 'esquerdo' ? layout.L2_ESQ : layout.L2_DIR);
+        const qtd = linha === 1 ? (lado === 'esquerdo' ? layout.L1_ESQ : layout.L1_DIR) : (lado === 'esquerdo' ? layout.L2_ESQ : layout.L2_DIR);
         if (qtd < 2) continue;
         const bTopo = getBancada(linha, lado, 1);
         const bUltimo = getBancada(linha, lado, qtd);
         if (!bTopo || !bUltimo) continue;
         if (bTopo.tipo_principal !== 'GM' || bUltimo.tipo_principal !== 'GM') continue;
-        if (ehTravada(bTopo.id) || ehTravada(bUltimo.id)) continue; // bancada travada não troca
-        // só move MÓVEIS (restrições ficam paradas)
+        if (ehTravada(bTopo.id) || ehTravada(bUltimo.id)) continue;
         const alocsTopo = alocacoesFonte.filter((a) => a.bancada_id === bTopo.id && !ehRestricao(a.id_groot));
         const alocsUltimo = alocacoesFonte.filter((a) => a.bancada_id === bUltimo.id && !ehRestricao(a.id_groot));
-        // capacidade livre no destino (descontando restrições que ficam)
         const restrTopo = alocacoesFonte.filter((a) => a.bancada_id === bTopo.id && ehRestricao(a.id_groot)).length;
         const restrUltimo = alocacoesFonte.filter((a) => a.bancada_id === bUltimo.id && ehRestricao(a.id_groot)).length;
-        // topo recebe os do último (se couber); último recebe os do topo (se couber)
         const cabeNoTopo = 2 - restrTopo;
         const cabeNoUltimo = 2 - restrUltimo;
-        if (alocsUltimo.length > cabeNoTopo || alocsTopo.length > cabeNoUltimo) continue; // não troca se não couber
-        for (const a of alocsTopo) {
-          await supabase.from('layout_alocacao').update({
-            bancada_id: bUltimo.id,
-            bancada_fixa_id: bUltimo.id,
-            tipo_alocacao: 'fixo',
-          }).eq('id', a.id);
-        }
-        for (const a of alocsUltimo) {
-          await supabase.from('layout_alocacao').update({
-            bancada_id: bTopo.id,
-            bancada_fixa_id: bTopo.id,
-            tipo_alocacao: 'fixo',
-          }).eq('id', a.id);
-        }
+        if (alocsUltimo.length > cabeNoTopo || alocsTopo.length > cabeNoUltimo) continue;
+        for (const a of alocsTopo) { await supabase.from('layout_alocacao').update({ bancada_id: bUltimo.id, bancada_fixa_id: bUltimo.id, tipo_alocacao: 'fixo' }).eq('id', a.id); }
+        for (const a of alocsUltimo) { await supabase.from('layout_alocacao').update({ bancada_id: bTopo.id, bancada_fixa_id: bTopo.id, tipo_alocacao: 'fixo' }).eq('id', a.id); }
       }
     }
   }
   function getAlocacoesBancada(bancadaId: number) { return alocacoes.filter((a) => a.bancada_id === bancadaId); }
   function getColab(idGroot: string) { return colabs.find((c) => c.id_groot === idGroot); }
-  function colabsLivres() {
-    const ids = new Set(alocacoes.map((a) => a.id_groot));
-    return colabs.filter((c) => !ids.has(c.id_groot));
-  }
-  function sinergiasDe(bancadaId: number) {
-    return alocacoes.filter((a) => a.bancada_fixa_id === bancadaId && a.bancada_id !== bancadaId);
-  }
+  function colabsLivres() { const ids = new Set(alocacoes.map((a) => a.id_groot)); return colabs.filter((c) => !ids.has(c.id_groot)); }
+  function sinergiasDe(bancadaId: number) { return alocacoes.filter((a) => a.bancada_fixa_id === bancadaId && a.bancada_id !== bancadaId); }
   function bancadaCompativel(bancada: Bancada): boolean {
     if (!cardAtivo && !draggingId) return false;
     const idCheck = cardAtivo || draggingId;
@@ -1271,17 +960,13 @@ export default function LinhaPage() {
     const bancadasGM = bancadas.filter((b) => b.linha === linha && b.tipo_principal === 'GM');
     const bancadasIds = new Set(bancadasGM.map((b) => b.id));
     const alocsLinha = alocacoes.filter((a) => bancadasIds.has(a.bancada_id));
-    let totalUnidades = 0;
-    let totalHoras = 0;
+    let totalUnidades = 0; let totalHoras = 0;
     let supera = 0, alinhado = 0, ofensor = 0, semDado = 0;
     alocsLinha.forEach((a) => {
       const ritmo = ritmos[a.id_groot];
       if (!ritmo) { semDado++; return; }
       const liq = ritmo.liquida;
-      if (ritmo.unidades && ritmo.horas && ritmo.horas > 0) {
-        totalUnidades += ritmo.unidades;
-        totalHoras += ritmo.horas;
-      }
+      if (ritmo.unidades && ritmo.horas && ritmo.horas > 0) { totalUnidades += ritmo.unidades; totalHoras += ritmo.horas; }
       if (liq == null || liq === 0) { semDado++; return; }
       if (liq < metas.p2m_base) ofensor++;
       else if (liq <= metas.p2m_alinhado_max) alinhado++;
@@ -1290,35 +975,13 @@ export default function LinhaPage() {
     const totalAtivos = alocsLinha.length;
     if (totalHoras === 0) {
       const liquidas: number[] = [];
-      alocsLinha.forEach((a) => {
-        const ritmo = ritmos[a.id_groot];
-        if (ritmo?.liquida && ritmo.liquida > 0) liquidas.push(ritmo.liquida);
-      });
-      if (liquidas.length === 0) {
-        return {
-          pctMedio: 0, pecasHora: 0, totalUnidades: 0, totalHoras: 0,
-          totalAtivos, supera, alinhado, ofensor, semDado
-        };
-      }
+      alocsLinha.forEach((a) => { const ritmo = ritmos[a.id_groot]; if (ritmo?.liquida && ritmo.liquida > 0) liquidas.push(ritmo.liquida); });
+      if (liquidas.length === 0) return { pctMedio: 0, pecasHora: 0, totalUnidades: 0, totalHoras: 0, totalAtivos, supera, alinhado, ofensor, semDado };
       const mediaLiq = liquidas.reduce((a, b) => a + b, 0) / liquidas.length;
-      const pctMedio = Math.round((mediaLiq / metas.p2m_base) * 100);
-      return {
-        pctMedio,
-        pecasHora: Math.round(mediaLiq),
-        totalUnidades: 0,
-        totalHoras: 0,
-        totalAtivos, supera, alinhado, ofensor, semDado
-      };
+      return { pctMedio: Math.round((mediaLiq / metas.p2m_base) * 100), pecasHora: Math.round(mediaLiq), totalUnidades: 0, totalHoras: 0, totalAtivos, supera, alinhado, ofensor, semDado };
     }
     const pecasHora = totalUnidades / totalHoras;
-    const pctMedio = Math.round((pecasHora / metas.p2m_base) * 100);
-    return {
-      pctMedio,
-      pecasHora: Math.round(pecasHora),
-      totalUnidades,
-      totalHoras: Math.round(totalHoras * 10) / 10,
-      totalAtivos, supera, alinhado, ofensor, semDado
-    };
+    return { pctMedio: Math.round((pecasHora / metas.p2m_base) * 100), pecasHora: Math.round(pecasHora), totalUnidades, totalHoras: Math.round(totalHoras * 10) / 10, totalAtivos, supera, alinhado, ofensor, semDado };
   }
   function CardColabSidebar({ c }: { c: Colaborador }) {
     const ritmo = ritmos[c.id_groot];
@@ -1364,11 +1027,7 @@ export default function LinhaPage() {
       onDragStart: (e: React.DragEvent) => { e.stopPropagation(); setDraggingId(aloc.id_groot); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', aloc.id_groot); },
       onDragEnd: () => { setDraggingId(null); setHoverBancada(null); },
       onDoubleClick: (e: React.MouseEvent) => { e.stopPropagation(); setCardAtivo(isAtivo ? null : aloc.id_groot); },
-      onContextMenu: (e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setMenuSinergia({ x: e.clientX, y: e.clientY, aloc });
-      },
+      onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); setMenuSinergia({ x: e.clientX, y: e.clientY, aloc }); },
     };
     const titulo = c.nome + (liquida ? ' · ' + liquida + ' pç/h · ' + cor.label : '') + (eFixoAqui ? ' · fixo' : '') + (eTemporario ? ' · temp' : '');
     if (expandido) {
@@ -1384,11 +1043,7 @@ export default function LinhaPage() {
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             {!modoPrint && (liquida != null && liquida > 0 ? (<span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>) : (<span className="text-gray-600 text-[10px]">—</span>))}
-            {!modoPrint && (
-              <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
-                className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
-                title="Remover">×</button>
-            )}
+            {!modoPrint && (<button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }} className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5" title="Remover">×</button>)}
           </div>
         </div>
       );
@@ -1399,60 +1054,29 @@ export default function LinhaPage() {
         className={'relative group flex-1 h-full rounded border ' + (modoPrint ? 'border-gray-700 bg-[#1a1a1a]' : eRestr ? 'border-green-500 bg-green-500/5' : cor.borda + ' ' + cor.bg) + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + bordaRestr + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
         {eRestr && !modoPrint && (<span className="absolute top-0 left-0.5 text-[8px]" title="Restrição">🔒</span>)}
         {eFixoAqui && !eRestr && !modoPrint && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
-        {modoPrint ? (
-          <span className="text-[11px] font-bold text-white text-center px-1 leading-tight">{nomeExibido(c, colabs)}</span>
-        ) : (
+        {modoPrint ? (<span className="text-[11px] font-bold text-white text-center px-1 leading-tight">{nomeExibido(c, colabs)}</span>) : (
           <>
             {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="text-gray-600 text-sm">—</span>)}
             <span className="text-[7px] text-gray-500 mt-0.5">{nomeExibido(c, colabs)}</span>
           </>
         )}
-        {!modoPrint && (
-          <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
-            className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
-            title="Remover">×</button>
-        )}
+        {!modoPrint && (<button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }} className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none" title="Remover">×</button>)}
       </div>
     );
   }
   function CardSinergia({ aloc, expandido }: { aloc: Alocacao; expandido?: boolean }) {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
-    function handleContextMenu(e: React.MouseEvent) {
-      e.preventDefault();
-      confirmar('Remover marca de fixo de ' + c!.nome + '?', () => removerFixo(aloc.id_groot));
-    }
+    function handleContextMenu(e: React.MouseEvent) { e.preventDefault(); confirmar('Remover marca de fixo de ' + c!.nome + '?', () => removerFixo(aloc.id_groot)); }
     if (expandido) {
-      return (
-        <div className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2 flex-shrink-0"
-          title={c.nome + ' (fixo aqui · right-click pra remover)'}
-          onContextMenu={handleContextMenu}>
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-[9px] font-bold text-yellow-400/70">{iniciais(c.nome)}</span>
-            <span className="text-[10px] text-yellow-400/70 truncate">{nomeExibido(c, colabs)}</span>
-          </div>
-        </div>
-      );
+      return (<div className="card-sinergia rounded px-2 py-1 flex items-center justify-between gap-2 flex-shrink-0" title={c.nome + ' (fixo aqui · right-click pra remover)'} onContextMenu={handleContextMenu}><div className="flex items-center gap-1.5 min-w-0"><span className="text-[9px] font-bold text-yellow-400/70">{iniciais(c.nome)}</span><span className="text-[10px] text-yellow-400/70 truncate">{nomeExibido(c, colabs)}</span></div></div>);
     }
-    return (
-      <div className="card-sinergia flex-1 h-full rounded flex flex-col items-center justify-center"
-        title={c.nome + ' (fixo aqui · right-click pra remover)'}
-        onContextMenu={handleContextMenu}>
-        <span className="text-[10px] font-bold text-yellow-400/70 leading-none">{iniciais(c.nome)}</span>
-        <span className="text-[7px] text-yellow-400/50 mt-0.5">{nomeExibido(c, colabs)}</span>
-      </div>
-    );
+    return (<div className="card-sinergia flex-1 h-full rounded flex flex-col items-center justify-center" title={c.nome + ' (fixo aqui · right-click pra remover)'} onContextMenu={handleContextMenu}><span className="text-[10px] font-bold text-yellow-400/70 leading-none">{iniciais(c.nome)}</span><span className="text-[7px] text-yellow-400/50 mt-0.5">{nomeExibido(c, colabs)}</span></div>);
   }
   function SlotBancada({ linha, lado, posicao }: { linha: number; lado: string; posicao: number }) {
     const b = getBancada(linha, lado, posicao);
     if (!b) {
-      return (
-        <div onClick={() => criarBancadaGM(linha, lado, posicao)}
-          className="w-[140px] h-[78px] border-2 border-dashed border-[#2a2a2a] rounded-md flex items-center justify-center cursor-pointer hover:border-yellow-500/40 hover:bg-yellow-500/5 transition"
-          title="Criar bancada GM">
-          <span className="text-2xl text-[#3a3a3a]">+</span>
-        </div>
-      );
+      return (<div onClick={() => criarBancadaGM(linha, lado, posicao)} className="w-[140px] h-[78px] border-2 border-dashed border-[#2a2a2a] rounded-md flex items-center justify-center cursor-pointer hover:border-yellow-500/40 hover:bg-yellow-500/5 transition" title="Criar bancada GM"><span className="text-2xl text-[#3a3a3a]">+</span></div>);
     }
     const cor = corTipo(b.tipo_principal);
     const alocs = getAlocacoesBancada(b.id);
@@ -1462,27 +1086,12 @@ export default function LinhaPage() {
     const isErro = erroBancada === b.id;
     const isCategoria = b.tipo_principal === 'CATEGORIA';
     const isCompativel = (cardAtivo || draggingId) && bancadaCompativel(b);
-    const classes = [
-      'w-[140px] h-[78px]',
-      'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200',
-      isCompativel ? 'bancada-compativel' : '',
-      isEncaixe ? 'bancada-encaixe' : '',
-      isErro ? 'bancada-erro' : '',
-      isHover && !isCompativel ? 'ring-2 ring-green-500/80 shadow-xl shadow-green-500/20' : '',
-      ehTravada(b.id) ? 'ring-1 ring-red-500/60' : '',
-    ].join(' ');
+    const classes = ['w-[140px] h-[78px]', 'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200', isCompativel ? 'bancada-compativel' : '', isEncaixe ? 'bancada-encaixe' : '', isErro ? 'bancada-erro' : '', isHover && !isCompativel ? 'ring-2 ring-green-500/80 shadow-xl shadow-green-500/20' : '', ehTravada(b.id) ? 'ring-1 ring-red-500/60' : ''].join(' ');
     return (
-      <div
-        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setHoverBancada(b.id); }}
-        onDragLeave={() => setHoverBancada(null)}
-        onDrop={(e) => {
-          e.preventDefault(); setHoverBancada(null);
-          const idDropped = e.dataTransfer.getData('text/plain') || draggingId;
-          if (idDropped) alocarColab(idDropped, b);
-        }}
+      <div onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setHoverBancada(b.id); }} onDragLeave={() => setHoverBancada(null)}
+        onDrop={(e) => { e.preventDefault(); setHoverBancada(null); const idDropped = e.dataTransfer.getData('text/plain') || draggingId; if (idDropped) alocarColab(idDropped, b); }}
         onClick={() => { if (cardAtivo && bancadaCompativel(b)) alocarColab(cardAtivo, b); }}
-        className={classes}
-        style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}>
+        className={classes} style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}>
         <div className="flex items-center justify-between px-1.5 pt-0.5 pb-0 flex-shrink-0">
           <div className="flex items-center gap-1 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.text + ' uppercase tracking-wider'}>{b.tipo_principal}</span>
@@ -1495,35 +1104,17 @@ export default function LinhaPage() {
                 className={'text-[10px] leading-none ' + (ehTravada(b.id) ? 'text-red-400' : 'text-gray-600 hover:text-red-400')}
                 title={ehTravada(b.id) ? 'Destravar bancada' : 'Travar bancada (não rotaciona)'}>{ehTravada(b.id) ? '🔐' : '🔓'}</button>
             )}
-            {b.tipo_principal === 'CATEGORIA' && !modoPrint && (
-              <button onClick={(e) => { e.stopPropagation(); abrirModalEditarSubtipo(b); }}
-                className="text-gray-600 hover:text-white text-[9px] leading-none" title="Editar sub-tipo">✏️</button>
-            )}
-            {!b.fixo_categoria && !modoPrint && (
-              <button onClick={(e) => { e.stopPropagation(); limparBancada(b); }}
-                className="text-gray-600 hover:text-red-400 text-[10px] leading-none" title="Limpar">×</button>
-            )}
+            {b.tipo_principal === 'CATEGORIA' && !modoPrint && (<button onClick={(e) => { e.stopPropagation(); abrirModalEditarSubtipo(b); }} className="text-gray-600 hover:text-white text-[9px] leading-none" title="Editar sub-tipo">✏️</button>)}
+            {!b.fixo_categoria && !modoPrint && (<button onClick={(e) => { e.stopPropagation(); limparBancada(b); }} className="text-gray-600 hover:text-red-400 text-[10px] leading-none" title="Limpar">×</button>)}
           </div>
         </div>
         {isCategoria ? (
           <div className="flex-1 flex flex-col gap-0.5 px-1 pb-1 pt-0.5 overflow-y-auto min-h-0">
-            {alocs.length === 0 && sinergias.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-[9px] text-gray-700 italic">Arrasta colabs</div>
-            ) : (
-              <>
-                {alocs.map((a) => <CardColabBancada key={a.id} aloc={a} expandido bancadaAtual={b} />)}
-                {sinergias.map((s) => <CardSinergia key={'syn-' + s.id} aloc={s} expandido />)}
-              </>
-            )}
+            {alocs.length === 0 && sinergias.length === 0 ? (<div className="flex-1 flex items-center justify-center text-[9px] text-gray-700 italic">Arrasta colabs</div>) : (<>{alocs.map((a) => <CardColabBancada key={a.id} aloc={a} expandido bancadaAtual={b} />)}{sinergias.map((s) => <CardSinergia key={'syn-' + s.id} aloc={s} expandido />)}</>)}
           </div>
         ) : (
           <div className="flex-1 flex gap-1 px-1 pb-1 pt-0.5 min-h-0">
-            {alocs.length === 0 && sinergias.length === 0 ? (<div className="flex-1" />) : (
-              <>
-                {alocs.map((a) => <CardColabBancada key={a.id} aloc={a} bancadaAtual={b} />)}
-                {sinergias.map((s) => <CardSinergia key={'syn-' + s.id} aloc={s} />)}
-              </>
-            )}
+            {alocs.length === 0 && sinergias.length === 0 ? (<div className="flex-1" />) : (<>{alocs.map((a) => <CardColabBancada key={a.id} aloc={a} bancadaAtual={b} />)}{sinergias.map((s) => <CardSinergia key={'syn-' + s.id} aloc={s} />)}</>)}
           </div>
         )}
       </div>
@@ -1532,35 +1123,19 @@ export default function LinhaPage() {
   function Esteira({ altura }: { altura: number }) {
     return (<div className="w-[44px] mx-1 rounded-sm border border-[#444] transition-all duration-300" style={{ minHeight: altura + 'px', background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)' }} aria-hidden="true" />);
   }
-  // Altura de uma coluna com N bancadas (pra esteira crescer junto)
-  function alturaDeColuna(qtd: number): number {
-    return Math.max(ALTURA_COLUNA, qtd * ALTURA_BANCADA + (qtd - 1) * GAP_BANCADA);
-  }
+  function alturaDeColuna(qtd: number): number { return Math.max(ALTURA_COLUNA, qtd * ALTURA_BANCADA + (qtd - 1) * GAP_BANCADA); }
   function ColunaBancadas({ linha, lado, qtd, alturaColuna, alinharFundo = false }: { linha: number; lado: string; qtd: number; alturaColuna: number; alinharFundo?: boolean }) {
     const chave = chaveColuna(linha, lado);
     const noMax = qtd >= LAYOUT_MAX[chave];
     const noMin = qtd <= 1;
     return (
       <div className={'flex flex-col gap-2 ' + (alinharFundo ? 'justify-end' : 'justify-start')} style={{ minHeight: alturaColuna + 'px' }}>
-        {Array.from({ length: qtd }, (_, i) => (
-          <SlotBancada key={linha + '-' + lado + '-' + (i + 1)} linha={linha} lado={lado} posicao={i + 1} />
-        ))}
-        {/* ➕➖ Controles de bancada (só no modo customizar) */}
+        {Array.from({ length: qtd }, (_, i) => (<SlotBancada key={linha + '-' + lado + '-' + (i + 1)} linha={linha} lado={lado} posicao={i + 1} />))}
         {modoCustomizar && !modoPrint && (
           <div className="flex items-center justify-center gap-1.5 mt-1">
-            <button
-              onClick={() => removerSlot(linha, lado)}
-              disabled={noMin}
-              className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMin ? 'border-[#2a2a2a] text-[#3a3a3a] cursor-not-allowed' : 'border-red-500/40 text-red-400 hover:bg-red-500/15 active:scale-95')}
-              title={noMin ? 'Mínimo 1 bancada' : 'Remover última bancada'}
-            >−</button>
+            <button onClick={() => removerSlot(linha, lado)} disabled={noMin} className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMin ? 'border-[#2a2a2a] text-[#3a3a3a] cursor-not-allowed' : 'border-red-500/40 text-red-400 hover:bg-red-500/15 active:scale-95')} title={noMin ? 'Mínimo 1 bancada' : 'Remover última bancada'}>−</button>
             <span className="text-[9px] text-gray-500 font-mono w-10 text-center">{qtd}/{LAYOUT_MAX[chave]}</span>
-            <button
-              onClick={() => adicionarSlot(linha, lado)}
-              disabled={noMax}
-              className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMax ? 'border-[#2a2a2a] text-[#3a3a3a] cursor-not-allowed' : 'border-green-500/40 text-green-400 hover:bg-green-500/15 active:scale-95')}
-              title={noMax ? 'Limite de ' + LAYOUT_MAX[chave] + ' bancadas' : 'Adicionar bancada'}
-            >+</button>
+            <button onClick={() => adicionarSlot(linha, lado)} disabled={noMax} className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMax ? 'border-[#2a2a2a] text-[#3a3a3a] cursor-not-allowed' : 'border-green-500/40 text-green-400 hover:bg-green-500/15 active:scale-95')} title={noMax ? 'Limite de ' + LAYOUT_MAX[chave] + ' bancadas' : 'Adicionar bancada'}>+</button>
           </div>
         )}
       </div>
@@ -1573,12 +1148,7 @@ export default function LinhaPage() {
     if (alocs.length === 0) return null;
     let totalUnid = 0, totalH = 0;
     const liquidas: number[] = [];
-    alocs.forEach((a) => {
-      const r = ritmos[a.id_groot];
-      if (!r) return;
-      if (r.unidades && r.horas && r.horas > 0) { totalUnid += r.unidades; totalH += r.horas; }
-      if (r.liquida && r.liquida > 0) liquidas.push(r.liquida);
-    });
+    alocs.forEach((a) => { const r = ritmos[a.id_groot]; if (!r) return; if (r.unidades && r.horas && r.horas > 0) { totalUnid += r.unidades; totalH += r.horas; } if (r.liquida && r.liquida > 0) liquidas.push(r.liquida); });
     if (totalH > 0) return Math.round(totalUnid / totalH);
     if (liquidas.length > 0) return Math.round(liquidas.reduce((a, b) => a + b, 0) / liquidas.length);
     return null;
@@ -1591,57 +1161,11 @@ export default function LinhaPage() {
     const temAlgum = p1 != null || c1 != null || p2 != null || c2 != null;
     return (
       <div className="flex flex-col items-center gap-2">
-        {temAlgum && !modoPrint && (
-          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded px-3 py-1 flex items-center gap-3 text-[10px]">
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-600 font-bold">L1:</span>
-              <span className="text-blue-400">🐟 {p1 ?? '—'}</span>
-              <span className="text-gray-700">·</span>
-              <span className="text-purple-400">📦 {c1 ?? '—'}</span>
-            </div>
-            <span className="text-gray-700">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-600 font-bold">L2:</span>
-              <span className="text-blue-400">🐟 {p2 ?? '—'}</span>
-              <span className="text-gray-700">·</span>
-              <span className="text-purple-400">📦 {c2 ?? '—'}</span>
-            </div>
-          </div>
-        )}
-        <div
-          style={{
-            position: 'relative',
-            width: '320px',
-            padding: '16px',
-            boxSizing: 'border-box',
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              border: '2px dashed #3a3a2a',
-              borderRadius: '8px',
-              pointerEvents: 'none',
-            }}
-            aria-hidden="true"
-          />
-          <div className="text-center mb-2 relative">
-            <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
-          </div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '140px 140px',
-              gridTemplateRows: '78px 78px',
-              columnGap: '8px',
-              rowGap: '8px',
-              position: 'relative',
-            }}
-          >
+        {temAlgum && !modoPrint && (<div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded px-3 py-1 flex items-center gap-3 text-[10px]"><div className="flex items-center gap-1.5"><span className="text-gray-600 font-bold">L1:</span><span className="text-blue-400">🐟 {p1 ?? '—'}</span><span className="text-gray-700">·</span><span className="text-purple-400">📦 {c1 ?? '—'}</span></div><span className="text-gray-700">|</span><div className="flex items-center gap-1.5"><span className="text-gray-600 font-bold">L2:</span><span className="text-blue-400">🐟 {p2 ?? '—'}</span><span className="text-gray-700">·</span><span className="text-purple-400">📦 {c2 ?? '—'}</span></div></div>)}
+        <div style={{ position: 'relative', width: '320px', padding: '16px', boxSizing: 'border-box' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '2px dashed #3a3a2a', borderRadius: '8px', pointerEvents: 'none' }} aria-hidden="true" />
+          <div className="text-center mb-2 relative"><span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '140px 140px', gridTemplateRows: '78px 78px', columnGap: '8px', rowGap: '8px', position: 'relative' }}>
             <div style={{ overflow: 'hidden' }}><SlotBancada linha={1} lado="centro" posicao={1} /></div>
             <div style={{ overflow: 'hidden' }}><SlotBancada linha={2} lado="centro" posicao={1} /></div>
             <div style={{ overflow: 'hidden' }}><SlotBancada linha={1} lado="centro" posicao={2} /></div>
@@ -1659,26 +1183,20 @@ export default function LinhaPage() {
     return (
       <div className="flex flex-col items-center gap-1 mb-2">
         {editando ? (
-          <input autoFocus type="text" maxLength={30} value={nomeTemp}
-            onChange={(e) => setNomeTemp(e.target.value)}
+          <input autoFocus type="text" maxLength={30} value={nomeTemp} onChange={(e) => setNomeTemp(e.target.value)}
             onBlur={() => { if (nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim()); else setEditandoLinha(null); }}
             onKeyDown={(e) => { if (e.key === 'Enter' && nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim()); if (e.key === 'Escape') setEditandoLinha(null); }}
             className="nome-linha-input" />
         ) : (
-          <span className="nome-linha-display text-[11px] text-gray-400 font-bold uppercase tracking-widest"
-            onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }} title="Click pra editar">{nome} {!modoPrint && '🖊️'}</span>
+          <span className="nome-linha-display text-[11px] text-gray-400 font-bold uppercase tracking-widest" onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }} title="Click pra editar">{nome} {!modoPrint && '🖊️'}</span>
         )}
         {!modoPrint && (ritmoLinha.totalAtivos > 0 ? (
           <div className="bg-[#0f0f0f] border border-[#2a2a2a] rounded-md px-3 py-1.5 flex items-center gap-2 ritmo-linha-pulse">
             <span className="text-[10px] text-gray-500 font-bold">RITMO:</span>
             <span className={'text-base font-black ' + corLinha.texto}>{ritmoLinha.pctMedio}%</span>
             <span className="text-sm">{corLinha.emoji}</span>
-            {ritmoLinha.pecasHora > 0 && (
-              <span className="text-[9px] text-gray-500">· {ritmoLinha.pecasHora} pç/h</span>
-            )}
-            {ritmoLinha.totalUnidades > 0 && (
-              <span className="text-[9px] text-gray-600">({ritmoLinha.totalUnidades} pç / {ritmoLinha.totalHoras}h)</span>
-            )}
+            {ritmoLinha.pecasHora > 0 && (<span className="text-[9px] text-gray-500">· {ritmoLinha.pecasHora} pç/h</span>)}
+            {ritmoLinha.totalUnidades > 0 && (<span className="text-[9px] text-gray-600">({ritmoLinha.totalUnidades} pç / {ritmoLinha.totalHoras}h)</span>)}
             <div className="flex items-center gap-1 ml-1 pl-2 border-l border-[#2a2a2a]">
               {ritmoLinha.supera > 0 && <span className="text-[10px] text-green-400">🟢 {ritmoLinha.supera}</span>}
               {ritmoLinha.alinhado > 0 && <span className="text-[10px] text-blue-400">🔵 {ritmoLinha.alinhado}</span>}
@@ -1686,9 +1204,7 @@ export default function LinhaPage() {
               {ritmoLinha.semDado > 0 && <span className="text-[10px] text-gray-500">⚪ {ritmoLinha.semDado}</span>}
             </div>
           </div>
-        ) : (
-          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md px-3 py-1 text-[9px] text-gray-600 italic">Sem colabs alocados</div>
-        ))}
+        ) : (<div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md px-3 py-1 text-[9px] text-gray-600 italic">Sem colabs alocados</div>))}
       </div>
     );
   }
@@ -1698,10 +1214,7 @@ export default function LinhaPage() {
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
       <header className="border-b border-[#1a1a1a] px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold">
-            🏭 <span className="text-yellow-400">Mapeamento Linha</span>
-            <span className="text-gray-500 text-sm font-normal ml-2">· P2M</span>
-          </h1>
+          <h1 className="text-lg font-bold">🏭 <span className="text-yellow-400">Mapeamento Linha</span><span className="text-gray-500 text-sm font-normal ml-2">· P2M</span></h1>
           <span className="text-[10px] text-gray-500">{new Date().toLocaleDateString('pt-BR')}</span>
           <span className="text-[10px] text-gray-500">· Metas: {metas.p2m_base}-{metas.p2m_alinhado_max}</span>
           <span className="text-[10px] text-gray-500">· Colabs: {colabs.length}</span>
@@ -1709,31 +1222,13 @@ export default function LinhaPage() {
         </div>
         <div className="flex items-center gap-2">
           <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleUploadCSV} className="hidden" />
-          <button onClick={() => setModoCustomizar((v) => !v)}
-            className={'text-xs px-3 py-1.5 rounded border transition active:scale-95 ' + (modoCustomizar ? 'bg-green-500/20 border-green-500/60 text-green-300' : 'bg-[#1a1a1a] border-[#2a2a2a] text-gray-400 hover:border-green-500/40 hover:text-green-300')}
-            title="Adicionar ou remover bancadas nas colunas">
-            {modoCustomizar ? '✓ Editando bancadas' : '⚙️ Customizar'}
-          </button>
-          <button onClick={printarLayout} disabled={printando}
-            className="bg-blue-500/10 border border-blue-500/50 text-blue-300 text-xs px-3 py-1.5 rounded hover:bg-blue-500/20 transition disabled:opacity-50"
-            title="Gera imagem do layout sem ritmos/líquidas pra reportar no grupo">
-            {printando ? '⏳ Gerando...' : '📸 Printar Layout'}
-          </button>
-          <button onClick={() => setModalRotacao(true)} disabled={rotacionando}
-            className="bg-purple-500/10 border border-purple-500/50 text-purple-300 text-xs px-3 py-1.5 rounded hover:bg-purple-500/20 transition disabled:opacity-50">🔄 Rotacionar</button>
-          {temSnapshot && (
-            <button onClick={desfazerRotacao} disabled={desfazendo || rotacionando}
-              className="bg-amber-500/10 border border-amber-500/50 text-amber-300 text-xs px-3 py-1.5 rounded hover:bg-amber-500/20 transition disabled:opacity-50"
-              title="Volta pra rotação anterior (Ctrl+Z)">{desfazendo ? '⏳' : '↩️'} Desfazer</button>
-          )}
-          <button onClick={limparTodasAlocacoes}
-            className="bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs px-2 py-1.5 rounded hover:bg-orange-500/20 transition"
-            title="Esvazia o time (tira todos das bancadas)">🧽 Esvaziar Time</button>
-          <button onClick={limparRitmos}
-            className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-2 py-1.5 rounded hover:bg-red-500/20 transition"
-            title="Limpar ritmos do dia">🧹 Limpar CSV</button>
-          <button onClick={() => fileInputRef.current?.click()}
-            className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition">↑ Upload Boletim</button>
+          <button onClick={() => setModoCustomizar((v) => !v)} className={'text-xs px-3 py-1.5 rounded border transition active:scale-95 ' + (modoCustomizar ? 'bg-green-500/20 border-green-500/60 text-green-300' : 'bg-[#1a1a1a] border-[#2a2a2a] text-gray-400 hover:border-green-500/40 hover:text-green-300')} title="Adicionar ou remover bancadas nas colunas">{modoCustomizar ? '✓ Editando bancadas' : '⚙️ Customizar'}</button>
+          <button onClick={printarLayout} disabled={printando} className="bg-blue-500/10 border border-blue-500/50 text-blue-300 text-xs px-3 py-1.5 rounded hover:bg-blue-500/20 transition disabled:opacity-50" title="Gera imagem do layout">{printando ? '⏳ Gerando...' : '📸 Printar Layout'}</button>
+          <button onClick={() => setModalRotacao(true)} disabled={rotacionando} className="bg-purple-500/10 border border-purple-500/50 text-purple-300 text-xs px-3 py-1.5 rounded hover:bg-purple-500/20 transition disabled:opacity-50">🔄 Rotacionar</button>
+          {temSnapshot && (<button onClick={desfazerRotacao} disabled={desfazendo || rotacionando} className="bg-amber-500/10 border border-amber-500/50 text-amber-300 text-xs px-3 py-1.5 rounded hover:bg-amber-500/20 transition disabled:opacity-50" title="Volta pra rotação anterior (Ctrl+Z)">{desfazendo ? '⏳' : '↩️'} Desfazer</button>)}
+          <button onClick={limparTodasAlocacoes} className="bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs px-2 py-1.5 rounded hover:bg-orange-500/20 transition" title="Esvazia o time">🧽 Esvaziar Time</button>
+          <button onClick={limparRitmos} className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-2 py-1.5 rounded hover:bg-red-500/20 transition" title="Limpar ritmos do dia">🧹 Limpar CSV</button>
+          <button onClick={() => fileInputRef.current?.click()} className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition">↑ Upload Boletim</button>
         </div>
       </header>
       {loading && (<div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>)}
@@ -1741,15 +1236,10 @@ export default function LinhaPage() {
         <div className="flex gap-3 p-3 min-w-0 overflow-x-auto">
           <aside className="w-[150px] flex-shrink-0">
             <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md p-2">
-              <div className="flex items-center justify-between mb-2 px-1">
-                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">Livres</span>
-                <span className="text-[10px] text-gray-500">{livres.length}</span>
-              </div>
+              <div className="flex items-center justify-between mb-2 px-1"><span className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">Livres</span><span className="text-[10px] text-gray-500">{livres.length}</span></div>
               <div className="text-[9px] text-gray-600 italic mb-2 px-1">Arrasta ou double-click</div>
               <div className="max-h-[calc(100vh-160px)] overflow-y-auto pr-1">
-                {livres.length === 0 ? (
-                  <div className="text-[10px] text-gray-600 italic text-center py-4">Todos alocados</div>
-                ) : (livres.map((c) => <CardColabSidebar key={c.id_groot} c={c} />))}
+                {livres.length === 0 ? (<div className="text-[10px] text-gray-600 italic text-center py-4">Todos alocados</div>) : (livres.map((c) => <CardColabSidebar key={c.id_groot} c={c} />))}
               </div>
             </div>
           </aside>
@@ -1763,9 +1253,7 @@ export default function LinhaPage() {
               </div>
               <div className="text-gray-700 text-xs mt-2">↓</div>
             </section>
-            <section className="flex flex-col items-center mt-8">
-              <ZonaCentral />
-            </section>
+            <section className="flex flex-col items-center mt-8"><ZonaCentral /></section>
             <section className="flex flex-col items-center">
               <HeaderLinha linha={2} />
               <div className="flex gap-1 items-stretch">
@@ -1779,72 +1267,22 @@ export default function LinhaPage() {
         </div>
       )}
       <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
-        {toasts.map((t) => {
-          const corClass = t.tipo === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-300' :
-                          t.tipo === 'error' ? 'bg-red-500/20 border-red-500/50 text-red-300' :
-                          'bg-blue-500/20 border-blue-500/50 text-blue-300';
-          return (
-            <div key={t.id}
-              className={'toast-in ' + corClass + ' border rounded-lg px-4 py-2 text-xs font-medium shadow-xl backdrop-blur-sm min-w-[200px] max-w-[400px]'}>
-              {t.msg}
-            </div>
-          );
-        })}
+        {toasts.map((t) => { const corClass = t.tipo === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-300' : t.tipo === 'error' ? 'bg-red-500/20 border-red-500/50 text-red-300' : 'bg-blue-500/20 border-blue-500/50 text-blue-300'; return (<div key={t.id} className={'toast-in ' + corClass + ' border rounded-lg px-4 py-2 text-xs font-medium shadow-xl backdrop-blur-sm min-w-[200px] max-w-[400px]'}>{t.msg}</div>); })}
       </div>
       {menuSinergia && (() => {
         const c = getColab(menuSinergia.aloc.id_groot);
         const bancadaOrigem = bancadas.find((b) => b.id === menuSinergia.aloc.bancada_fixa_id);
-        const labelOrigem = bancadaOrigem
-          ? bancadaOrigem.tipo_principal + ' L' + bancadaOrigem.linha + (bancadaOrigem.lado !== 'centro' ? ' ' + bancadaOrigem.lado : '')
-          : 'origem';
+        const labelOrigem = bancadaOrigem ? bancadaOrigem.tipo_principal + ' L' + bancadaOrigem.linha + (bancadaOrigem.lado !== 'centro' ? ' ' + bancadaOrigem.lado : '') : 'origem';
         const eTemp = menuSinergia.aloc.tipo_alocacao === 'temporario' || (menuSinergia.aloc.bancada_fixa_id != null && menuSinergia.aloc.bancada_fixa_id !== menuSinergia.aloc.bancada_id);
         const jaRestricao = ehRestricao(menuSinergia.aloc.id_groot);
         return (
           <>
             <div className="fixed inset-0 z-[95]" onClick={() => setMenuSinergia(null)} onContextMenu={(e) => { e.preventDefault(); setMenuSinergia(null); }} />
-            <div
-              className="fixed z-[96] bg-[#1a1a1a] border border-yellow-500/40 rounded-md shadow-2xl py-1 min-w-[200px] slide-in"
-              style={{ left: Math.min(menuSinergia.x, window.innerWidth - 220) + 'px', top: Math.min(menuSinergia.y, window.innerHeight - 160) + 'px' }}
-            >
-              <div className="px-3 py-1 border-b border-[#2a2a2a]">
-                <div className="text-[10px] text-yellow-400/80 font-bold">{c?.nome}</div>
-                <div className="text-[9px] text-gray-500">{jaRestricao ? '🔒 restrição' : eTemp ? 'em sinergia' : 'alocado'}</div>
-              </div>
-              {eTemp && (
-                <button
-                  onClick={() => { voltarOrigem(menuSinergia.aloc); setMenuSinergia(null); }}
-                  className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
-                >
-                  <span>↩️</span>
-                  <span>Voltar pra origem <span className="text-gray-500">({labelOrigem})</span></span>
-                </button>
-              )}
-              {eTemp && (
-                <button
-                  onClick={() => { fixarAqui(menuSinergia.aloc); setMenuSinergia(null); }}
-                  className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
-                >
-                  <span>📍</span>
-                  <span>Fixar aqui</span>
-                </button>
-              )}
-              {!jaRestricao ? (
-                <button
-                  onClick={() => { const nm = c?.nome || ''; const id = menuSinergia.aloc.id_groot; setMenuSinergia(null); setModalRestricao({ idGroot: id, nome: nm }); }}
-                  className="w-full text-left px-3 py-1.5 text-[11px] text-green-400 hover:bg-green-500/10 transition flex items-center gap-2 border-t border-[#2a2a2a]"
-                >
-                  <span>🔒</span>
-                  <span>Marcar restrição</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => { desmarcarRestricao(menuSinergia.aloc.id_groot); }}
-                  className="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-red-500/10 transition flex items-center gap-2 border-t border-[#2a2a2a]"
-                >
-                  <span>🔓</span>
-                  <span>Desmarcar restrição</span>
-                </button>
-              )}
+            <div className="fixed z-[96] bg-[#1a1a1a] border border-yellow-500/40 rounded-md shadow-2xl py-1 min-w-[200px] slide-in" style={{ left: Math.min(menuSinergia.x, window.innerWidth - 220) + 'px', top: Math.min(menuSinergia.y, window.innerHeight - 160) + 'px' }}>
+              <div className="px-3 py-1 border-b border-[#2a2a2a]"><div className="text-[10px] text-yellow-400/80 font-bold">{c?.nome}</div><div className="text-[9px] text-gray-500">{jaRestricao ? '🔒 restrição' : eTemp ? 'em sinergia' : 'alocado'}</div></div>
+              {eTemp && (<button onClick={() => { voltarOrigem(menuSinergia.aloc); setMenuSinergia(null); }} className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"><span>↩️</span><span>Voltar pra origem <span className="text-gray-500">({labelOrigem})</span></span></button>)}
+              {eTemp && (<button onClick={() => { fixarAqui(menuSinergia.aloc); setMenuSinergia(null); }} className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"><span>📍</span><span>Fixar aqui</span></button>)}
+              {!jaRestricao ? (<button onClick={() => { const nm = c?.nome || ''; const id = menuSinergia.aloc.id_groot; setMenuSinergia(null); setModalRestricao({ idGroot: id, nome: nm }); }} className="w-full text-left px-3 py-1.5 text-[11px] text-green-400 hover:bg-green-500/10 transition flex items-center gap-2 border-t border-[#2a2a2a]"><span>🔒</span><span>Marcar restrição</span></button>) : (<button onClick={() => { desmarcarRestricao(menuSinergia.aloc.id_groot); }} className="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-red-500/10 transition flex items-center gap-2 border-t border-[#2a2a2a]"><span>🔓</span><span>Desmarcar restrição</span></button>)}
             </div>
           </>
         );
@@ -1855,30 +1293,20 @@ export default function LinhaPage() {
             <h2 className="text-sm font-bold text-green-400 mb-1">🔒 Marcar Restrição</h2>
             <p className="text-[11px] text-gray-400 mb-4">{modalRestricao.nome} vai ficar fixa (não rotaciona). Escolha a coluna:</p>
             <div className="grid grid-cols-2 gap-2 mb-3">
-              <button onClick={() => marcarRestricao(modalRestricao.idGroot, 'E')}
-                className="py-3 rounded border border-green-500/40 bg-green-500/10 text-green-300 text-xs font-bold hover:bg-green-500/20 transition">
-                Coluna E<div className="text-[9px] text-gray-400 font-normal mt-0.5">Linha O (esquerda)</div>
-              </button>
-              <button onClick={() => marcarRestricao(modalRestricao.idGroot, 'D')}
-                className="py-3 rounded border border-green-500/40 bg-green-500/10 text-green-300 text-xs font-bold hover:bg-green-500/20 transition">
-                Coluna D<div className="text-[9px] text-gray-400 font-normal mt-0.5">Linha N (direita)</div>
-              </button>
+              <button onClick={() => marcarRestricao(modalRestricao.idGroot, 'E')} className="py-3 rounded border border-green-500/40 bg-green-500/10 text-green-300 text-xs font-bold hover:bg-green-500/20 transition">Coluna E<div className="text-[9px] text-gray-400 font-normal mt-0.5">Linha O (esquerda)</div></button>
+              <button onClick={() => marcarRestricao(modalRestricao.idGroot, 'D')} className="py-3 rounded border border-green-500/40 bg-green-500/10 text-green-300 text-xs font-bold hover:bg-green-500/20 transition">Coluna D<div className="text-[9px] text-gray-400 font-normal mt-0.5">Linha N (direita)</div></button>
             </div>
             <button onClick={() => setModalRestricao(null)} className="w-full text-[10px] text-gray-500 hover:text-white transition py-1">Cancelar</button>
           </div>
         </div>
       )}
       {confirmModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[90] p-4"
-          onClick={() => setConfirmModal(null)}>
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-sm w-full slide-in"
-            onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[90] p-4" onClick={() => setConfirmModal(null)}>
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-sm w-full slide-in" onClick={(e) => e.stopPropagation()}>
             <p className="text-sm text-white mb-4">{confirmModal.msg}</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmModal(null)}
-                className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">Cancelar</button>
-              <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }}
-                className="px-4 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition">Confirmar</button>
+              <button onClick={() => setConfirmModal(null)} className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">Cancelar</button>
+              <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }} className="px-4 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition">Confirmar</button>
             </div>
           </div>
         </div>
@@ -1888,47 +1316,22 @@ export default function LinhaPage() {
           <div className="bg-[#1a1a1a] border border-purple-500/30 rounded-lg p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-sm font-bold text-purple-300 mb-3">🔄 Rotacionar</h2>
             <div className="space-y-2">
-              <button onClick={() => aplicarRotacao(1)} disabled={rotacionando}
-                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
-                <div className="text-xs font-bold text-white mb-0.5">Rotação 1 · Sem Pesca</div>
-                <div className="text-[10px] text-gray-500">Desce um lado → sobe o outro → Categoria</div>
-              </button>
-              <button onClick={() => aplicarRotacao(2)} disabled={rotacionando}
-                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
-                <div className="text-xs font-bold text-white mb-0.5">Rotação 2 · Com Pesca</div>
-                <div className="text-[10px] text-gray-500">Dupla atravessa: Pesca + Categoria</div>
-              </button>
-              <button onClick={() => aplicarRotacao(3)} disabled={rotacionando}
-                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
-                <div className="text-xs font-bold text-white mb-0.5">Rotação 3 · Nivelar Dia</div>
-                <div className="text-[10px] text-gray-500">Topo ↔ Último (mesmo lado)</div>
-              </button>
+              <button onClick={() => aplicarRotacao(1)} disabled={rotacionando} className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50"><div className="text-xs font-bold text-white mb-0.5">Rotação 1 · Sem Pesca</div><div className="text-[10px] text-gray-500">Desce um lado → sobe o outro → Categoria</div></button>
+              <button onClick={() => aplicarRotacao(2)} disabled={rotacionando} className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50"><div className="text-xs font-bold text-white mb-0.5">Rotação 2 · Com Pesca</div><div className="text-[10px] text-gray-500">Dupla atravessa: Pesca + Categoria</div></button>
+              <button onClick={() => aplicarRotacao(3)} disabled={rotacionando} className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50"><div className="text-xs font-bold text-white mb-0.5">Rotação 3 · Nivelar Dia</div><div className="text-[10px] text-gray-500">Topo ↔ Último (mesmo lado)</div></button>
             </div>
             <div className="mt-4 pt-3 border-t border-[#2a2a2a]">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-[11px] font-bold text-yellow-400">⭐ Rotação Automática</div>
-                {rotAutoTipo !== 0 && (
-                  <button onClick={() => salvarConfigRotAuto(0, rotAutoUltima)} disabled={rotacionando}
-                    className="text-[9px] text-gray-500 hover:text-red-400 transition">desligar</button>
-                )}
+                {rotAutoTipo !== 0 && (<button onClick={() => salvarConfigRotAuto(0, rotAutoUltima)} disabled={rotacionando} className="text-[9px] text-gray-500 hover:text-red-400 transition">desligar</button>)}
               </div>
               <div className="text-[9px] text-gray-500 mb-2 leading-relaxed">Escolha 1 rotação pra girar sozinha ao abrir o app (seg–sáb, domingo não). Recupera dias que ficaram sem abrir.</div>
               <div className="grid grid-cols-3 gap-1.5">
-                {[1, 2, 3].map((t) => (
-                  <button key={t} onClick={() => salvarConfigRotAuto(t as 1 | 2 | 3, rotAutoUltima)} disabled={rotacionando}
-                    className={'py-2 px-1 rounded text-[10px] font-bold border transition disabled:opacity-50 ' + (rotAutoTipo === t ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300' : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')}>
-                    {rotAutoTipo === t ? '⭐ ' : ''}Rot {t}
-                  </button>
-                ))}
+                {[1, 2, 3].map((t) => (<button key={t} onClick={() => salvarConfigRotAuto(t as 1 | 2 | 3, rotAutoUltima)} disabled={rotacionando} className={'py-2 px-1 rounded text-[10px] font-bold border transition disabled:opacity-50 ' + (rotAutoTipo === t ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300' : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')}>{rotAutoTipo === t ? '⭐ ' : ''}Rot {t}</button>))}
               </div>
-              {rotAutoTipo !== 0 && (
-                <div className="text-[9px] text-green-400/80 mt-2 text-center">
-                  ✓ Rotação {rotAutoTipo} ativa{rotAutoUltima ? ' · última: ' + rotAutoUltima.split('-').reverse().join('/') : ''}
-                </div>
-              )}
+              {rotAutoTipo !== 0 && (<div className="text-[9px] text-green-400/80 mt-2 text-center">✓ Rotação {rotAutoTipo} ativa{rotAutoUltima ? ' · última: ' + rotAutoUltima.split('-').reverse().join('/') : ''}</div>)}
             </div>
-            <button onClick={() => setModalRotacao(false)} disabled={rotacionando}
-              className="w-full mt-3 text-[10px] text-gray-500 hover:text-white transition py-1 disabled:opacity-50">Cancelar</button>
+            <button onClick={() => setModalRotacao(false)} disabled={rotacionando} className="w-full mt-3 text-[10px] text-gray-500 hover:text-white transition py-1 disabled:opacity-50">Cancelar</button>
             {rotacionando && (<div className="text-center text-[10px] text-purple-400 mt-2 animate-pulse">Rotacionando...</div>)}
           </div>
         </div>
@@ -1940,12 +1343,7 @@ export default function LinhaPage() {
             <p className="text-xs text-gray-500 mb-4">Linha {modal.linha} · Zona Central</p>
             <div className="mb-4">
               <label className="text-xs text-gray-400 mb-1.5 block">Sub-tipo:</label>
-              <div className="grid grid-cols-2 gap-2">
-                {SUBTIPOS_CATEGORIA.map((s) => (
-                  <button key={s} onClick={() => setModalSubtipo(s)}
-                    className={'py-1.5 px-2 rounded text-xs font-medium border transition ' + (modalSubtipo === s ? 'border-purple-500 bg-purple-500/20 text-purple-300' : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')}>{s}</button>
-                ))}
-              </div>
+              <div className="grid grid-cols-2 gap-2">{SUBTIPOS_CATEGORIA.map((s) => (<button key={s} onClick={() => setModalSubtipo(s)} className={'py-1.5 px-2 rounded text-xs font-medium border transition ' + (modalSubtipo === s ? 'border-purple-500 bg-purple-500/20 text-purple-300' : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')}>{s}</button>))}</div>
             </div>
             <div className="flex gap-2 justify-end pt-2 border-t border-[#2a2a2a]">
               <button onClick={fecharModal} className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">Cancelar</button>
