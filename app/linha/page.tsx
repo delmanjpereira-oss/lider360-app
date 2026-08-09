@@ -231,6 +231,22 @@ export default function LinhaPage() {
     // cardPessoa: avatar com ÍCONE de pessoa; nome completo se for Pesca
     const cardPessoa = (col: { nome: string }, c: { avatar: string }, nomeCompleto = false) =>
       `<div style="flex:1;min-width:0;background:linear-gradient(180deg,#FFFFFF,#FAFBFC);border:1px solid #ECEEF1;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px 4px;box-shadow:0 1px 3px rgba(16,24,40,.06),inset 0 1px 0 rgba(255,255,255,.8);"><div style="width:24px;height:24px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 4px rgba(16,24,40,.15),inset 0 1px 1px rgba(255,255,255,.3);">${ICON_AVATAR(24)}</div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.05;white-space:nowrap;">${nomeCompleto ? nomeCompletoPng(col) : nomePng(col)}</span></div>`;
+    // Número contínuo da bancada seguindo o FLUXO da rotação:
+    // desce um lado (1..N do topo ao fundo), sobe o outro (N+1.. do fundo ao topo)
+    const numeroBancada = (linha: number, lado: string, posicao: number): number => {
+      const ladoDesce = linha === 1 ? 'esquerdo' : 'direito';
+      const ladoSobe = linha === 1 ? 'direito' : 'esquerdo';
+      const qtdDesce = linha === 1 ? layout.L1_ESQ : layout.L2_DIR;
+      const qtdSobe = linha === 1 ? layout.L1_DIR : layout.L2_ESQ;
+      if (lado === ladoDesce) {
+        return posicao; // desce: topo=1 ... fundo=N
+      }
+      if (lado === ladoSobe) {
+        // sobe: fundo = qtdDesce+1, subindo até o topo
+        return qtdDesce + (qtdSobe - posicao + 1);
+      }
+      return posicao;
+    };
     const bancadaHTML = (b: Bancada, num: number) => {
       const c = corDe(b.tipo_principal);
       const ehPesca = b.tipo_principal === 'PESCA';
@@ -240,11 +256,11 @@ export default function LinhaPage() {
       const corpo = cols.length === 0
         ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;"><span style="font-size:11px;color:#C4CAD3;font-weight:700;letter-spacing:2px;">VAZIA</span></div>`
         : `<div style="flex:1;display:flex;gap:5px;">${cols.map((x) => cardPessoa(x, c, ehPesca)).join('')}</div>`;
-      const badge = num ? `<span style="font-size:9px;font-weight:800;color:#fff;background:${c.bd};width:17px;height:17px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(16,24,40,.2);">${num}</span>` : '';
+      const badge = num ? `<span style="font-size:9px;font-weight:800;color:#fff;background:${c.bd};min-width:16px;height:16px;padding:0 3px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(16,24,40,.2);flex-shrink:0;box-sizing:border-box;">${num}</span>` : '';
       const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;"> · ${b.subtipo}</span>` : '';
       return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;">
         <div style="padding:7px 10px;display:flex;flex-direction:column;flex:1;min-height:0;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:${c.label};">${b.tipo_principal}${sub}</span>${badge}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;margin-bottom:6px;"><span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:${c.label};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${b.tipo_principal}${sub}</span>${badge}</div>
           ${corpo}
         </div>
       </div>`;
@@ -255,7 +271,7 @@ export default function LinhaPage() {
       if (alinharFundo) { for (let k = 0; k < qtdMax - qtd; k++) slots += espacador(); }
       for (let p = 1; p <= qtd; p++) {
         const b = getBancada(linha, lado, p);
-        slots += b ? bancadaHTML(b, p) : `<div style="width:172px;height:${H_BANCADA}px;border:2px dashed #E0E4EA;border-radius:14px;box-sizing:border-box;"></div>`;
+        slots += b ? bancadaHTML(b, numeroBancada(linha, lado, p)) : `<div style="width:172px;height:${H_BANCADA}px;border:2px dashed #E0E4EA;border-radius:14px;box-sizing:border-box;"></div>`;
       }
       return `<div style="display:flex;flex-direction:column;gap:${GAP}px;">${slots}</div>`;
     };
