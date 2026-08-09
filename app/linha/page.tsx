@@ -196,150 +196,138 @@ export default function LinhaPage() {
 
   // Monta o HTML do PNG de exportação (retorna um elemento pronto pra fotografar)
   function construirLayoutExportacao(): HTMLElement {
-    const AZUL = '#2D3277';       // azul-marinho MELI
-    const AMARELO = '#FFE600';    // amarelo MELI
+    const AZUL = '#2D3277';
+    const AZUL2 = '#3A4199';
+    const AMARELO = '#FFE600';
+    const AMARELO2 = '#FFC400';
+    const PREP = ['de', 'da', 'do', 'dos', 'das', 'e'];
+    // Nome pro PNG: primeiro nome + inicial do sobrenome significativo (pula "de/da/do")
     const nomePng = (c: { nome: string }) => {
-      const p = c.nome.trim().split(/\s+/);
-      return p.length === 1 ? p[0] : p[0] + ' ' + p[1];
+      const partes = c.nome.trim().split(/\s+/);
+      if (partes.length === 1) return partes[0];
+      const sobren = partes.slice(1);
+      const sig = sobren.find((s) => !PREP.includes(s.toLowerCase())) || sobren[0];
+      return partes[0] + ' ' + sig[0].toUpperCase() + '.';
+    };
+    const iniciaisPng = (c: { nome: string }) => {
+      const partes = c.nome.trim().split(/\s+/);
+      if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
+      const sobren = partes.slice(1);
+      const sig = sobren.find((s) => !PREP.includes(s.toLowerCase())) || sobren[0];
+      return (partes[0][0] + sig[0]).toUpperCase();
     };
     const corDe = (tipo: string) => {
-      if (tipo === 'GM') return { faixa: '#F5C518', label: '#B8890B', soft: '#FFFBEB' };
-      if (tipo === 'PESCA') return { faixa: '#2D6BE8', label: '#1D4FB0', soft: '#EFF5FF' };
-      if (tipo === 'CATEGORIA') return { faixa: '#8B3FE8', label: '#6B27B8', soft: '#F7F0FF' };
-      return { faixa: '#9AA2AF', label: '#5B6472', soft: '#F5F6F8' };
+      if (tipo === 'GM') return { faixa: '#F5B70A', label: '#8A6100', soft: '#FFFDF5', avatar: '#F5B70A' };
+      if (tipo === 'PESCA') return { faixa: '#2D6BE8', label: '#1D4FB0', soft: '#F5F9FF', avatar: '#2D6BE8' };
+      if (tipo === 'CATEGORIA') return { faixa: '#8B3FE8', label: '#6B27B8', soft: '#FBF7FF', avatar: '#8B3FE8' };
+      return { faixa: '#9AA2AF', label: '#5B6472', soft: '#F8F9FB', avatar: '#9AA2AF' };
     };
-    // card de uma pessoa dentro de bancada
-    const cardPessoa = (nome: string) =>
-      `<div style="flex:1;min-width:0;background:#fff;border:1px solid #E3E7EC;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:4px 6px;min-height:44px;">
-        <span style="font-size:13px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.15;">${nome}</span>
+    const cardPessoa = (col: { nome: string }, c: { avatar: string }) =>
+      `<div style="flex:1;min-width:0;background:#fff;border:1px solid #EAEDF1;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 5px;min-height:52px;box-shadow:0 1px 2px rgba(16,24,40,.04);">
+        <div style="width:22px;height:22px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:9px;font-weight:800;color:#fff;letter-spacing:.3px;">${iniciaisPng(col)}</span></div>
+        <span style="font-size:11.5px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.1;white-space:nowrap;">${nomePng(col)}</span>
       </div>`;
-    // uma bancada (alinhada, altura uniforme)
-    const bancadaHTML = (b: Bancada) => {
+    const bancadaHTML = (b: Bancada, num: number) => {
       const c = corDe(b.tipo_principal);
       const ocupantes = alocacoes.filter((a) => a.bancada_id === b.id);
-      const nomes = ocupantes.map((a) => { const col = getColab(a.id_groot); return col ? nomePng(col) : null; }).filter(Boolean) as string[];
+      const cols = ocupantes.map((a) => getColab(a.id_groot)).filter(Boolean) as { nome: string }[];
       const isCat = b.tipo_principal === 'CATEGORIA';
-      const corpo = nomes.length === 0
-        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#B4BAC4;font-size:11px;font-style:italic;min-height:44px;">—</div>`
+      const corpo = cols.length === 0
+        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;min-height:52px;"><span style="font-size:10px;color:#C4CAD3;font-weight:600;letter-spacing:1px;">VAZIA</span></div>`
         : (isCat
-            ? `<div style="display:flex;flex-direction:column;gap:5px;">${nomes.map(cardPessoa).join('')}</div>`
-            : `<div style="display:flex;gap:5px;">${nomes.map(cardPessoa).join('')}</div>`);
-      const sub = b.subtipo ? `<span style="font-size:9px;color:${c.label};font-weight:600;margin-left:4px;">· ${b.subtipo}</span>` : '';
-      return `<div style="width:150px;min-height:78px;background:${c.soft};border:1px solid #E3E7EC;border-top:4px solid ${c.faixa};border-radius:10px;box-shadow:0 1px 3px rgba(16,24,40,.08);padding:6px 7px;display:flex;flex-direction:column;box-sizing:border-box;">
-        <div style="margin-bottom:5px;"><span style="font-size:10px;font-weight:800;letter-spacing:.5px;color:${c.label};">${b.tipo_principal}</span>${sub}</div>
-        ${corpo}
+            ? `<div style="display:flex;flex-direction:column;gap:5px;">${cols.map((x) => cardPessoa(x, c)).join('')}</div>`
+            : `<div style="display:flex;gap:5px;">${cols.map((x) => cardPessoa(x, c)).join('')}</div>`);
+      const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;"> · ${b.subtipo}</span>` : '';
+      const numTxt = num ? `<span style="font-size:9px;font-weight:800;color:${c.label};opacity:.55;">${num}</span>` : '';
+      return `<div style="width:158px;background:${c.soft};border:1px solid #EAEDF1;border-radius:12px;box-shadow:0 2px 6px rgba(16,24,40,.06);overflow:hidden;box-sizing:border-box;">
+        <div style="height:4px;background:${c.faixa};"></div>
+        <div style="padding:7px 8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font-size:10px;font-weight:800;letter-spacing:.6px;color:${c.label};">${b.tipo_principal}${sub}</span>${numTxt}</div>
+          ${corpo}
+        </div>
       </div>`;
     };
-    // uma coluna de bancadas (SEM alinharFundo — tudo no topo = esquadro)
     const colunaHTML = (linha: number, lado: string, qtd: number) => {
       let slots = '';
       for (let p = 1; p <= qtd; p++) {
         const b = getBancada(linha, lado, p);
-        slots += b ? bancadaHTML(b) : `<div style="width:150px;min-height:78px;border:2px dashed #E3E7EC;border-radius:10px;box-sizing:border-box;"></div>`;
+        slots += b ? bancadaHTML(b, p) : `<div style="width:158px;min-height:80px;border:2px dashed #E8EBEF;border-radius:12px;box-sizing:border-box;"></div>`;
       }
-      return `<div style="display:flex;flex-direction:column;gap:10px;">${slots}</div>`;
+      return `<div style="display:flex;flex-direction:column;gap:11px;">${slots}</div>`;
     };
-    const esteiraHTML = (qtdMax: number) => {
-      const h = qtdMax * 78 + (qtdMax - 1) * 10;
-      return `<div style="width:46px;min-height:${h}px;border-radius:8px;border:1px solid #D2D8E0;background-image:repeating-linear-gradient(45deg,#C6CDD6 0,#C6CDD6 9px,#D9DEE5 9px,#D9DEE5 18px);box-shadow:inset 0 2px 4px rgba(16,24,40,.08);"></div>`;
-    };
-    // zona central (pesca/categoria)
+    const esteiraHTML = () =>
+      `<div style="width:34px;align-self:stretch;border-radius:8px;background:linear-gradient(180deg,#EEF1F5,#E3E7EC);border:1px solid #DADFE6;box-shadow:inset 0 2px 6px rgba(16,24,40,.06);position:relative;overflow:hidden;"><div style="position:absolute;inset:0;background-image:repeating-linear-gradient(180deg,transparent 0,transparent 14px,#D2D8E0 14px,#D2D8E0 16px);opacity:.6;"></div></div>`;
     const centralHTML = () => {
       const cel = (linha: number, pos: number) => {
         const b = bancadas.find((x) => x.linha === linha && x.lado === 'centro' && x.posicao === pos);
-        return b ? bancadaHTML(b) : `<div style="width:150px;min-height:78px;border:2px dashed #E3E7EC;border-radius:10px;box-sizing:border-box;"></div>`;
+        return b ? bancadaHTML(b, 0) : `<div style="width:158px;min-height:80px;border:2px dashed #E8EBEF;border-radius:12px;box-sizing:border-box;"></div>`;
       };
       return `<div style="display:flex;flex-direction:column;align-items:center;">
-        <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#B8890B;text-transform:uppercase;margin-bottom:8px;">Zona Central</div>
-        <div style="border:2px dashed #D2D8E0;border-radius:12px;background:#FBFCFD;padding:14px;display:grid;grid-template-columns:150px 150px;gap:10px;">
-          ${cel(1,1)}${cel(2,1)}${cel(1,2)}${cel(2,2)}
-        </div>
+        <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;padding:4px 14px;background:#fff;border:1px solid #EAEDF1;border-radius:20px;box-shadow:0 1px 3px rgba(16,24,40,.06);"><span style="font-size:11px;font-weight:800;letter-spacing:1.5px;color:#8A6100;text-transform:uppercase;">Zona Central</span></div>
+        <div style="border:2px dashed #DDE2E8;border-radius:16px;background:linear-gradient(135deg,#FCFCFD,#F7F8FA);padding:16px;display:grid;grid-template-columns:158px 158px;gap:11px;">${cel(1, 1)}${cel(2, 1)}${cel(1, 2)}${cel(2, 2)}</div>
       </div>`;
     };
-    // linha completa (nome + colunas + esteira)
-    const linhaHTML = (linha: number, nome: string, ladoDentro: string) => {
+    const linhaHTML = (linha: number, nome: string, espelhar: boolean) => {
       const qEsq = linha === 1 ? layout.L1_ESQ : layout.L2_ESQ;
       const qDir = linha === 1 ? layout.L1_DIR : layout.L2_DIR;
-      const qMax = Math.max(qEsq, qDir);
-      // ordem visual: esquerda | esteira | direita (igual à tela)
+      const cE = colunaHTML(linha, 'esquerdo', qEsq);
+      const cD = colunaHTML(linha, 'direito', qDir);
+      const est = esteiraHTML();
+      const cols = espelhar ? `${cD}${est}${cE}` : `${cE}${est}${cD}`;
       return `<div style="display:flex;flex-direction:column;align-items:center;">
-        <div style="font-size:15px;font-weight:800;letter-spacing:2px;color:#1A1D23;text-transform:uppercase;margin-bottom:10px;">${nome}</div>
-        <div style="display:flex;gap:6px;align-items:flex-start;">
-          ${colunaHTML(linha,'esquerdo',qEsq)}
-          ${esteiraHTML(qMax)}
-          ${colunaHTML(linha,'direito',qDir)}
-        </div>
+        <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:14px;"><div style="width:8px;height:8px;border-radius:2px;background:${AMARELO2};"></div><span style="font-size:16px;font-weight:900;letter-spacing:3px;color:#1A1D23;text-transform:uppercase;">${nome}</span><div style="width:8px;height:8px;border-radius:2px;background:${AMARELO2};"></div></div>
+        <div style="display:flex;gap:7px;align-items:flex-start;">${cols}</div>
       </div>`;
     };
-    // RESERVAS (não alocados) — coluna à esquerda, como a "Livres"
     const livresList = colabsLivres();
     const reservasHTML = () => {
       const cards = livresList.length === 0
-        ? `<div style="color:#B4BAC4;font-size:12px;font-style:italic;text-align:center;padding:12px 0;">Todos alocados</div>`
+        ? `<div style="color:#B4BAC4;font-size:12px;font-style:italic;text-align:center;padding:16px 0;">Todos alocados</div>`
         : livresList.map((c) =>
-            `<div style="background:#fff;border:1px solid #E3E7EC;border-radius:8px;padding:6px 9px;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
-              <span style="width:6px;height:6px;border-radius:50%;background:${AMARELO};flex-shrink:0;"></span>
-              <span style="font-size:12px;font-weight:600;color:#1A1D23;">${nomePng(c)}</span>
-            </div>`).join('');
-      return `<div style="width:180px;flex-shrink:0;background:#F7F8FA;border:1px solid #E3E7EC;border-radius:12px;padding:12px;align-self:stretch;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-          <span style="font-size:12px;font-weight:800;letter-spacing:.5px;color:#5B6472;text-transform:uppercase;">🔄 Reservas</span>
-          <span style="font-size:11px;font-weight:800;color:#1A1D23;background:#fff;border:1px solid #E3E7EC;border-radius:6px;padding:1px 7px;">${livresList.length}</span>
-        </div>
+            `<div style="background:#fff;border:1px solid #EAEDF1;border-radius:10px;padding:7px 9px;margin-bottom:7px;display:flex;align-items:center;gap:8px;box-shadow:0 1px 2px rgba(16,24,40,.04);"><div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#FFE600,#FFC400);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:9px;font-weight:800;color:#5A4A00;">${iniciaisPng(c)}</span></div><span style="font-size:12px;font-weight:700;color:#1A1D23;white-space:nowrap;">${nomePng(c)}</span></div>`).join('');
+      return `<div style="width:186px;flex-shrink:0;background:linear-gradient(180deg,#FAFBFC,#F4F6F8);border:1px solid #EAEDF1;border-radius:16px;padding:14px;align-self:stretch;box-shadow:0 2px 8px rgba(16,24,40,.04);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #EAEDF1;"><span style="font-size:12px;font-weight:900;letter-spacing:1px;color:#4B5563;text-transform:uppercase;">Reservas</span><span style="font-size:12px;font-weight:900;color:#fff;background:${AZUL};border-radius:8px;padding:2px 9px;">${livresList.length}</span></div>
         ${cards}
       </div>`;
     };
-
     const totalAlocados = alocacoes.length;
     const dataExt = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
-
+    const cap = dataExt.charAt(0).toUpperCase() + dataExt.slice(1);
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
-    wrap.innerHTML = `
-      <div style="width:1500px;background:#fff;">
-        <!-- HEADER MELI -->
-        <div style="background:${AZUL};padding:22px 28px;display:flex;align-items:center;justify-content:space-between;">
-          <div style="display:flex;align-items:center;gap:16px;">
-            <div style="width:64px;height:52px;background:${AMARELO};border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
-              <img src="/logos/pngwing.com.png" style="width:56px;height:auto;" crossorigin="anonymous" />
-            </div>
-            <div>
-              <div style="font-size:26px;font-weight:800;color:#fff;line-height:1.1;">Alocação Time · <span style="color:${AMARELO};">DEL P2M</span></div>
-              <div style="font-size:13px;color:#C9CCE8;font-weight:500;margin-top:2px;text-transform:capitalize;">${dataExt}</div>
-            </div>
-          </div>
-          <div style="display:flex;gap:10px;align-items:center;">
-            <div style="background:rgba(255,255,255,.12);border-radius:10px;padding:8px 14px;text-align:center;">
-              <div style="font-size:22px;font-weight:800;color:#fff;line-height:1;">${totalAlocados}</div>
-              <div style="font-size:10px;color:#C9CCE8;text-transform:uppercase;letter-spacing:.5px;margin-top:2px;">Alocados</div>
-            </div>
-            <div style="background:rgba(255,255,255,.12);border-radius:10px;padding:8px 14px;text-align:center;">
-              <div style="font-size:22px;font-weight:800;color:${AMARELO};line-height:1;">${livresList.length}</div>
-              <div style="font-size:10px;color:#C9CCE8;text-transform:uppercase;letter-spacing:.5px;margin-top:2px;">Reservas</div>
-            </div>
+    wrap.style.cssText = 'position:fixed;left:-99999px;top:0;';
+    wrap.innerHTML = `<div style="width:1560px;background:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+      <div style="background:linear-gradient(120deg,${AZUL} 0%,${AZUL2} 100%);padding:24px 32px;display:flex;align-items:center;justify-content:space-between;position:relative;overflow:hidden;">
+        <div style="position:absolute;right:-40px;top:-40px;width:200px;height:200px;border-radius:50%;background:rgba(255,230,0,.06);"></div>
+        <div style="display:flex;align-items:center;gap:18px;position:relative;">
+          <div style="width:70px;height:58px;background:${AMARELO};border-radius:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.15);overflow:hidden;"><img src="/logos/pngwing.com.png" style="width:60px;height:auto;" crossorigin="anonymous" /></div>
+          <div>
+            <div style="font-size:28px;font-weight:900;color:#fff;line-height:1.05;letter-spacing:-.5px;">Alocação Time <span style="color:${AMARELO};">· DEL P2M</span></div>
+            <div style="font-size:13px;color:#B8BCE0;font-weight:500;margin-top:3px;">${cap}</div>
           </div>
         </div>
-        <!-- LEGENDA -->
-        <div style="display:flex;gap:18px;padding:12px 28px;border-bottom:1px solid #EEF1F5;background:#FBFCFD;">
-          <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#5B6472;"><span style="width:13px;height:13px;border-radius:3px;background:#F5C518;"></span> GM</span>
-          <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#5B6472;"><span style="width:13px;height:13px;border-radius:3px;background:#2D6BE8;"></span> Pesca</span>
-          <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#5B6472;"><span style="width:13px;height:13px;border-radius:3px;background:#8B3FE8;"></span> Categoria</span>
+        <div style="display:flex;gap:12px;align-items:center;position:relative;">
+          <div style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:10px 18px;text-align:center;"><div style="font-size:26px;font-weight:900;color:#fff;line-height:1;">${totalAlocados}</div><div style="font-size:10px;color:#B8BCE0;text-transform:uppercase;letter-spacing:1px;margin-top:3px;font-weight:600;">Alocados</div></div>
+          <div style="background:${AMARELO};border-radius:14px;padding:10px 18px;text-align:center;"><div style="font-size:26px;font-weight:900;color:${AZUL};line-height:1;">${livresList.length}</div><div style="font-size:10px;color:#8A7A00;text-transform:uppercase;letter-spacing:1px;margin-top:3px;font-weight:700;">Reservas</div></div>
         </div>
-        <!-- CORPO -->
-        <div style="display:flex;gap:24px;padding:28px;align-items:flex-start;">
-          ${reservasHTML()}
-          <div style="flex:1;display:flex;gap:32px;align-items:flex-start;justify-content:space-around;">
-            ${linhaHTML(1, nomesLinhas.linha1, 'direito')}
-            ${centralHTML()}
-            ${linhaHTML(2, nomesLinhas.linha2, 'esquerdo')}
-          </div>
+      </div>
+      <div style="display:flex;gap:20px;padding:13px 32px;border-bottom:1px solid #EEF1F5;background:#FCFCFD;">
+        <span style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#F5B70A;"></span> GM</span>
+        <span style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#2D6BE8;"></span> Pesca</span>
+        <span style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#8B3FE8;"></span> Categoria</span>
+      </div>
+      <div style="display:flex;gap:26px;padding:30px 32px;align-items:flex-start;background:linear-gradient(180deg,#fff,#FAFBFC);">
+        ${reservasHTML()}
+        <div style="flex:1;display:flex;gap:30px;align-items:flex-start;justify-content:space-around;">
+          ${linhaHTML(1, nomesLinhas.linha1, false)}
+          ${centralHTML()}
+          ${linhaHTML(2, nomesLinhas.linha2, true)}
         </div>
-        <!-- RODAPÉ -->
-        <div style="padding:14px 28px;border-top:1px solid #EEF1F5;background:#FBFCFD;display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:12px;font-weight:700;color:${AZUL};">LIDER 360</span>
-          <span style="font-size:11px;color:#8A93A0;">Gerado em ${new Date().toLocaleString('pt-BR')}</span>
-        </div>
-      </div>`;
+      </div>
+      <div style="padding:16px 32px;border-top:1px solid #EEF1F5;background:${AZUL};display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;font-weight:800;color:#fff;letter-spacing:.5px;">LIDER <span style="color:${AMARELO};">360</span></span>
+        <span style="font-size:11px;color:#B8BCE0;">Gerado em ${new Date().toLocaleString('pt-BR')}</span>
+      </div>
+    </div>`;
     return wrap.firstElementChild as HTMLElement;
   }
   useEffect(() => { carregarTudo(); }, []);
