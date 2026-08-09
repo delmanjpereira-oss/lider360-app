@@ -65,6 +65,12 @@ type PresencaTipo = {
   conta_presenca: boolean;
   status: string;
 };
+type AbsManualTipo = {
+  id_groot: string;
+  mes: number;
+  ano: number;
+  abs_pct: number;
+};
 type LinhaCalib = {
   id: number;
   idGroot: string;
@@ -171,6 +177,7 @@ export default function CalibracaoPage() {
   const [ocupacaoP2M, setOcupacaoP2M] = useState<OcupacaoP2MTipo[]>([]);
   const [feedbacks, setFeedbacks] = useState<FeedbackTrim[]>([]);
   const [presencaData, setPresencaData] = useState<PresencaTipo[]>([]);
+  const [absManual, setAbsManual] = useState<AbsManualTipo[]>([]);
   const [metaIma, setMetaIma] = useState({ checkin: 1567, p2m: 1567 });
   const [metaOcup, setMetaOcup] = useState({ checkin: 75, p2m: 80 });
   const [metaLiq, setMetaLiq] = useState({ checkin: 296, p2m: 329 });
@@ -216,6 +223,7 @@ export default function CalibracaoPage() {
         fbData,
         imaManualData,
         presData,
+        absManualData,
         confResp,
       ] = await Promise.all([
         fetchAll(supabase.from('colaboradores').select('*').eq('status', 'Ativo'), 'colaboradores'),
@@ -227,6 +235,7 @@ export default function CalibracaoPage() {
         fetchAll(supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'), 'feedbacks'),
         fetchAll(supabase.from('ima_manual').select('id_groot, mes, ano, trimestre, processo, ima'), 'ima_manual'),
         fetchAll(supabase.from('presenca').select('id_groot, data_referencia, motivo, categoria, conta_abs, conta_presenca, status'), 'presenca'),
+        fetchAll(supabase.from('abs_manual').select('id_groot, mes, ano, abs_pct'), 'abs_manual'),
         supabase.from('config').select('chave, valor'),
       ]);
       console.log('🔍 ===== DEBUG CALIBRAÇÃO =====');
@@ -237,6 +246,7 @@ export default function CalibracaoPage() {
       console.log('🔥 DPMO agregado TOTAL:', dpmoAggData.length);
       console.log('📷 IMA Manual TOTAL:', imaManualData.length);
       console.log('🗓️ Presença TOTAL:', presData.length);
+      console.log('✏️ ABS Manual TOTAL:', absManualData.length);
       setColaboradores(colabData);
       setHistorico(histData);
       setProdutividadeMensal(prodMensalData);
@@ -246,6 +256,7 @@ export default function CalibracaoPage() {
       setOcupacaoP2M(ocupData as OcupacaoP2MTipo[]);
       setFeedbacks(fbData as FeedbackTrim[]);
       setPresencaData(presData as PresencaTipo[]);
+      setAbsManual(absManualData as AbsManualTipo[]);
       if (confResp.data) {
         const map: Record<string, number> = {};
         confResp.data.forEach((c: { chave: string; valor: string }) => {
@@ -258,6 +269,34 @@ export default function CalibracaoPage() {
     } finally {
       setLoading(false);
     }
+  }
+  // ✏️ Salva o ABS Operacional digitado à mão pra um colaborador/mês
+  async function salvarAbsManual(idGroot: string, mes: number, valorRaw: string) {
+    const limpo = valorRaw.replace('%', '').replace(',', '.').trim();
+    // vazio → remove o valor manual (volta pro calculado)
+    if (limpo === '') {
+      await supabase.from('abs_manual').delete().match({ id_groot: idGroot, mes, ano: anoNum });
+      setAbsManual((prev) => prev.filter((x) => !(x.id_groot === idGroot && x.mes === mes && x.ano === anoNum)));
+      return;
+    }
+    const valor = Number(limpo);
+    if (isNaN(valor) || valor < 0 || valor > 100) return; // ignora inválido
+    const arredondado = Number(valor.toFixed(2));
+    const { error } = await supabase
+      .from('abs_manual')
+      .upsert(
+        { id_groot: idGroot, mes, ano: anoNum, trimestre: quarterSel, abs_pct: arredondado },
+        { onConflict: 'id_groot,mes,ano' }
+      );
+    if (error) {
+      console.error('Erro ao salvar ABS manual:', error);
+      return;
+    }
+    // atualiza estado local (sem recarregar tudo)
+    setAbsManual((prev) => {
+      const semEsse = prev.filter((x) => !(x.id_groot === idGroot && x.mes === mes && x.ano === anoNum));
+      return [...semEsse, { id_groot: idGroot, mes, ano: anoNum, abs_pct: arredondado }];
+    });
   }
   const trimestresDisponiveis = useMemo(() => {
     const set = new Set<string>();
@@ -363,11 +402,21 @@ export default function CalibracaoPage() {
         const { quarter, ano } = getTrimestreDeData(h.data_referencia);
         return ano === anoNum && quarter === quarterSel;
       });
-      const mediasPorMes: Record<number, { liq: number[]; ocup: number[] }> = {};
+      // 📊 LÍQUIDA PONDERADA POR HORAS (correto):
+      //   liq = Σ(unidades) ÷ Σ(horas)   — nunca média das médias diárias
+      //   horas de cada dia = unidades ÷ prod_liquida  (deriva do histórico)
+      //   OCUP continua sendo média simples dos dias (é um % de utilização)
+      const mediasPorMes: Record<number, { unidades: number; horas: number; ocup: number[] }> = {};
       histColab.forEach((h) => {
         const { mes } = getTrimestreDeData(h.data_referencia);
-        if (!mediasPorMes[mes]) mediasPorMes[mes] = { liq: [], ocup: [] };
-        if (h.prod_liquida > 0) mediasPorMes[mes].liq.push(h.prod_liquida);
+        if (!mediasPorMes[mes]) mediasPorMes[mes] = { unidades: 0, horas: 0, ocup: [] };
+        // só acumula dias com dados válidos (pula prod_liquida=0 ou unidades=0)
+        const und = Number(h.unidades) || 0;
+        const liqDia = Number(h.prod_liquida) || 0;
+        if (und > 0 && liqDia > 0) {
+          mediasPorMes[mes].unidades += und;
+          mediasPorMes[mes].horas += und / liqDia; // horas do dia = peças ÷ (peças/hora)
+        }
       });
       const prodMensalColab = produtividadeMensal.filter((p) => {
         const pIdGroot = String(p.id_groot || '').trim();
@@ -385,10 +434,13 @@ export default function CalibracaoPage() {
       });
       prodMensalColab.forEach((p) => {
         const pMes = Number(p.mes);
-        if (!mediasPorMes[pMes]) mediasPorMes[pMes] = { liq: [], ocup: [] };
-        const liqValue = Number(p.prod_liquida_media);
-        if (liqValue > 0) {
-          mediasPorMes[pMes].liq.push(liqValue);
+        if (!mediasPorMes[pMes]) mediasPorMes[pMes] = { unidades: 0, horas: 0, ocup: [] };
+        const liqValue = Number(p.prod_liquida_media) || 0;
+        const undValue = Number(p.unidades_total) || 0;
+        // reconstrói as horas do mês: unidades ÷ (peças/hora). Só se ambos > 0.
+        if (undValue > 0 && liqValue > 0) {
+          mediasPorMes[pMes].unidades += undValue;
+          mediasPorMes[pMes].horas += undValue / liqValue;
         }
       });
       if (c.processo === 'P2M') {
@@ -397,12 +449,18 @@ export default function CalibracaoPage() {
           return o.id_groot === c.id_groot;
         });
         ocupColab.forEach((o) => {
-          if (!mediasPorMes[o.mes]) mediasPorMes[o.mes] = { liq: [], ocup: [] };
+          if (!mediasPorMes[o.mes]) mediasPorMes[o.mes] = { unidades: 0, horas: 0, ocup: [] };
           if (o.ocupacao_pct > 0) mediasPorMes[o.mes].ocup.push(o.ocupacao_pct);
         });
       }
-      const mediaMes = (mes: number, tipo: 'liq' | 'ocup') => {
-        const arr = mediasPorMes[mes]?.[tipo] || [];
+      // LÍQUIDA do mês = Σ unidades ÷ Σ horas (ponderada). OCUP = média simples dos dias.
+      const liqDoMes = (mes: number): number => {
+        const m = mediasPorMes[mes];
+        if (!m || m.horas <= 0) return 0;
+        return m.unidades / m.horas;
+      };
+      const ocupDoMes = (mes: number): number => {
+        const arr = mediasPorMes[mes]?.ocup || [];
         if (arr.length === 0) return 0;
         return arr.reduce((s, v) => s + v, 0) / arr.length;
       };
@@ -429,28 +487,52 @@ export default function CalibracaoPage() {
           absPorMes[mes].faltas += 1;
         }
       });
-      const absMes = (mes: number): number | null => {
+      const absMesCalc = (mes: number): number | null => {
         const a = absPorMes[mes];
         if (!a || a.base === 0) return null;
         return Number(((a.faltas / a.base) * 100).toFixed(1));
       };
+      // ABS manual sobrescreve o calculado: se há valor digitado pra esse mês/ano, usa ele
+      const absManualDe = (mes: number): number | null => {
+        const rec = absManual.find((x) => x.id_groot === c.id_groot && x.mes === mes && x.ano === anoNum);
+        return rec ? Number(rec.abs_pct) : null;
+      };
+      const absMes = (mes: number): number | null => {
+        const man = absManualDe(mes);
+        if (man !== null && man !== undefined) return man;
+        return absMesCalc(mes);
+      };
       const medMes: Record<number, { liq: number; ocup: number; ima: number; abs: number | null }> = {};
       mesesPossiveis.forEach((m) => {
         medMes[m] = {
-          liq: Math.round(mediaMes(m, 'liq')),
-          ocup: Math.round(mediaMes(m, 'ocup')),
+          liq: Math.round(liqDoMes(m)),
+          ocup: Math.round(ocupDoMes(m)),
           ima: 0,
           abs: absMes(m),
         };
       });
-      const liqsValidas = mesesPossiveis.map((m) => medMes[m].liq).filter((v) => v > 0);
+      // LÍQUIDA do TRIMESTRE = Σ unidades ÷ Σ horas de TODOS os meses (ponderada, não média das médias)
+      const totUnidadesTrim = mesesPossiveis.reduce((s, m) => s + (mediasPorMes[m]?.unidades || 0), 0);
+      const totHorasTrim = mesesPossiveis.reduce((s, m) => s + (mediasPorMes[m]?.horas || 0), 0);
+      const liqTrim = totHorasTrim > 0 ? Math.round(totUnidadesTrim / totHorasTrim) : 0;
+      // OCUP do trimestre = média simples dos meses com ocupação (continua como antes)
       const ocupsValidas = mesesPossiveis.map((m) => medMes[m].ocup).filter((v) => v > 0);
-      const liqTrim = liqsValidas.length > 0 ? Math.round(liqsValidas.reduce((s, v) => s + v, 0) / liqsValidas.length) : 0;
       const ocupTrim = ocupsValidas.length > 0 ? Math.round(ocupsValidas.reduce((s, v) => s + v, 0) / ocupsValidas.length) : 0;
-      // ABS do trimestre = média PONDERADA (soma faltas / soma base de todos os meses)
-      const totFaltas = mesesPossiveis.reduce((s, m) => s + (absPorMes[m]?.faltas || 0), 0);
-      const totBase = mesesPossiveis.reduce((s, m) => s + (absPorMes[m]?.base || 0), 0);
-      const absTrim: number | null = totBase > 0 ? Number(((totFaltas / totBase) * 100).toFixed(1)) : null;
+      // ABS do trimestre:
+      //   - Se NENHUM mês tem valor manual → média PONDERADA (soma faltas / soma base)
+      //   - Se ALGUM mês é manual → média SIMPLES dos ABS mensais finais (o manual não tem faltas/base)
+      const temAlgumManual = mesesPossiveis.some((m) => absManualDe(m) !== null);
+      let absTrim: number | null;
+      if (temAlgumManual) {
+        const absMensais = mesesPossiveis.map((m) => absMes(m)).filter((v): v is number => v !== null);
+        absTrim = absMensais.length > 0
+          ? Number((absMensais.reduce((s, v) => s + v, 0) / absMensais.length).toFixed(1))
+          : null;
+      } else {
+        const totFaltas = mesesPossiveis.reduce((s, m) => s + (absPorMes[m]?.faltas || 0), 0);
+        const totBase = mesesPossiveis.reduce((s, m) => s + (absPorMes[m]?.base || 0), 0);
+        absTrim = totBase > 0 ? Number(((totFaltas / totBase) * 100).toFixed(1)) : null;
+      }
       let ima = 0;
       let imaDefeitos = 0;
       let imaUnidades = 0;
@@ -628,6 +710,15 @@ export default function CalibracaoPage() {
         else if (supera >= alinhado && supera >= abaixo) como = 'Supera';
         else como = 'Alinhado';
       }
+      // 🗓️ ABS entra no COMO junto com o feedback:
+      //   ABS > 5% → puxa o COMO pra Abaixo (eliminatório, mesmo com feedback bom)
+      //   ABS ≤ 5% → não atrapalha (mantém o que veio do feedback)
+      if (absTrim !== null && absTrim > 5) {
+        como = 'Abaixo';
+      } else if (absTrim !== null && absTrim <= 5 && como === 'Sem feedbacks') {
+        // sem feedback mas ABS bom → conta como Alinhado (postura ok na presença)
+        como = 'Alinhado';
+      }
       let aptidao = 'Sem dados';
       if (que !== 'Sem dados') {
         if (que === 'Abaixo' || como === 'Abaixo') aptidao = 'NÃO APTO';
@@ -654,7 +745,7 @@ export default function CalibracaoPage() {
         aptidao,
       };
     });
-  }, [colaboradores, historico, produtividadeMensal, imaManual, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, presencaData, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
+  }, [colaboradores, historico, produtividadeMensal, imaManual, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, presencaData, absManual, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
   const porProcesso = {
     Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
     P2M: linhasCalibracao.filter((l) => l.processo === 'P2M').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
@@ -1103,13 +1194,27 @@ export default function CalibracaoPage() {
                                   {l.medMes[m]?.ocup ? l.medMes[m].ocup + '%' : '-'}
                                 </td>
                               )}
-                              <td key={`${l.idGroot}-${m}-a`} className={`py-2 px-2 text-center font-mono text-xs font-bold ${
-                                l.medMes[m]?.abs === null || l.medMes[m]?.abs === undefined ? 'text-gray-600' :
-                                (l.medMes[m]!.abs as number) < 5 ? 'text-green-400' :
-                                (l.medMes[m]!.abs as number) < 10 ? 'text-amber-400' :
-                                'text-red-400'
-                              }`}>
-                                {l.medMes[m]?.abs === null || l.medMes[m]?.abs === undefined ? '-' : l.medMes[m]!.abs + '%'}
+                              <td key={`${l.idGroot}-${m}-a`} className="py-2 px-2 text-center">
+                                <span
+                                  contentEditable
+                                  suppressContentEditableWarning
+                                  onBlur={(e) => {
+                                    const txt = e.currentTarget.textContent || '';
+                                    salvarAbsManual(l.idGroot, m, txt);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLElement).blur(); }
+                                  }}
+                                  title="Clique pra editar o ABS. Vazio = volta pro cálculo automático."
+                                  className={`inline-block min-w-[42px] px-1.5 py-0.5 rounded font-mono text-xs font-bold cursor-text outline-none border border-dashed border-transparent hover:border-[#FFD700]/40 focus:border-[#FFD700] focus:bg-[#FFD700]/5 ${
+                                    l.medMes[m]?.abs === null || l.medMes[m]?.abs === undefined ? 'text-gray-600' :
+                                    (l.medMes[m]!.abs as number) < 5 ? 'text-green-400' :
+                                    (l.medMes[m]!.abs as number) < 10 ? 'text-amber-400' :
+                                    'text-red-400'
+                                  }`}
+                                >
+                                  {l.medMes[m]?.abs === null || l.medMes[m]?.abs === undefined ? '' : l.medMes[m]!.abs + '%'}
+                                </span>
                               </td>
                             </>
                           ))}
