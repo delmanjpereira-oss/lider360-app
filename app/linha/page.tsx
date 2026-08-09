@@ -275,7 +275,7 @@ export default function LinhaPage() {
       const badge = num ? `<span style="font-size:13px;font-weight:900;color:${AZUL};line-height:1;flex-shrink:0;">${num}</span>` : '';
       const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;line-height:1;"> · ${b.subtipo}</span>` : '';
       return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);box-sizing:border-box;display:flex;flex-direction:column;padding:11px 11px 11px 11px;position:relative;">
-        <div style="flex-shrink:0;display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:9px;position:relative;z-index:2;"><span style="font-size:11px;font-weight:800;letter-spacing:.6px;color:${c.label};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${b.tipo_principal}${sub}</span>${badge}</div>
+        <div style="flex-shrink:0;display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:9px;position:relative;z-index:2;"><span style="font-size:11px;font-weight:800;letter-spacing:.6px;color:${c.label};line-height:1;flex-shrink:0;white-space:nowrap;">${b.tipo_principal}${sub}</span>${badge}</div>
         ${corpo}
       </div>`;
     };
