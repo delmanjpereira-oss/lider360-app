@@ -246,7 +246,7 @@ export default function LinhaPage() {
     };
     // cardPessoa: avatar com ÍCONE de pessoa; nome completo se for Pesca
     const cardPessoa = (col: { nome: string }, c: { avatar: string }, nomeCompleto = false) =>
-      `<div style="flex:1;min-width:0;background:linear-gradient(180deg,#FFFFFF,#FAFBFC);border:1px solid #ECEEF1;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px 4px;box-shadow:0 1px 3px rgba(16,24,40,.06),inset 0 1px 0 rgba(255,255,255,.8);"><div style="width:24px;height:24px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 4px rgba(16,24,40,.15),inset 0 1px 1px rgba(255,255,255,.3);">${ICON_AVATAR(24)}</div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:13px;white-space:nowrap;">${nomeCompleto ? nomeCompletoPng(col) : nomePng(col)}</span></div>`;
+      `<div style="flex:1;min-width:0;background:linear-gradient(180deg,#FFFFFF,#FAFBFC);border:1px solid #ECEEF1;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px 4px;box-shadow:0 3px 5px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.8);"><div style="width:24px;height:24px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 4px rgba(16,24,40,.15),inset 0 1px 1px rgba(255,255,255,.3);">${ICON_AVATAR(24)}</div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:13px;white-space:nowrap;">${nomeCompleto ? nomeCompletoPng(col) : nomePng(col)}</span></div>`;
     // Número contínuo da bancada seguindo o FLUXO da rotação:
     // desce um lado (1..N do topo ao fundo), sobe o outro (N+1.. do fundo ao topo)
     const numeroBancada = (linha: number, lado: string, posicao: number): number => {
@@ -270,12 +270,12 @@ export default function LinhaPage() {
       const sinergias = alocacoes.filter((a) => a.bancada_fixa_id === b.id && a.bancada_id !== b.id);
       const cols = [...ocupantes, ...sinergias].map((a) => getColab(a.id_groot)).filter(Boolean) as { nome: string }[];
       const corpo = cols.length === 0
-        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;"><span style="font-size:11px;color:#C4CAD3;font-weight:700;letter-spacing:2px;line-height:1;">VAZIA</span></div>`
-        : `<div style="flex:1;display:flex;gap:6px;align-items:center;">${cols.map((x) => cardPessoa(x, c, ehPesca)).join('')}</div>`;
+        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;position:relative;z-index:1;"><span style="font-size:11px;color:#C4CAD3;font-weight:700;letter-spacing:2px;line-height:1;">VAZIA</span></div>`
+        : `<div style="flex:1;display:flex;gap:6px;align-items:center;position:relative;z-index:1;">${cols.map((x) => cardPessoa(x, c, ehPesca)).join('')}</div>`;
       const badge = num ? `<span style="font-size:13px;font-weight:900;color:${AZUL};line-height:1;flex-shrink:0;">${num}</span>` : '';
       const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;line-height:1;"> · ${b.subtipo}</span>` : '';
-      return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);box-sizing:border-box;display:flex;flex-direction:column;padding:11px 11px 11px 11px;">
-        <div style="flex-shrink:0;display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:9px;"><span style="font-size:11px;font-weight:800;letter-spacing:.6px;color:${c.label};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${b.tipo_principal}${sub}</span>${badge}</div>
+      return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);box-sizing:border-box;display:flex;flex-direction:column;padding:11px 11px 11px 11px;position:relative;">
+        <div style="flex-shrink:0;display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:9px;position:relative;z-index:2;"><span style="font-size:11px;font-weight:800;letter-spacing:.6px;color:${c.label};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${b.tipo_principal}${sub}</span>${badge}</div>
         ${corpo}
       </div>`;
     };
