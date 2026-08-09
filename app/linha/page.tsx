@@ -196,12 +196,13 @@ export default function LinhaPage() {
 
   // Monta o HTML do PNG de exportação (retorna um elemento pronto pra fotografar)
   function construirLayoutExportacao(): HTMLElement {
-    const AZUL = '#2D3277';
-    const AZUL2 = '#3A4199';
+    const AZUL = '#1B2A8F';
+    const AZUL2 = '#2536B0';
+    const AZUL3 = '#0F1E6B';
     const AMARELO = '#FFE600';
-    const AMARELO2 = '#FFC400';
-    const H_BANCADA = 96;  // altura FIXA de toda bancada (mantém tudo alinhado)
-    const GAP = 12;
+    const DOURADO = '#F5C518';
+    const H_BANCADA = 100;
+    const GAP = 14;
     const PREP = ['de', 'da', 'do', 'dos', 'das', 'e'];
     const nomePng = (c: { nome: string }) => {
       const partes = c.nome.trim().split(/\s+/);
@@ -217,82 +218,77 @@ export default function LinhaPage() {
       const sig = sob.find((s) => !PREP.includes(s.toLowerCase())) || sob[0];
       return (partes[0][0] + sig[0]).toUpperCase();
     };
+    const ICON_PEOPLE = (cor: string, sz: number) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><path d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 14c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z" fill="${cor}"/></svg>`;
     const corDe = (tipo: string) => {
-      if (tipo === 'GM') return { faixa: '#F5B70A', label: '#8A6100', soft: '#FFFDF5', avatar: '#F5B70A' };
-      if (tipo === 'PESCA') return { faixa: '#2D6BE8', label: '#1D4FB0', soft: '#F5F9FF', avatar: '#2D6BE8' };
-      if (tipo === 'CATEGORIA') return { faixa: '#8B3FE8', label: '#6B27B8', soft: '#FBF7FF', avatar: '#8B3FE8' };
-      return { faixa: '#9AA2AF', label: '#5B6472', soft: '#F8F9FB', avatar: '#9AA2AF' };
+      if (tipo === 'GM') return { label: '#8A6100', avatar: '#F5C518', bd: '#F5C518' };
+      if (tipo === 'PESCA') return { label: '#1D4FB0', avatar: '#2D6BE8', bd: '#2D6BE8' };
+      if (tipo === 'CATEGORIA') return { label: '#6B27B8', avatar: '#8B3FE8', bd: '#8B3FE8' };
+      return { label: '#5B6472', avatar: '#9AA2AF', bd: '#D2D8E0' };
     };
     const cardPessoa = (col: { nome: string }, c: { avatar: string }) =>
-      `<div style="flex:1;min-width:0;background:#fff;border:1px solid #EAEDF1;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px 4px;box-shadow:0 1px 2px rgba(16,24,40,.04);"><div style="width:20px;height:20px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:8px;font-weight:800;color:#fff;">${iniciaisPng(col)}</span></div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.05;white-space:nowrap;">${nomePng(col)}</span></div>`;
+      `<div style="flex:1;min-width:0;background:#fff;border:1px solid #F0F0F0;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:5px 4px;box-shadow:0 1px 2px rgba(16,24,40,.03);"><div style="width:22px;height:22px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:8px;font-weight:800;color:#fff;">${iniciaisPng(col)}</span></div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.05;white-space:nowrap;">${nomePng(col)}</span></div>`;
     const bancadaHTML = (b: Bancada, num: number) => {
       const c = corDe(b.tipo_principal);
-      // alocação real (quem está fisicamente na bancada) + sinergias (fixos aqui, alocados em outro lugar)
       const ocupantes = alocacoes.filter((a) => a.bancada_id === b.id);
       const sinergias = alocacoes.filter((a) => a.bancada_fixa_id === b.id && a.bancada_id !== b.id);
       const cols = [...ocupantes, ...sinergias].map((a) => getColab(a.id_groot)).filter(Boolean) as { nome: string }[];
       const corpo = cols.length === 0
-        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;"><span style="font-size:10px;color:#C4CAD3;font-weight:600;letter-spacing:1px;">VAZIA</span></div>`
-        : `<div style="flex:1;display:flex;gap:4px;">${cols.map((x) => cardPessoa(x, c)).join('')}</div>`;
-      const numTxt = num ? `<span style="font-size:9px;font-weight:800;color:${c.label};opacity:.5;">${num}</span>` : '';
-      return `<div style="width:170px;height:${H_BANCADA}px;background:${c.soft};border:1px solid #EAEDF1;border-radius:12px;box-shadow:0 2px 5px rgba(16,24,40,.06);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;">
-        <div style="height:4px;background:${c.faixa};flex-shrink:0;"></div>
-        <div style="padding:6px 8px;display:flex;flex-direction:column;flex:1;min-height:0;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;flex-shrink:0;"><span style="font-size:10px;font-weight:800;letter-spacing:.5px;color:${c.label};">${b.tipo_principal}${b.subtipo ? ' · ' + b.subtipo : ''}</span>${numTxt}</div>
+        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;"><span style="font-size:11px;color:#C4CAD3;font-weight:700;letter-spacing:2px;">VAZIA</span></div>`
+        : `<div style="flex:1;display:flex;gap:5px;">${cols.map((x) => cardPessoa(x, c)).join('')}</div>`;
+      const badge = num ? `<span style="font-size:9px;font-weight:800;color:#fff;background:${c.bd};width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;">${num}</span>` : '';
+      const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;"> · ${b.subtipo}</span>` : '';
+      return `<div style="width:172px;height:${H_BANCADA}px;background:#fff;border:2px solid ${c.bd};border-radius:14px;box-shadow:0 2px 8px rgba(16,24,40,.07);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;">
+        <div style="padding:6px 9px;display:flex;flex-direction:column;flex:1;min-height:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:${c.label};">${b.tipo_principal}${sub}</span>${badge}</div>
           ${corpo}
         </div>
       </div>`;
     };
-    const espacador = () => `<div style="width:170px;height:${H_BANCADA}px;"></div>`;
+    const espacador = () => `<div style="width:172px;height:${H_BANCADA}px;"></div>`;
     const colunaHTML = (linha: number, lado: string, qtd: number, qtdMax: number, alinharFundo: boolean) => {
       let slots = '';
-      // pra alinhar no fundo: empurra com espaçadores invisíveis em cima
       if (alinharFundo) { for (let k = 0; k < qtdMax - qtd; k++) slots += espacador(); }
       for (let p = 1; p <= qtd; p++) {
         const b = getBancada(linha, lado, p);
-        slots += b ? bancadaHTML(b, p) : `<div style="width:170px;height:${H_BANCADA}px;border:2px dashed #E8EBEF;border-radius:12px;box-sizing:border-box;"></div>`;
+        slots += b ? bancadaHTML(b, p) : `<div style="width:172px;height:${H_BANCADA}px;border:2px dashed #E0E4EA;border-radius:14px;box-sizing:border-box;"></div>`;
       }
       return `<div style="display:flex;flex-direction:column;gap:${GAP}px;">${slots}</div>`;
     };
     const esteiraHTML = (qtdMax: number) => {
       const h = qtdMax * H_BANCADA + (qtdMax - 1) * GAP;
-      return `<div style="width:32px;height:${h}px;border-radius:8px;background:linear-gradient(180deg,#EEF1F5,#E3E7EC);border:1px solid #DADFE6;box-shadow:inset 0 2px 6px rgba(16,24,40,.06);position:relative;overflow:hidden;flex-shrink:0;"><div style="position:absolute;inset:0;background-image:repeating-linear-gradient(180deg,transparent 0,transparent 16px,#D2D8E0 16px,#D2D8E0 18px);opacity:.5;"></div></div>`;
+      return `<div style="width:26px;height:${h}px;border-radius:20px;background:linear-gradient(180deg,#EDEFF3,#E2E6EC);border:1px solid #DCE0E7;box-shadow:inset 0 1px 3px rgba(16,24,40,.08);flex-shrink:0;"></div>`;
     };
     const centralHTML = () => {
       const cel = (linha: number, pos: number) => {
         const b = bancadas.find((x) => x.linha === linha && x.lado === 'centro' && x.posicao === pos);
-        return b ? bancadaHTML(b, 0) : `<div style="width:170px;height:${H_BANCADA}px;border:2px dashed #E8EBEF;border-radius:12px;box-sizing:border-box;"></div>`;
+        return b ? bancadaHTML(b, 0) : `<div style="width:172px;height:${H_BANCADA}px;border:2px dashed #E0E4EA;border-radius:14px;box-sizing:border-box;"></div>`;
       };
       return `<div style="display:flex;flex-direction:column;align-items:center;">
-        <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;padding:4px 14px;background:#fff;border:1px solid #EAEDF1;border-radius:20px;box-shadow:0 1px 3px rgba(16,24,40,.06);"><span style="font-size:11px;font-weight:800;letter-spacing:1.5px;color:#8A6100;text-transform:uppercase;">Zona Central</span></div>
-        <div style="border:2px dashed #DDE2E8;border-radius:16px;background:linear-gradient(135deg,#FCFCFD,#F7F8FA);padding:14px;display:grid;grid-template-columns:170px 170px;gap:${GAP}px;">${cel(1, 1)}${cel(2, 1)}${cel(1, 2)}${cel(2, 2)}</div>
+        <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:14px;padding:6px 18px;background:#fff;border:2px solid ${DOURADO};border-radius:22px;box-shadow:0 2px 6px rgba(16,24,40,.08);"><span style="font-size:11px;font-weight:800;letter-spacing:1.5px;color:${AZUL};text-transform:uppercase;">Zona Central</span></div>
+        <div style="border:2px dashed #C9CFD8;border-radius:18px;background:linear-gradient(135deg,#FCFCFD,#F6F8FA);padding:16px;display:grid;grid-template-columns:172px 172px;gap:${GAP}px;">${cel(1, 1)}${cel(2, 1)}${cel(1, 2)}${cel(2, 2)}</div>
       </div>`;
     };
+    const tituloLinha = (nm: string) => `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;width:100%;justify-content:center;"><div style="flex:1;max-width:80px;height:3px;background:linear-gradient(90deg,transparent,${DOURADO});border-radius:2px;"></div><div style="width:9px;height:9px;border-radius:50%;background:${DOURADO};box-shadow:0 0 6px rgba(245,197,24,.5);"></div><span style="font-size:17px;font-weight:900;letter-spacing:3px;color:${AZUL};text-transform:uppercase;white-space:nowrap;">${nm}</span><div style="width:9px;height:9px;border-radius:50%;background:${DOURADO};box-shadow:0 0 6px rgba(245,197,24,.5);"></div><div style="flex:1;max-width:80px;height:3px;background:linear-gradient(90deg,${DOURADO},transparent);border-radius:2px;"></div></div>`;
     const linhaHTML = (linha: number, nome: string) => {
       const qEsq = linha === 1 ? layout.L1_ESQ : layout.L2_ESQ;
       const qDir = linha === 1 ? layout.L1_DIR : layout.L2_DIR;
       const qMax = Math.max(qEsq, qDir);
-      // igual à tela: Linha 1 (O) alinha a DIREITA no fundo; Linha 2 (N) alinha a ESQUERDA no fundo
       const fundoEsq = linha === 2;
       const fundoDir = linha === 1;
       const cE = colunaHTML(linha, 'esquerdo', qEsq, qMax, fundoEsq);
       const cD = colunaHTML(linha, 'direito', qDir, qMax, fundoDir);
       const est = esteiraHTML(qMax);
-      // MESMA ordem visual da tela nas duas linhas: esquerda | esteira | direita
       const cols = `${cE}${est}${cD}`;
-      return `<div style="display:flex;flex-direction:column;align-items:center;">
-        <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:14px;"><div style="width:8px;height:8px;border-radius:2px;background:${AMARELO2};"></div><span style="font-size:16px;font-weight:900;letter-spacing:3px;color:#1A1D23;text-transform:uppercase;">${nome}</span><div style="width:8px;height:8px;border-radius:2px;background:${AMARELO2};"></div></div>
-        <div style="display:flex;gap:8px;align-items:flex-start;">${cols}</div>
-      </div>`;
+      return `<div style="display:flex;flex-direction:column;align-items:center;">${tituloLinha(nome)}<div style="display:flex;gap:10px;align-items:flex-start;">${cols}</div></div>`;
     };
     const livresList = colabsLivres();
     const reservasHTML = () => {
       const cards = livresList.length === 0
         ? `<div style="color:#B4BAC4;font-size:12px;font-style:italic;text-align:center;padding:16px 0;">Todos alocados</div>`
         : livresList.map((c) =>
-            `<div style="background:#fff;border:1px solid #EAEDF1;border-radius:10px;padding:7px 9px;margin-bottom:7px;display:flex;align-items:center;gap:8px;box-shadow:0 1px 2px rgba(16,24,40,.04);"><div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#FFE600,#FFC400);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:9px;font-weight:800;color:#5A4A00;">${iniciaisPng(c)}</span></div><span style="font-size:12px;font-weight:700;color:#1A1D23;white-space:nowrap;">${nomePng(c)}</span></div>`).join('');
-      return `<div style="width:186px;flex-shrink:0;background:linear-gradient(180deg,#FAFBFC,#F4F6F8);border:1px solid #EAEDF1;border-radius:16px;padding:14px;box-shadow:0 2px 8px rgba(16,24,40,.04);">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #EAEDF1;"><span style="font-size:12px;font-weight:900;letter-spacing:1px;color:#4B5563;text-transform:uppercase;">Reservas</span><span style="font-size:12px;font-weight:900;color:#fff;background:${AZUL};border-radius:8px;padding:2px 9px;">${livresList.length}</span></div>
+            `<div style="background:#fff;border:1px solid #EEF0F3;border-radius:11px;padding:8px 10px;margin-bottom:8px;display:flex;align-items:center;gap:9px;box-shadow:0 1px 3px rgba(16,24,40,.04);"><div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#FFE600,#FFC400);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:9px;font-weight:800;color:#5A4A00;">${iniciaisPng(c)}</span></div><span style="font-size:12px;font-weight:700;color:#1A1D23;white-space:nowrap;">${nomePng(c)}</span></div>`).join('');
+      return `<div style="width:192px;flex-shrink:0;background:#fff;border:1px solid #EAEDF1;border-radius:18px;padding:16px;box-shadow:0 3px 12px rgba(16,24,40,.06);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:12px;border-bottom:2px solid #F0F2F5;"><span style="font-size:13px;font-weight:900;letter-spacing:1px;color:${AZUL};text-transform:uppercase;">Reservas</span><div style="width:28px;height:28px;border-radius:50%;background:${AZUL};display:flex;align-items:center;justify-content:center;">${ICON_PEOPLE('#fff', 15)}</div></div>
         ${cards}
       </div>`;
     };
@@ -301,38 +297,29 @@ export default function LinhaPage() {
     const cap = dataExt.charAt(0).toUpperCase() + dataExt.slice(1);
     const wrap = document.createElement('div');
     wrap.style.cssText = 'position:fixed;left:-99999px;top:0;';
-    wrap.innerHTML = `<div style="width:1560px;background:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-      <div style="background:linear-gradient(120deg,${AZUL} 0%,${AZUL2} 100%);padding:24px 32px;display:flex;align-items:center;justify-content:space-between;position:relative;overflow:hidden;">
-        <div style="position:absolute;right:-40px;top:-40px;width:200px;height:200px;border-radius:50%;background:rgba(255,230,0,.06);"></div>
-        <div style="display:flex;align-items:center;gap:18px;position:relative;">
-          <div style="width:70px;height:58px;background:${AMARELO};border-radius:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.15);overflow:hidden;"><img src="/logos/pngwing.com.png" style="width:60px;height:auto;" crossorigin="anonymous" /></div>
-          <div>
-            <div style="font-size:28px;font-weight:900;color:#fff;line-height:1.05;letter-spacing:-.5px;">Alocação Time <span style="color:${AMARELO};">· DEL P2M</span></div>
-            <div style="font-size:13px;color:#B8BCE0;font-weight:500;margin-top:3px;">${cap}</div>
-          </div>
+    wrap.innerHTML = `<div style="width:1600px;background:linear-gradient(180deg,#FFFFFF,#F4F6FA);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+      <div style="background:linear-gradient(115deg,${AZUL3} 0%,${AZUL} 45%,${AZUL2} 100%);padding:26px 34px;display:flex;align-items:center;justify-content:space-between;position:relative;overflow:hidden;box-shadow:0 4px 16px rgba(27,42,143,.25);">
+        <div style="position:absolute;right:-30px;top:-50px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(255,230,0,.1),transparent 70%);"></div>
+        <div style="position:absolute;left:40%;bottom:-80px;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.05),transparent 70%);"></div>
+        <div style="display:flex;align-items:center;gap:20px;position:relative;">
+          <div style="width:74px;height:60px;background:${AMARELO};border-radius:15px;display:flex;align-items:center;justify-content:center;box-shadow:0 5px 16px rgba(0,0,0,.2);overflow:hidden;"><img src="/logos/pngwing.com.png" style="width:64px;height:auto;" crossorigin="anonymous" /></div>
+          <div><div style="font-size:30px;font-weight:900;color:#fff;letter-spacing:-.5px;text-shadow:0 2px 4px rgba(0,0,0,.15);">Alocação Time <span style="color:${AMARELO};">· DEL P2M</span></div><div style="font-size:13px;color:#AEB6E8;font-weight:500;margin-top:4px;">${cap}</div></div>
         </div>
-        <div style="display:flex;gap:12px;align-items:center;position:relative;">
-          <div style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:10px 18px;text-align:center;"><div style="font-size:26px;font-weight:900;color:#fff;line-height:1;">${totalAlocados}</div><div style="font-size:10px;color:#B8BCE0;text-transform:uppercase;letter-spacing:1px;margin-top:3px;font-weight:600;">Alocados</div></div>
-          <div style="background:${AMARELO};border-radius:14px;padding:10px 18px;text-align:center;"><div style="font-size:26px;font-weight:900;color:${AZUL};line-height:1;">${livresList.length}</div><div style="font-size:10px;color:#8A7A00;text-transform:uppercase;letter-spacing:1px;margin-top:3px;font-weight:700;">Reservas</div></div>
+        <div style="display:flex;gap:14px;align-items:center;position:relative;">
+          <div style="background:rgba(255,255,255,.08);border:1.5px solid rgba(255,255,255,.2);border-radius:16px;padding:11px 20px;display:flex;align-items:center;gap:10px;">${ICON_PEOPLE('#fff', 22)}<div><div style="font-size:26px;font-weight:900;color:#fff;line-height:1;">${totalAlocados}</div><div style="font-size:10px;color:#AEB6E8;text-transform:uppercase;letter-spacing:1px;margin-top:2px;">Alocados</div></div></div>
+          <div style="background:${AMARELO};border-radius:16px;padding:11px 20px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 12px rgba(255,230,0,.3);">${ICON_PEOPLE(AZUL, 22)}<div><div style="font-size:26px;font-weight:900;color:${AZUL};line-height:1;">${livresList.length}</div><div style="font-size:10px;color:#8A7A00;text-transform:uppercase;letter-spacing:1px;margin-top:2px;font-weight:700;">Reservas</div></div></div>
         </div>
       </div>
-      <div style="display:flex;gap:20px;padding:13px 32px;border-bottom:1px solid #EEF1F5;background:#FCFCFD;">
-        <span style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#F5B70A;"></span> GM</span>
-        <span style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#2D6BE8;"></span> Pesca</span>
-        <span style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#8B3FE8;"></span> Categoria</span>
-      </div>
-      <div style="display:flex;gap:26px;padding:30px 32px;align-items:flex-start;background:linear-gradient(180deg,#fff,#FAFBFC);">
+      <div style="display:flex;gap:22px;padding:14px 34px;border-bottom:1px solid #E8EBF0;background:rgba(255,255,255,.6);"><span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#F5C518;"></span> GM</span><span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#2D6BE8;"></span> Pesca</span><span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#4B5563;"><span style="width:14px;height:14px;border-radius:4px;background:#8B3FE8;"></span> Categoria</span></div>
+      <div style="display:flex;gap:28px;padding:32px 34px;align-items:flex-start;">
         ${reservasHTML()}
-        <div style="flex:1;display:flex;gap:30px;align-items:flex-start;justify-content:space-around;">
+        <div style="flex:1;display:flex;gap:28px;align-items:flex-start;justify-content:space-around;">
           ${linhaHTML(1, nomesLinhas.linha1)}
           ${centralHTML()}
           ${linhaHTML(2, nomesLinhas.linha2)}
         </div>
       </div>
-      <div style="padding:16px 32px;border-top:1px solid #EEF1F5;background:${AZUL};display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:13px;font-weight:800;color:#fff;letter-spacing:.5px;">LIDER <span style="color:${AMARELO};">360</span></span>
-        <span style="font-size:11px;color:#B8BCE0;">Gerado em ${new Date().toLocaleString('pt-BR')}</span>
-      </div>
+      <div style="padding:16px 34px;border-top:1px solid #E8EBF0;background:linear-gradient(90deg,${AZUL3},${AZUL});display:flex;justify-content:space-between;align-items:center;"><span style="font-size:14px;font-weight:800;color:#fff;letter-spacing:.5px;">LIDER <span style="color:${AMARELO};">360</span></span><span style="font-size:11px;color:#AEB6E8;">Gerado em ${new Date().toLocaleString('pt-BR')}</span></div>
     </div>`;
     return wrap.firstElementChild as HTMLElement;
   }
