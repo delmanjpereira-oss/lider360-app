@@ -138,6 +138,9 @@ export default function LinhaPage() {
   // 🔒 RESTRIÇÃO: pessoas que não rotacionam (ficam fixas em E1/D1, transbordando E2/D2)
   const [restricoes, setRestricoes] = useState<Set<string>>(new Set());
   const [modalRestricao, setModalRestricao] = useState<{ idGroot: string; nome: string } | null>(null);
+  // ↩️ DESFAZER: guarda o snapshot da última rotação (pra voltar com Ctrl+Z ou botão)
+  const [temSnapshot, setTemSnapshot] = useState(false);
+  const [desfazendo, setDesfazendo] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
   const [menuSinergia, setMenuSinergia] = useState<{ x: number; y: number; aloc: Alocacao } | null>(null);
@@ -387,6 +390,22 @@ export default function LinhaPage() {
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
+  // Ctrl+Z / Cmd+Z desfaz a última rotação (se houver snapshot)
+  useEffect(() => {
+    function handleUndo(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        // não interfere se estiver digitando num campo
+        const alvo = e.target as HTMLElement;
+        if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA')) return;
+        if (temSnapshot && !desfazendo && !rotacionando) {
+          e.preventDefault();
+          desfazerRotacao();
+        }
+      }
+    }
+    window.addEventListener('keydown', handleUndo);
+    return () => window.removeEventListener('keydown', handleUndo);
+  }, [temSnapshot, desfazendo, rotacionando]);
   async function carregarTudo() {
     setLoading(true);
     await carregarMetas();
@@ -395,6 +414,7 @@ export default function LinhaPage() {
     await garantirSlotsFixos();
     await carregarConfigRotAuto();
     await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes(), carregarRestricoes()]);
+    verificarSnapshot();
     setLoading(false);
   }
   // ============================================================
@@ -957,9 +977,71 @@ export default function LinhaPage() {
       });
     });
   }
+  // ============================================================
+  // ↩️ DESFAZER ROTAÇÃO — salva um snapshot antes de cada rotação
+  // Guarda no banco (tabela 'rotacao_snapshot') pra funcionar mesmo
+  // depois de recarregar. Só 1 nível (a última rotação).
+  // ============================================================
+  async function salvarSnapshot() {
+    // captura todas as alocações atuais
+    const { data: alocsAtuais } = await supabase.from('layout_alocacao').select('*');
+    const snap = JSON.stringify(alocsAtuais || []);
+    // grava (substitui o snapshot anterior — só 1 nível)
+    await supabase.from('rotacao_snapshot').upsert(
+      { id: 1, dados: snap, criado_em: new Date().toISOString() },
+      { onConflict: 'id' }
+    );
+    setTemSnapshot(true);
+  }
+  async function verificarSnapshot() {
+    const { data } = await supabase.from('rotacao_snapshot').select('id').eq('id', 1);
+    setTemSnapshot(!!(data && data.length > 0));
+  }
+  async function desfazerRotacao() {
+    if (desfazendo) return;
+    setDesfazendo(true);
+    try {
+      const { data } = await supabase.from('rotacao_snapshot').select('dados').eq('id', 1);
+      if (!data || data.length === 0) {
+        toast('info', 'Nada pra desfazer');
+        setDesfazendo(false);
+        return;
+      }
+      const snap: Alocacao[] = JSON.parse(data[0].dados);
+      const posicoesAntes = capturarPosicoesCards();
+      // apaga todas as alocações atuais e recria as do snapshot
+      const { data: atuais } = await supabase.from('layout_alocacao').select('id');
+      if (atuais && atuais.length > 0) {
+        await supabase.from('layout_alocacao').delete().in('id', atuais.map((a: any) => a.id));
+      }
+      if (snap.length > 0) {
+        await supabase.from('layout_alocacao').insert(
+          snap.map((a) => ({
+            bancada_id: a.bancada_id,
+            id_groot: a.id_groot,
+            tipo_alocacao: a.tipo_alocacao,
+            bancada_fixa_id: a.bancada_fixa_id,
+            data_referencia: a.data_referencia,
+          }))
+        );
+      }
+      // consome o snapshot (desfazer é 1 nível só)
+      await supabase.from('rotacao_snapshot').delete().eq('id', 1);
+      setTemSnapshot(false);
+      await carregarAlocacoes();
+      await new Promise((r) => setTimeout(r, 50));
+      animarFLIP(posicoesAntes);
+      toast('success', '↩️ Rotação desfeita');
+    } catch (err: any) {
+      toast('error', 'Erro ao desfazer: ' + err.message);
+    } finally {
+      setDesfazendo(false);
+    }
+  }
   async function aplicarRotacao(tipo: 1 | 2 | 3) {
     setRotacionando(true);
     try {
+      await salvarSnapshot(); // guarda o estado ANTES de rotacionar (pra desfazer)
       const posicoesAntes = capturarPosicoesCards();
       if (tipo === 3) await rotacaoNivelar();
       else await rotacaoCiclo(tipo === 2);
@@ -1603,6 +1685,11 @@ export default function LinhaPage() {
           </button>
           <button onClick={() => setModalRotacao(true)} disabled={rotacionando}
             className="bg-purple-500/10 border border-purple-500/50 text-purple-300 text-xs px-3 py-1.5 rounded hover:bg-purple-500/20 transition disabled:opacity-50">🔄 Rotacionar</button>
+          {temSnapshot && (
+            <button onClick={desfazerRotacao} disabled={desfazendo || rotacionando}
+              className="bg-amber-500/10 border border-amber-500/50 text-amber-300 text-xs px-3 py-1.5 rounded hover:bg-amber-500/20 transition disabled:opacity-50"
+              title="Volta pra rotação anterior (Ctrl+Z)">{desfazendo ? '⏳' : '↩️'} Desfazer</button>
+          )}
           <button onClick={limparTodasAlocacoes}
             className="bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs px-2 py-1.5 rounded hover:bg-orange-500/20 transition"
             title="Esvazia o time (tira todos das bancadas)">🧽 Esvaziar Time</button>
