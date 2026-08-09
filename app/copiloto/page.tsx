@@ -49,10 +49,11 @@ type ProdutividadeMensalLinha = {
   unidades_total: number;
   dias_trabalhados: number;
 };
-// 🆕 OCUPAÇÃO (ocupacao_p2m) — só P2M tem
+// 🆕 OCUPAÇÃO (ocupacao_p2m) — só P2M tem · mensal (sobrepõe igual IMA)
 type OcupacaoLinha = {
   id_groot: string;
-  data_referencia: string;
+  mes: number;
+  ano: number;
   ocupacao_pct: number;
 };
 // 🆕 IMA / QUALIDADE (ima_manual) — mensal, menor é melhor
@@ -220,8 +221,8 @@ export default function CopilotoPage() {
         supabase.from('produtividade_mensal').select('id_groot, mes, ano, processo, prod_liquida_media, unidades_total, dias_trabalhados').order('ano', { ascending: false }).order('mes', { ascending: false }),
         supabase.from('tarefas').select('*').eq('status', 'Finalizada').not('classificacao_aprendizado', 'is', null).order('finalizada_em', { ascending: false }).limit(30),
         supabase.from('config').select('chave, valor'),
-        // 🆕 ocupação (últimos 30 dias) e IMA (mais recentes)
-        supabase.from('ocupacao_p2m').select('id_groot, data_referencia, ocupacao_pct').gte('data_referencia', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]).order('data_referencia', { ascending: false }),
+        // 🆕 ocupação (mensal, sobrepõe igual IMA) e IMA (mais recentes)
+        supabase.from('ocupacao_p2m').select('id_groot, mes, ano, ocupacao_pct').order('ano', { ascending: false }).order('mes', { ascending: false }),
         supabase.from('ima_manual').select('id_groot, processo, mes, ano, ima').order('ano', { ascending: false }).order('mes', { ascending: false }),
       ]);
       
@@ -520,31 +521,31 @@ export default function CopilotoPage() {
 
   // ============================================
   // 🆕 MONITOR DE OCUPAÇÃO (dentro/fora) — só P2M tem ocupação
-  // Média dos últimos 30 dias por colaborador. Dentro = média >= meta.
+  // Mensal (sobrepõe igual IMA): usa o registro do MÊS mais recente
+  // de cada colab. Dentro = ocupação >= meta.
   // ============================================
-  const ocupPorColab: Record<string, number[]> = {};
+  const ocupMaisRecentePorColab: Record<string, OcupacaoLinha> = {};
   ocupacaoData.forEach((o) => {
-    const v = Number(o.ocupacao_pct) || 0;
-    if (v <= 0) return;
-    if (!ocupPorColab[o.id_groot]) ocupPorColab[o.id_groot] = [];
-    ocupPorColab[o.id_groot].push(v);
+    // ocupacaoData vem ordenado ano desc, mes desc → o primeiro de cada colab é o mais recente
+    if (!ocupMaisRecentePorColab[o.id_groot]) ocupMaisRecentePorColab[o.id_groot] = o;
   });
   const monitorOcupacao = { dentro: [] as IndicadorItem[], fora: [] as IndicadorItem[] };
   colaboradores.forEach((c) => {
-    const valores = ocupPorColab[c.id_groot];
-    if (!valores || valores.length === 0) return; // sem ocupação (ex: Checkin) → não entra
-    const media = Math.round((valores.reduce((s, v) => s + v, 0) / valores.length) * 10) / 10;
+    const reg = ocupMaisRecentePorColab[c.id_groot];
+    if (!reg) return; // sem ocupação (ex: Checkin) → não entra
+    const valor = Math.round((Number(reg.ocupacao_pct) || 0) * 10) / 10;
+    if (valor <= 0) return;
     const meta = c.processo === 'P2M' ? metasConfig.ocupacaoP2M : metasConfig.ocupacaoCheckin;
-    const dentro = media >= meta;
+    const dentro = valor >= meta;
     const item: IndicadorItem = {
       idGroot: c.id_groot,
       id: c.id,
       nome: c.nome,
       processo: c.processo || '-',
-      valor: media,
+      valor,
       meta,
       dentro,
-      dias: valores.length,
+      mesRef: `${String(reg.mes).padStart(2, '0')}/${reg.ano}`,
     };
     if (dentro) monitorOcupacao.dentro.push(item);
     else monitorOcupacao.fora.push(item);
@@ -997,7 +998,7 @@ export default function CopilotoPage() {
                                 <div className="w-8 h-8 rounded-full bg-red-500/30 flex items-center justify-center text-red-300 font-bold text-xs">{iniciais(o.nome)}</div>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-bold text-white truncate">{o.nome}</p>
-                                  <p className="text-xs text-gray-500">{o.processo}{o.dias ? ` · ${o.dias}d` : ''}</p>
+                                  <p className="text-xs text-gray-500">{o.processo}{o.mesRef ? ` · ${o.mesRef}` : ''}</p>
                                 </div>
                                 <span className="text-sm font-black text-red-300">{o.valor}%</span>
                               </div>
@@ -1022,7 +1023,7 @@ export default function CopilotoPage() {
                                 <div className="w-8 h-8 rounded-full bg-green-500/30 flex items-center justify-center text-green-300 font-bold text-xs">{iniciais(o.nome)}</div>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-bold text-white truncate">{o.nome}</p>
-                                  <p className="text-xs text-gray-500">{o.processo}{o.dias ? ` · ${o.dias}d` : ''}</p>
+                                  <p className="text-xs text-gray-500">{o.processo}{o.mesRef ? ` · ${o.mesRef}` : ''}</p>
                                 </div>
                                 <span className="text-sm font-black text-green-300">{o.valor}%</span>
                               </div>
