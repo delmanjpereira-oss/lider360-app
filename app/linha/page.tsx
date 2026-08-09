@@ -169,18 +169,34 @@ export default function LinhaPage() {
       }
       const container = construirLayoutExportacao();
       document.body.appendChild(container);
+      // reseta o scroll pro topo (evita o html2canvas somar offset e jogar tudo pra baixo)
+      const scrollYAntes = window.scrollY;
+      const scrollXAntes = window.scrollX;
+      window.scrollTo(0, 0);
+      // torna o container visível (mas atrás de tudo) só durante a captura
+      container.style.opacity = '1';
+      container.style.zIndex = '-9999';
       // espera imagens (logo) carregarem
       await new Promise((r) => setTimeout(r, 250));
+      const larguraReal = container.offsetWidth;
+      const alturaReal = container.offsetHeight;
       const canvas = await html2canvas(container, {
         backgroundColor: '#FFFFFF',
         scale: 2,
         logging: false,
         useCORS: true,
         allowTaint: true,
-        windowWidth: container.scrollWidth,
-        windowHeight: container.scrollHeight,
+        scrollX: 0,
+        scrollY: 0,
+        x: 0,
+        y: 0,
+        width: larguraReal,
+        height: alturaReal,
+        windowWidth: larguraReal,
+        windowHeight: alturaReal,
       });
       document.body.removeChild(container);
+      window.scrollTo(scrollXAntes, scrollYAntes);
       const link = document.createElement('a');
       const dataStr = new Date().toLocaleDateString('pt-BR').replace(/[/:\s,]/g, '-');
       link.download = 'Alocacao-Time-DEL-P2M-' + dataStr + '.png';
@@ -321,7 +337,7 @@ export default function LinhaPage() {
     const dataExt = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
     const cap = dataExt.charAt(0).toUpperCase() + dataExt.slice(1);
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'position:fixed;left:-99999px;top:0;';
+    wrap.style.cssText = 'position:absolute;top:0;left:0;z-index:-9999;opacity:0;pointer-events:none;';
     wrap.innerHTML = `<div style="width:1600px;background:linear-gradient(180deg,#FFFFFF,#F4F6FA);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
       <div style="background:linear-gradient(115deg,${AZUL3} 0%,${AZUL} 45%,${AZUL2} 100%);padding:26px 34px;display:flex;align-items:center;justify-content:space-between;position:relative;overflow:hidden;box-shadow:0 4px 16px rgba(27,42,143,.25);">
         <div style="position:absolute;right:-30px;top:-50px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(255,230,0,.1),transparent 70%);"></div>
