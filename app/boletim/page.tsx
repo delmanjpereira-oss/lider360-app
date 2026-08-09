@@ -383,17 +383,47 @@ export default function BoletimPage() {
       </tr>
     </thead>
   );
-  // 🎯 Cabeçalho de bloco de setor (barra colorida acima da tabela)
-  function BarraSetor({ tipo, qtd }: { tipo: 'CK' | 'P2M'; qtd: number }) {
+  // 🎯 CARD VISUAL DE METAS (substitui as linhas de texto repetidas)
+  // Mostra setor + nº de colaboradores + mini-cards de cada meta, tudo visual.
+  function CardMetas({ tipo, qtd }: { tipo: 'CK' | 'P2M'; qtd: number }) {
+    const isP2M = tipo === 'P2M';
+    const icone = isP2M ? '🚚' : '📦';
+    const nome = isP2M ? 'P2M' : 'CHECK-IN';
+    const metaLiq = isP2M ? metas.p2mLiq : metas.checkinLiq;
+    const metaVol = isP2M ? metas.p2mVol : metas.checkinVol;
+    const MiniCard = ({ label, valor, cor }: { label: string; valor: string; cor: string }) => (
+      <div className="flex-1 text-center rounded-lg" style={{ padding: '10px 8px', backgroundColor: 'rgba(255,255,255,0.04)', border: `1px solid ${cor}44` }}>
+        <div className="uppercase font-bold" style={{ fontSize: '9px', color: '#9ca3af', letterSpacing: '0.05em', marginBottom: '3px' }}>{label}</div>
+        <div className="font-black font-mono" style={{ fontSize: '22px', color: cor, lineHeight: '1' }}>{valor}</div>
+      </div>
+    );
+    return (
+      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}`, background: 'linear-gradient(135deg, rgba(45,50,119,0.18) 0%, rgba(15,15,26,0.4) 100%)' }}>
+        <div className="flex items-center gap-2.5" style={{ padding: '10px 16px', backgroundColor: MELI.azul }}>
+          <span style={{ fontSize: '22px' }}>{icone}</span>
+          <span className="font-black" style={{ fontSize: '18px', color: MELI.amarelo, letterSpacing: '0.03em' }}>{nome}</span>
+          <span className="flex items-center gap-1.5 rounded-full" style={{ marginLeft: 'auto', backgroundColor: 'rgba(255,255,255,0.12)', padding: '4px 12px' }}>
+            <span style={{ fontSize: '14px' }}>👥</span>
+            <span className="font-black" style={{ fontSize: '15px', color: '#fff' }}>{qtd}</span>
+            <span className="font-bold" style={{ fontSize: '10px', color: 'rgba(255,255,255,0.7)' }}>colabs</span>
+          </span>
+        </div>
+        <div className="flex gap-2" style={{ padding: '12px' }}>
+          <MiniCard label="Meta Líquida" valor={String(metaLiq)} cor={MELI.amarelo} />
+          <MiniCard label="Meta Volume" valor={metaVol.toLocaleString('pt-BR')} cor={MELI.azulClaro} />
+          {isP2M && <MiniCard label="Meta Ocupação" valor={`${metas.ocupMeta}%`} cor="#34d399" />}
+        </div>
+      </div>
+    );
+  }
+  // 🎯 Barra minimalista no topo da tabela (só identifica o setor, sem repetir metas)
+  function BarraTabela({ tipo }: { tipo: 'CK' | 'P2M' }) {
     const isP2M = tipo === 'P2M';
     return (
       <div className="px-4 py-2 flex items-center gap-2" style={{ backgroundColor: MELI.azul }}>
-        <span className="text-lg">{isP2M ? '🚚' : '📦'}</span>
-        <h3 className="font-black text-sm uppercase flex items-center gap-2" style={{ color: MELI.amarelo }}>
+        <span className="text-base">{isP2M ? '🚚' : '📦'}</span>
+        <h3 className="font-black text-sm uppercase" style={{ color: MELI.amarelo }}>
           {isP2M ? 'P2M' : 'CHECK-IN'}
-          <span className="text-xs font-normal text-white/80">
-            · {qtd} colaboradores · Meta Líq: {isP2M ? metas.p2mLiq : metas.checkinLiq} · Meta Vol: {(isP2M ? metas.p2mVol : metas.checkinVol).toLocaleString('pt-BR')}{isP2M ? ` · Meta Oc: ${metas.ocupMeta}%` : ''}
-          </span>
         </h3>
       </div>
     );
@@ -750,22 +780,11 @@ export default function BoletimPage() {
           </div>
         </div>
         {/* RESUMO DE METAS — só mostra os setores COM dados */}
+        {/* CARD(S) VISUAL(IS) DE METAS — substitui as linhas de texto repetidas */}
         {(temCheckin || temP2M) && (
-          <div className="rounded-xl p-3 mb-4" style={{ backgroundColor: 'rgba(10,10,20,0.5)', border: `1px solid ${MELI.azul}88` }}>
-            <div className={`grid grid-cols-1 ${temCheckin && temP2M ? 'md:grid-cols-2' : ''} gap-2 text-center text-xs font-bold`}>
-              {temCheckin && (
-                <div className="flex items-center justify-center gap-2" style={{ color: '#67e8f9' }}>
-                  <span>📦</span>
-                  <span>CHECK-IN · Líq: {metas.checkinLiq} · Vol: {metas.checkinVol.toLocaleString('pt-BR')}</span>
-                </div>
-              )}
-              {temP2M && (
-                <div className="flex items-center justify-center gap-2" style={{ color: MELI.amarelo }}>
-                  <span>🚚</span>
-                  <span>P2M · Líq: {metas.p2mLiq} · Vol: {metas.p2mVol.toLocaleString('pt-BR')} · Oc: {metas.ocupMeta}%</span>
-                </div>
-              )}
-            </div>
+          <div className={`grid grid-cols-1 ${temCheckin && temP2M ? 'md:grid-cols-2' : ''} gap-3 mb-5`}>
+            {temCheckin && <CardMetas tipo="CK" qtd={checkins.length} />}
+            {temP2M && <CardMetas tipo="P2M" qtd={p2ms.length} />}
           </div>
         )}
         {linhasUnificadas.length > 0 ? (
@@ -774,7 +793,7 @@ export default function BoletimPage() {
             {dividirEm2Colunas && setoresAtivos[0] === 'P2M' ? (
               /* SÓ P2M COM 15+ → 2 COLUNAS */
               <div className="bg-white rounded-xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}` }}>
-                <BarraSetor tipo="P2M" qtd={p2ms.length} />
+                <BarraTabela tipo="P2M" />
                 <div className="grid grid-cols-2 gap-0">
                   {(() => {
                     const [primeira, segunda] = dividirEmDuas(p2ms);
@@ -800,7 +819,7 @@ export default function BoletimPage() {
             ) : dividirEm2Colunas && setoresAtivos[0] === 'CK' ? (
               /* SÓ CHECKIN COM 15+ → 2 COLUNAS */
               <div className="bg-white rounded-xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}` }}>
-                <BarraSetor tipo="CK" qtd={checkins.length} />
+                <BarraTabela tipo="CK" />
                 <div className="grid grid-cols-2 gap-0">
                   {(() => {
                     const [primeira, segunda] = dividirEmDuas(checkins);
@@ -828,7 +847,7 @@ export default function BoletimPage() {
               <div className={`grid grid-cols-1 ${temCheckin && temP2M ? 'lg:grid-cols-2' : ''} gap-4`}>
                 {temCheckin && (
                   <div className="bg-white rounded-xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}` }}>
-                    <BarraSetor tipo="CK" qtd={checkins.length} />
+                    <BarraTabela tipo="CK" />
                     <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                       <HeaderCK />
                       <tbody>
@@ -839,7 +858,7 @@ export default function BoletimPage() {
                 )}
                 {temP2M && (
                   <div className="bg-white rounded-xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}` }}>
-                    <BarraSetor tipo="P2M" qtd={p2ms.length} />
+                    <BarraTabela tipo="P2M" />
                     <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                       <HeaderP2M />
                       <tbody>
