@@ -5,14 +5,13 @@
 // - O que funcionou (sucesso)
 // - O que não funcionou (falha)
 // - Padrões do seu time específico
+// 🆕 Agora também lê OCUPAÇÃO (ocupacao_p2m) e IMA (ima_manual)
+//    e usa CICLO DE FEEDBACK configurável (config: ciclo_feedback_dias)
 // ============================================
-
 import { createClient } from '@supabase/supabase-js';
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
-
 function calcularMesesEntreDatas(dataInicio: string | null): number {
   if (!dataInicio) return 0;
   try {
@@ -25,7 +24,6 @@ function calcularMesesEntreDatas(dataInicio: string | null): number {
     return 0;
   }
 }
-
 function analisarTendencia(valores: number[]): {
   tendencia: 'subindo' | 'estavel' | 'caindo' | 'sem_dados';
   variacao_pct: number;
@@ -55,7 +53,6 @@ function analisarTendencia(valores: number[]): {
   
   return { tendencia, variacao_pct: Number(variacao.toFixed(1)), forca };
 }
-
 function detectarPadroes(historicoColab: any[]): {
   cai_segunda: boolean;
   cai_sexta: boolean;
@@ -93,7 +90,6 @@ function detectarPadroes(historicoColab: any[]): {
   
   return { cai_segunda, cai_sexta, consistente, volatil, variancia: Number(coefVariacao.toFixed(1)) };
 }
-
 // ============================================
 // 🧠 ANALISA APRENDIZADO DAS TAREFAS PASSADAS
 // ============================================
@@ -188,11 +184,9 @@ function analisarAprendizado(tarefasPassadas: any[]): {
     historicoDetalhado,
   };
 }
-
 // ============================================
 // FUNÇÃO PRINCIPAL
 // ============================================
-
 export async function coletarContextoCompleto(): Promise<{
   colabs: any[];
   metas: Record<string, number>;
@@ -212,6 +206,13 @@ export async function coletarContextoCompleto(): Promise<{
   });
   
   const metaDiariaIA = metas['limite_tarefas_pendentes'] || 2;
+  // 🆕 Ciclo de feedback: a cada X dias um colab volta a ser elegível (default 6)
+  const cicloFeedbackDias = metas['ciclo_feedback_dias'] || 6;
+  // 🆕 Metas de ocupação e IMA (por processo)
+  const metaOcupP2M = metas['meta_ocupacao_p2m'] || 80;
+  const metaOcupCheckin = metas['meta_ocupacao_checkin'] || 75;
+  const metaImaP2M = metas['meta_ima_p2m'] || 1567;
+  const metaImaCheckin = metas['meta_ima_checkin'] || 1567;
   
   const hoje = new Date().toISOString().split('T')[0];
   
@@ -285,7 +286,7 @@ export async function coletarContextoCompleto(): Promise<{
     podeGerar: false, vagasHoje: 0, saudeTime: null, dataAtual, aprendizado,
   };
   
-  const idsGroot = colabsData.map(c => c.id_groot);
+  const idsGroot = colabsData.map((c: any) => c.id_groot);
   
   const trimestreAtual = Math.ceil(mesAtual / 3);
   const inicioQuarter = `${anoAtual}-${String((trimestreAtual - 1) * 3 + 1).padStart(2, '0')}-01`;
@@ -298,6 +299,7 @@ export async function coletarContextoCompleto(): Promise<{
     { data: produtividadeMensalData },
     { data: presencaData },
     { data: imaData },
+    { data: ocupacaoData },
     { data: calibracoesData },
     { data: tarefasPendentesData },
     { data: tarefasRecentesData },
@@ -308,7 +310,9 @@ export async function coletarContextoCompleto(): Promise<{
     supabase.from('historico').select('*').in('id_groot', idsGroot).gte('data_referencia', dias90atras),
     supabase.from('produtividade_mensal').select('*').in('id_groot', idsGroot).order('ano', { ascending: false }).order('mes', { ascending: false }),
     supabase.from('presenca').select('*').in('id_groot', idsGroot).gte('data_referencia', dias90atras).neq('status', 'descartado'),
-    supabase.from('ima_manual').select('*').in('id_groot', idsGroot).order('data_avaliacao', { ascending: false }),
+    supabase.from('ima_manual').select('*').in('id_groot', idsGroot).order('ano', { ascending: false }).order('mes', { ascending: false }),
+    // 🆕 OCUPAÇÃO (ocupacao_p2m) — últimos 30 dias
+    supabase.from('ocupacao_p2m').select('id_groot, data_referencia, ocupacao_pct, qtd_totes').in('id_groot', idsGroot).gte('data_referencia', dias30atras).order('data_referencia', { ascending: false }),
     supabase.from('calibracoes').select('*').in('id_groot', idsGroot).order('criado_em', { ascending: false }),
     supabase.from('tarefas').select('id_groot').eq('status', 'Pendente'),
     supabase.from('tarefas').select('id_groot, criado_em, status, tipo, diagnostico').gte('criado_em', dias14atras),
@@ -340,6 +344,20 @@ export async function coletarContextoCompleto(): Promise<{
   (presencaData || []).forEach((p: any) => {
     if (!mapaPresenca[p.id_groot]) mapaPresenca[p.id_groot] = [];
     mapaPresenca[p.id_groot].push(p);
+  });
+  
+  // 🆕 Mapa de IMA (ima_manual, mensal) — já ordenado por ano/mes desc
+  const mapaIma: Record<string, any[]> = {};
+  (imaData || []).forEach((i: any) => {
+    if (!mapaIma[i.id_groot]) mapaIma[i.id_groot] = [];
+    mapaIma[i.id_groot].push(i);
+  });
+  
+  // 🆕 Mapa de OCUPAÇÃO (ocupacao_p2m, diário) — já ordenado por data desc
+  const mapaOcupacao: Record<string, any[]> = {};
+  (ocupacaoData || []).forEach((o: any) => {
+    if (!mapaOcupacao[o.id_groot]) mapaOcupacao[o.id_groot] = [];
+    mapaOcupacao[o.id_groot].push(o);
   });
   
   const mapaCalibracoes: Record<string, any[]> = {};
@@ -388,6 +406,8 @@ export async function coletarContextoCompleto(): Promise<{
     const tarefasRec = mapaTarefasRecentes[c.id_groot] || [];
     const calibracoes = mapaCalibracoes[c.id_groot] || [];
     const aprendizadoColab = mapaAprendizadoColab[c.id_groot] || [];
+    const imasColab = mapaIma[c.id_groot] || [];
+    const ocupacoesColab = mapaOcupacao[c.id_groot] || [];
     
     const historico7d = historicoColab.filter(h => 
       h.data_referencia >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
@@ -407,12 +427,69 @@ export async function coletarContextoCompleto(): Promise<{
     const padroes = detectarPadroes(historico30d);
     
     // mensaisColab já vem ordenado por ano desc, mes desc.
-    // Prefere o mês corrente; se ainda não lançou, usa o mês mais recente com >=5 dias;
-    // por último, o registro mais recente que existir (evita cair em "nenhum" à toa).
     const mensalDoMesCorrente = mensaisColab.find(p => p.mes === mesAtual && p.ano === anoAtual);
     const mensalRepresentativo = mensaisColab.find(p => (Number(p.dias_trabalhados) || 0) >= 5);
     const mensalAtual = mensalDoMesCorrente || mensalRepresentativo || mensaisColab[0] || null;
     const historicoMensal = mensaisColab.slice(0, 3);
+    
+    // ============================================
+    // 🆕 OCUPAÇÃO (só P2M tem dados na tabela ocupacao_p2m)
+    // ============================================
+    const metaOcup = c.processo === 'P2M' ? metaOcupP2M : metaOcupCheckin;
+    const ocupValores = ocupacoesColab.map((o: any) => Number(o.ocupacao_pct) || 0).filter(v => v > 0);
+    const ocupValores7d = ocupacoesColab
+      .filter((o: any) => o.data_referencia >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+      .map((o: any) => Number(o.ocupacao_pct) || 0).filter(v => v > 0);
+    const ocupMedia30d = ocupValores.length > 0 ? ocupValores.reduce((s, v) => s + v, 0) / ocupValores.length : 0;
+    const ocupMedia7d = ocupValores7d.length > 0 ? ocupValores7d.reduce((s, v) => s + v, 0) / ocupValores7d.length : 0;
+    // tendência de ocupação: valores em ordem cronológica (reverte, pois vêm desc)
+    const ocupCronologico = [...ocupValores].reverse();
+    const ocupTendencia = analisarTendencia(ocupCronologico);
+    const temOcupacao = ocupValores.length > 0;
+    // classificação ocupação: dentro (>= meta) / fora (< meta)
+    const ocupStatus: 'dentro' | 'fora' | 'sem_dados' = !temOcupacao ? 'sem_dados' : (ocupMedia30d >= metaOcup ? 'dentro' : 'fora');
+    
+    const ocupacaoInfo = {
+      tem: temOcupacao,
+      media7d: Math.round(ocupMedia7d * 10) / 10,
+      media30d: Math.round(ocupMedia30d * 10) / 10,
+      meta: metaOcup,
+      status: ocupStatus,
+      tendencia: ocupTendencia,
+      dias: ocupValores.length,
+    };
+    
+    // ============================================
+    // 🆕 IMA / QUALIDADE (ima_manual, mensal — MENOR é melhor)
+    // ============================================
+    const metaIma = c.processo === 'P2M' ? metaImaP2M : metaImaCheckin;
+    const imaAtualReg = imasColab.find((i: any) => i.mes === mesAtual && i.ano === anoAtual) || imasColab[0] || null;
+    const imaAtualValor = imaAtualReg ? Number(imaAtualReg.ima) || 0 : 0;
+    const imaAnteriorReg = imasColab[1] || null;
+    const imaAnteriorValor = imaAnteriorReg ? Number(imaAnteriorReg.ima) || 0 : 0;
+    const temIma = imaAtualValor > 0;
+    // IMA: MENOR é melhor. dentro (<= meta) / fora (> meta)
+    const imaStatus: 'dentro' | 'fora' | 'sem_dados' = !temIma ? 'sem_dados' : (imaAtualValor <= metaIma ? 'dentro' : 'fora');
+    // tendência IMA: como MENOR é melhor, se subiu = piorou
+    let imaTendencia: 'melhorou' | 'piorou' | 'estavel' | 'sem_dados' = 'sem_dados';
+    let imaVariacaoPct = 0;
+    if (temIma && imaAnteriorValor > 0) {
+      imaVariacaoPct = Number((((imaAtualValor - imaAnteriorValor) / imaAnteriorValor) * 100).toFixed(1));
+      if (imaVariacaoPct > 3) imaTendencia = 'piorou';       // subiu = pior
+      else if (imaVariacaoPct < -3) imaTendencia = 'melhorou'; // caiu = melhor
+      else imaTendencia = 'estavel';
+    }
+    
+    const imaInfo = {
+      tem: temIma,
+      atual: imaAtualValor,
+      anterior: imaAnteriorValor,
+      meta: metaIma,
+      status: imaStatus,
+      tendencia: imaTendencia,
+      variacao_pct: imaVariacaoPct,
+      mesRef: imaAtualReg ? `${imaAtualReg.mes}/${imaAtualReg.ano}` : null,
+    };
     
     const presencaStats = {
       presencas: 0, atestados: 0, faltasInjustificadas: 0,
@@ -500,9 +577,18 @@ export async function coletarContextoCompleto(): Promise<{
       };
     }
     
+    // ============================================
+    // 🆕 CICLO DE FEEDBACK CONFIGURÁVEL (substitui bloqueio fixo de 14 dias)
+    // Elegível quando: nunca recebeu feedback OU já passou do ciclo desde
+    // o último feedback. E sem tarefa pendente aberta.
+    // ============================================
     const temTarefaPendente = (mapaTarefasPendentes[c.id_groot] || 0) > 0;
-    const tarefasRecentesPessoa = tarefasRec.length;
-    const podeSerSugerido = !temTarefaPendente && tarefasRecentesPessoa === 0;
+    const diasDesdeUltimoFeedback = ultimoFeedback
+      ? Math.floor((Date.now() - new Date(ultimoFeedback.registrado_em).getTime()) / (1000 * 60 * 60 * 24))
+      : 9999; // nunca recebeu = muito tempo
+    const cicloVenceu = diasDesdeUltimoFeedback >= cicloFeedbackDias;
+    // elegível: sem tarefa pendente E (nunca recebeu feedback OU o ciclo venceu)
+    const podeSerSugerido = !temTarefaPendente && cicloVenceu;
     
     const feedbacksUltimos90d = feedbacksHist.length;
     const feedbacksConstrutivos = feedbacksHist.filter(f => f.tipo === 'Construtivo').length;
@@ -512,7 +598,7 @@ export async function coletarContextoCompleto(): Promise<{
     const nuncaReceberFeedback = feedbacksUltimos90d === 0;
     const desbalanceadoConstrutivo = feedbacksConstrutivos >= 3 && feedbacksReconhecimento === 0;
     
-    const calibracoesPassadas = calibracoes.slice(0, 3).map(c => ({
+    const calibracoesPassadas = calibracoes.slice(0, 3).map((c: any) => ({
       classificacao: c.classificacao, data: c.criado_em,
     }));
     
@@ -579,6 +665,10 @@ export async function coletarContextoCompleto(): Promise<{
         fonteDados,
       },
       
+      // 🆕 OCUPAÇÃO e IMA no contexto do colab
+      ocupacao: ocupacaoInfo,
+      ima: imaInfo,
+      
       padroes,
       presenca: presencaStats,
       
@@ -589,6 +679,14 @@ export async function coletarContextoCompleto(): Promise<{
       },
       
       acompanhamento,
+      
+      // 🆕 info do ciclo (útil pro prompt e pros painéis)
+      cicloFeedback: {
+        diasDesdeUltimo: diasDesdeUltimoFeedback === 9999 ? null : diasDesdeUltimoFeedback,
+        ciclo: cicloFeedbackDias,
+        venceu: cicloVenceu,
+        nunca: !ultimoFeedback,
+      },
       
       memoria: {
         feedbacksUltimos90d, feedbacksConstrutivos, feedbacksReconhecimento,
@@ -608,32 +706,69 @@ export async function coletarContextoCompleto(): Promise<{
       
       tarefasPendentes: mapaTarefasPendentes[c.id_groot] || 0,
       podeSerSugerido,
-      tarefasRecentes14d: tarefasRecentesPessoa,
+      tarefasRecentes14d: tarefasRec.length,
     };
   });
+  
+  // helpers de classificação pros painéis
+  const metaBaseProc = (p: string): number =>
+    p === 'P2M' ? (metas['meta_p2m_base'] || 329) : (metas['meta_checkin_base'] || 296);
+  const metaMaxProc = (p: string): number =>
+    p === 'P2M' ? (metas['meta_p2m_alinhado_max'] || 350) : (metas['meta_checkin_alinhado_max'] || 310);
+  const mediaLiq = (c: any): number =>
+    Number(c?.performance?.medio_prazo_30d?.media) ||
+    Number(c?.performance?.mensal_atual?.liquida) ||
+    Number(c?.performance?.curto_prazo_7d?.media) || 0;
   
   const saudeTime = {
     total: colabs.length,
     performance: {
-      acimaMetaP2M: colabs.filter(c => c.processo === 'P2M' && c.performance.medio_prazo_30d.media >= (metas['meta_p2m_base'] || 329)).length,
-      acimaMetaCheckin: colabs.filter(c => c.processo === 'Checkin' && c.performance.medio_prazo_30d.media >= (metas['meta_checkin_base'] || 296)).length,
-      caindoTodos: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo').length,
-      subindo: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'subindo').length,
+      acimaMetaP2M: colabs.filter((c: any) => c.processo === 'P2M' && c.performance.medio_prazo_30d.media >= (metas['meta_p2m_base'] || 329)).length,
+      acimaMetaCheckin: colabs.filter((c: any) => c.processo === 'Checkin' && c.performance.medio_prazo_30d.media >= (metas['meta_checkin_base'] || 296)).length,
+      caindoTodos: colabs.filter((c: any) => c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo').length,
+      subindo: colabs.filter((c: any) => c.performance.medio_prazo_30d.tendencia.tendencia === 'subindo').length,
+    },
+    // ============================================
+    // 🆕 PAINÉIS: Líquida (ofensor/alinhado/supera), Ocupação (dentro/fora), IMA (dentro/fora)
+    // ============================================
+    paineis: {
+      liquida: {
+        ofensor: colabs.filter((c: any) => { const m = mediaLiq(c); return m > 0 && m < metaBaseProc(c.processo); }).length,
+        alinhado: colabs.filter((c: any) => { const m = mediaLiq(c); return m >= metaBaseProc(c.processo) && m <= metaMaxProc(c.processo); }).length,
+        supera: colabs.filter((c: any) => { const m = mediaLiq(c); return m > metaMaxProc(c.processo); }).length,
+        semDados: colabs.filter((c: any) => mediaLiq(c) === 0).length,
+      },
+      ocupacao: {
+        dentro: colabs.filter((c: any) => c.ocupacao.status === 'dentro').length,
+        fora: colabs.filter((c: any) => c.ocupacao.status === 'fora').length,
+        semDados: colabs.filter((c: any) => c.ocupacao.status === 'sem_dados').length,
+        // listas (nome + valor) pra facilitar o painel
+        listaFora: colabs.filter((c: any) => c.ocupacao.status === 'fora').map((c: any) => ({ nome: c.nome, processo: c.processo, valor: c.ocupacao.media30d, meta: c.ocupacao.meta })),
+      },
+      ima: {
+        dentro: colabs.filter((c: any) => c.ima.status === 'dentro').length,
+        fora: colabs.filter((c: any) => c.ima.status === 'fora').length,
+        semDados: colabs.filter((c: any) => c.ima.status === 'sem_dados').length,
+        listaFora: colabs.filter((c: any) => c.ima.status === 'fora').map((c: any) => ({ nome: c.nome, processo: c.processo, valor: c.ima.atual, meta: c.ima.meta })),
+      },
     },
     alertas: {
-      muitasQuedasJuntas: colabs.filter(c => c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo').length >= 5,
-      atestadosEmAlta: colabs.filter(c => c.presenca.tendenciaAtestados === 'subindo').length >= 3,
-      burnoutColetivo: colabs.filter(c => c.burnout.pontuacao >= 2).length >= 3,
+      muitasQuedasJuntas: colabs.filter((c: any) => c.performance.medio_prazo_30d.tendencia.tendencia === 'caindo').length >= 5,
+      atestadosEmAlta: colabs.filter((c: any) => c.presenca.tendenciaAtestados === 'subindo').length >= 3,
+      burnoutColetivo: colabs.filter((c: any) => c.burnout.pontuacao >= 2).length >= 3,
+      // 🆕 alertas de ocupação e IMA
+      ocupacaoBaixaColetiva: colabs.filter((c: any) => c.ocupacao.status === 'fora').length >= 5,
+      imaAltoColetivo: colabs.filter((c: any) => c.ima.status === 'fora').length >= 5,
     },
     distribuicaoFeedback: {
-      semFeedback90d: colabs.filter(c => c.memoria.feedbacksUltimos90d === 0).length,
-      poucoConstrutivos: colabs.filter(c => c.memoria.feedbacksConstrutivos === 0 && c.performance.medio_prazo_30d.media > 0).length,
-      poucoReconhecimentos: colabs.filter(c => c.memoria.feedbacksReconhecimento === 0).length,
+      semFeedback90d: colabs.filter((c: any) => c.memoria.feedbacksUltimos90d === 0).length,
+      poucoConstrutivos: colabs.filter((c: any) => c.memoria.feedbacksConstrutivos === 0 && c.performance.medio_prazo_30d.media > 0).length,
+      poucoReconhecimentos: colabs.filter((c: any) => c.memoria.feedbacksReconhecimento === 0).length,
     },
     oportunidades: {
-      prontosPromocao: colabs.filter(c => c.carreira_info.podePromover).length,
-      consistentesSilenciosos: colabs.filter(c => c.reconhecimentoInvisivel.consistenteSilencioso).length,
-      evolucoesInvisiveis: colabs.filter(c => c.reconhecimentoInvisivel.evolucaoSilenciosa).length,
+      prontosPromocao: colabs.filter((c: any) => c.carreira_info.podePromover).length,
+      consistentesSilenciosos: colabs.filter((c: any) => c.reconhecimentoInvisivel.consistenteSilencioso).length,
+      evolucoesInvisiveis: colabs.filter((c: any) => c.reconhecimentoInvisivel.evolucaoSilenciosa).length,
     },
   };
   
