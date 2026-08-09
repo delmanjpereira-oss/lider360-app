@@ -403,8 +403,8 @@ export default function BoletimPage() {
         <div className="flex items-center" style={{ paddingTop: '10px', paddingBottom: '10px', paddingLeft: '16px', paddingRight: '16px', backgroundColor: MELI.azul, gap: '10px' }}>
           <span style={{ fontSize: '22px', height: '26px', lineHeight: '26px', display: 'inline-block' }}>{icone}</span>
           <span className="font-black" style={{ fontSize: '18px', color: MELI.amarelo, letterSpacing: '0.03em', height: '26px', lineHeight: '26px', display: 'inline-block' }}>{nome}</span>
-          <span className="rounded-full font-black" style={{ marginLeft: 'auto', backgroundColor: 'rgba(255,255,255,0.12)', paddingLeft: '14px', paddingRight: '14px', height: '26px', lineHeight: '26px', display: 'inline-block', whiteSpace: 'nowrap', fontSize: '13px', color: '#fff' }}>
-            👥&nbsp;{qtd}<span style={{ color: 'rgba(255,255,255,0.65)', fontWeight: 700 }}>&nbsp;colabs</span>
+          <span className="font-black" style={{ marginLeft: 'auto', height: '26px', lineHeight: '26px', display: 'inline-block', whiteSpace: 'nowrap', fontSize: '14px', color: '#fff' }}>
+            👥&nbsp;{qtd}<span style={{ color: MELI.amarelo, fontWeight: 700 }}>&nbsp;colabs</span>
           </span>
         </div>
         <div className="flex" style={{ padding: '12px', gap: '8px' }}>
