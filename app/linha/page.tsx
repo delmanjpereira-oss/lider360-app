@@ -36,18 +36,18 @@ function tipoEFixoAutomatico(tipo: string): boolean {
 }
 function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
   if (liquida == null || liquida === 0) {
-    return { status: 'sem_dado' as const, texto: 'lm-text-soft', borda: 'lm-border-mid', bg: 'lm-sunken', emoji: '⚪', label: 'Sem dado' };
+    return { status: 'sem_dado' as const, texto: 'text-gray-400', borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', emoji: '⚪', label: 'Sem dado' };
   }
-  if (liquida < metas.p2m_base) return { status: 'ofensor' as const, texto: 'text-red-600', borda: 'border-red-300', bg: 'bg-red-50', emoji: '🔴', label: 'Ofensor' };
-  if (liquida <= metas.p2m_alinhado_max) return { status: 'alinhado' as const, texto: 'text-blue-600', borda: 'border-blue-300', bg: 'bg-blue-50', emoji: '🔵', label: 'Alinhado' };
-  return { status: 'supera' as const, texto: 'text-green-600', borda: 'border-green-300', bg: 'bg-green-50', emoji: '🟢', label: 'Supera' };
+  if (liquida < metas.p2m_base) return { status: 'ofensor' as const, texto: 'text-red-400', borda: 'border-red-500/50', bg: 'bg-red-500/10', emoji: '🔴', label: 'Ofensor' };
+  if (liquida <= metas.p2m_alinhado_max) return { status: 'alinhado' as const, texto: 'text-blue-400', borda: 'border-blue-500/50', bg: 'bg-blue-500/10', emoji: '🔵', label: 'Alinhado' };
+  return { status: 'supera' as const, texto: 'text-green-400', borda: 'border-green-500/50', bg: 'bg-green-500/10', emoji: '🟢', label: 'Supera' };
 }
 function corRitmoLinha(pct: number, metas: MetasConfig) {
-  if (pct === 0) return { texto: 'lm-text-soft', emoji: '⚪', label: 'Sem dados' };
-  if (pct < 90) return { texto: 'text-red-600', emoji: '🔴', label: 'Ofensor' };
-  if (pct < 100) return { texto: 'text-amber-600', emoji: '🟡', label: 'Bom ritmo' };
-  if (pct <= 106) return { texto: 'text-blue-600', emoji: '🔵', label: 'Alinhado' };
-  return { texto: 'text-green-600', emoji: '🟢', label: 'Supera' };
+  if (pct === 0) return { texto: 'text-gray-400', emoji: '⚪', label: 'Sem dados' };
+  if (pct < 90) return { texto: 'text-red-400', emoji: '🔴', label: 'Ofensor' };
+  if (pct < 100) return { texto: 'text-yellow-400', emoji: '🟡', label: 'Bom ritmo' };
+  if (pct <= 106) return { texto: 'text-blue-400', emoji: '🔵', label: 'Alinhado' };
+  return { texto: 'text-green-400', emoji: '🟢', label: 'Supera' };
 }
 function iniciais(nome: string) {
   const p = nome.trim().split(/\s+/);
@@ -56,19 +56,13 @@ function iniciais(nome: string) {
 }
 function corTipo(tipo: string) {
   switch (tipo) {
-    case 'GM': return { hex: '#F5C518', text: 'text-amber-600', bgSoft: '#FEF6D9' };
-    case 'PESCA': return { hex: '#2D6BE8', text: 'text-blue-600', bgSoft: '#E7EEFD' };
-    case 'CATEGORIA': return { hex: '#8B3FE8', text: 'text-purple-600', bgSoft: '#F1E8FD' };
-    default: return { hex: '#8A93A0', text: 'lm-text-soft', bgSoft: '#EEF1F5' };
+    case 'GM': return { hex: '#FFD700', text: 'text-yellow-400' };
+    case 'PESCA': return { hex: '#3b82f6', text: 'text-blue-400' };
+    case 'CATEGORIA': return { hex: '#a855f7', text: 'text-purple-400' };
+    default: return { hex: '#6b7280', text: 'text-gray-400' };
   }
 }
 function primeiroNome(nome: string) { return nome.trim().split(/\s+/)[0]; }
-// 📸 Nome pro PNG: primeiro nome + primeiro sobrenome (ex "Isabella Martins")
-function nomeCompletoPrint(colab: { nome: string }): string {
-  const partes = colab.nome.trim().split(/\s+/);
-  if (partes.length === 1) return partes[0];
-  return partes[0] + ' ' + partes[1];
-}
 // 🏷️ Desambigua nomes: se vários colabs compartilham o primeiro nome,
 // retorna "Victor J.P." em vez de só "Victor"
 function nomeExibido(colab: { id_groot: string; nome: string }, todos: { id_groot: string; nome: string }[]): string {
@@ -84,64 +78,31 @@ function nomeExibido(colab: { id_groot: string; nome: string }, todos: { id_groo
   return primeiro + ' ' + iniciaisSobrenome;
 }
 const STYLES = `
-  :root {
-    --bg-app: #F7F8FA;
-    --bg-surface: #FFFFFF;
-    --bg-surface-2: #FBFCFD;
-    --bg-sunken: #EEF1F5;
-    --border-soft: #E3E7EC;
-    --border-mid: #D2D8E0;
-    --text-strong: #1A1D23;
-    --text-mid: #4B5563;
-    --text-soft: #8A93A0;
-    --meli-yellow: #F5C518;
-    --meli-yellow-soft: #FEF6D9;
-    --blue: #2D6BE8;
-    --blue-soft: #E7EEFD;
-    --purple: #8B3FE8;
-    --purple-soft: #F1E8FD;
-    --green: #16A34A;
-    --green-soft: #E4F6EB;
-    --red: #DC2626;
-    --red-soft: #FCE9E9;
-    --shadow-card: 0 1px 2px rgba(16,24,40,0.04), 0 1px 3px rgba(16,24,40,0.08);
-    --shadow-lift: 0 8px 20px rgba(16,24,40,0.12);
-  }
-  .lm-app { background: var(--bg-app); color: var(--text-strong); }
-  .lm-surface { background: var(--bg-surface); }
-  .lm-surface-2 { background: var(--bg-surface-2); }
-  .lm-sunken { background: var(--bg-sunken); }
-  .lm-border { border-color: var(--border-soft); }
-  .lm-border-mid { border-color: var(--border-mid); }
-  .lm-text-strong { color: var(--text-strong); }
-  .lm-text-mid { color: var(--text-mid); }
-  .lm-text-soft { color: var(--text-soft); }
-  .lm-shadow { box-shadow: var(--shadow-card); }
-  @keyframes pulseGold { 0%, 100% { box-shadow: 0 0 0 0 rgba(245, 197, 24, 0.6), 0 0 20px rgba(245, 197, 24, 0.35); } 50% { box-shadow: 0 0 0 6px rgba(245, 197, 24, 0), 0 0 28px rgba(245, 197, 24, 0.5); } }
-  @keyframes pulseGreen { 0%, 100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.5); border-color: rgba(22, 163, 74, 0.5) !important; } 50% { box-shadow: 0 0 0 6px rgba(22, 163, 74, 0); border-color: rgba(22, 163, 74, 0.9) !important; } }
-  @keyframes successFlash { 0% { background: rgba(22, 163, 74, 0.28); } 50% { background: rgba(22, 163, 74, 0.1); } 100% { background: transparent; } }
-  @keyframes ghostFloat { 0%, 100% { opacity: 0.5; transform: translateY(0px); } 50% { opacity: 0.7; transform: translateY(-2px); } }
-  @keyframes synergyGlow { 0%, 100% { box-shadow: 0 0 8px rgba(245, 197, 24, 0.25); } 50% { box-shadow: 0 0 15px rgba(245, 197, 24, 0.45); } }
+  @keyframes pulseGold { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.9), 0 0 30px rgba(255, 215, 0, 0.6); } 50% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.8); } }
+  @keyframes pulseGreen { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); border-color: rgba(34, 197, 94, 0.6) !important; } 50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); border-color: rgba(34, 197, 94, 1) !important; } }
+  @keyframes successFlash { 0% { background: rgba(34, 197, 94, 0.4); } 50% { background: rgba(34, 197, 94, 0.15); } 100% { background: transparent; } }
+  @keyframes ghostFloat { 0%, 100% { opacity: 0.35; transform: translateY(0px); } 50% { opacity: 0.55; transform: translateY(-2px); } }
+  @keyframes synergyGlow { 0%, 100% { box-shadow: 0 0 8px rgba(255, 215, 0, 0.3); } 50% { box-shadow: 0 0 15px rgba(255, 215, 0, 0.5); } }
   @keyframes shakeError { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
   @keyframes slideIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
-  @keyframes pulseLine { 0%, 100% { opacity: 0.85; } 50% { opacity: 1; } }
+  @keyframes pulseLine { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
   @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
   @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(20px); } }
-  @keyframes floatPulse { 0%, 100% { transform: translateY(0px); filter: brightness(1); } 50% { transform: translateY(-3px); filter: brightness(1.06); } }
-  @keyframes shimmerGold { 0% { box-shadow: 0 0 0 0 rgba(245, 197, 24, 0); } 50% { box-shadow: 0 0 20px 2px rgba(245, 197, 24, 0.35); } 100% { box-shadow: 0 0 0 0 rgba(245, 197, 24, 0); } }
-  .card-ativo { animation: pulseGold 1.2s ease-in-out infinite !important; border-color: var(--meli-yellow) !important; border-width: 2px !important; outline: 2px solid var(--meli-yellow) !important; outline-offset: 2px !important; z-index: 50; position: relative; }
+  @keyframes floatPulse { 0%, 100% { transform: translateY(0px); filter: brightness(1); } 50% { transform: translateY(-3px); filter: brightness(1.15); } }
+  @keyframes shimmerGold { 0% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); } 50% { box-shadow: 0 0 20px 2px rgba(255, 215, 0, 0.4); } 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); } }
+  .card-ativo { animation: pulseGold 1.2s ease-in-out infinite !important; border-color: #FFD700 !important; border-width: 2px !important; outline: 2px solid #FFD700 !important; outline-offset: 2px !important; z-index: 50; position: relative; }
   .bancada-compativel { animation: pulseGreen 1s ease-in-out infinite; cursor: pointer !important; }
   .bancada-encaixe { animation: successFlash 0.5s ease-out; }
   .bancada-erro { animation: shakeError 0.3s ease-in-out; }
-  .card-sinergia { animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite; background: var(--meli-yellow-soft) !important; border: 2px dashed var(--meli-yellow) !important; position: relative; overflow: hidden; }
-  .card-sinergia::after { content: 'SINERGIA'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); font-size: 7px; font-weight: 900; color: rgba(180, 140, 10, 0.5); letter-spacing: 1px; pointer-events: none; white-space: nowrap; }
-  .card-temporario { border-color: var(--meli-yellow) !important; border-style: dashed !important; box-shadow: 0 0 6px rgba(245, 197, 24, 0.25); }
+  .card-sinergia { animation: ghostFloat 2.5s ease-in-out infinite, synergyGlow 2s ease-in-out infinite; background: rgba(255, 215, 0, 0.08) !important; border: 2px dashed #FFD700 !important; position: relative; overflow: hidden; }
+  .card-sinergia::after { content: 'SINERGIA'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); font-size: 7px; font-weight: 900; color: rgba(255, 215, 0, 0.5); letter-spacing: 1px; pointer-events: none; white-space: nowrap; }
+  .card-temporario { border-color: #FFD700 !important; border-style: dashed !important; box-shadow: 0 0 6px rgba(255, 215, 0, 0.2); }
   .card-hover { transition: all 0.15s ease; }
-  .card-hover:hover { transform: scale(1.05); box-shadow: var(--shadow-lift); z-index: 10; }
+  .card-hover:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
   .card-arrastando { opacity: 0.4; }
-  .nome-linha-input { background: transparent; border: none; outline: 1px solid var(--meli-yellow); color: var(--text-strong); font-size: 12px; font-weight: bold; text-align: center; width: 100%; padding: 2px 4px; border-radius: 3px; }
-  .nome-linha-display { cursor: pointer; transition: all 0.15s ease; padding: 2px 8px; border-radius: 4px; }
-  .nome-linha-display:hover { background: var(--meli-yellow-soft); }
+  .nome-linha-input { background: transparent; border: none; outline: 1px solid #FFD700; color: #FFD700; font-size: 10px; font-weight: bold; text-align: center; width: 100%; padding: 2px 4px; border-radius: 3px; }
+  .nome-linha-display { cursor: pointer; transition: all 0.15s ease; padding: 2px 6px; border-radius: 3px; }
+  .nome-linha-display:hover { background: rgba(255, 215, 0, 0.1); color: #FFD700; }
   .badge-fixo { animation: synergyGlow 2s ease-in-out infinite; }
   .slide-in { animation: slideIn 0.3s ease-out; }
   .ritmo-linha-pulse { animation: pulseLine 2s ease-in-out infinite; }
@@ -150,12 +111,6 @@ const STYLES = `
   [data-flip-key] { will-change: transform; transition: transform 700ms cubic-bezier(0.34, 1.56, 0.64, 1); }
   .flip-animating [data-flip-key] { animation: floatPulse 700ms ease-in-out, shimmerGold 700ms ease-out; }
   .flip-flash { animation: shimmerGold 800ms ease-out; }
-  .bancada-card { background: var(--bg-surface); box-shadow: var(--shadow-card); transition: all 0.18s ease; }
-  .bancada-card:hover { box-shadow: 0 4px 10px rgba(16,24,40,0.1); }
-  .esteira-belt { background-image: repeating-linear-gradient(45deg, #C6CDD6 0px, #C6CDD6 9px, #D9DEE5 9px, #D9DEE5 18px); border: 1px solid var(--border-mid); box-shadow: inset 0 2px 4px rgba(16,24,40,0.08); }
-  .btn-soft { transition: all 0.15s ease; }
-  .btn-soft:hover { transform: translateY(-1px); }
-  .btn-soft:active { transform: translateY(0) scale(0.98); }
 `;
 export default function LinhaPage() {
   const [colabs, setColabs] = useState<Colaborador[]>([]);
@@ -195,11 +150,11 @@ export default function LinhaPage() {
   function confirmar(msg: string, onConfirm: () => void) {
     setConfirmModal({ msg, onConfirm });
   }
-  // 📸 Tira print do mapa (sem líquida/ritmo/cores) e baixa como PNG
+  // 📸 Gera o PNG "Alocação Time DEL P2M" — layout de exportação próprio,
+  // bonito, alinhado (esquadro), identidade MELI, com reservas.
+  // NÃO fotografa a tela (que é preta); monta um container claro à parte.
   async function printarLayout() {
     setPrintando(true);
-    setModoPrint(true);
-    await new Promise((r) => setTimeout(r, 100));
     try {
       let html2canvas: any = (window as any).html2canvas;
       if (!html2canvas) {
@@ -212,14 +167,20 @@ export default function LinhaPage() {
         });
         html2canvas = (window as any).html2canvas;
       }
-      const alvo = document.getElementById('mapa-canvas');
-      if (!alvo) { toast('error', 'Mapa não encontrado'); return; }
-      const canvas = await html2canvas(alvo, {
+      const container = construirLayoutExportacao();
+      document.body.appendChild(container);
+      // espera imagens (logo) carregarem
+      await new Promise((r) => setTimeout(r, 250));
+      const canvas = await html2canvas(container, {
         backgroundColor: '#FFFFFF',
         scale: 2,
         logging: false,
         useCORS: true,
+        allowTaint: true,
+        windowWidth: container.scrollWidth,
+        windowHeight: container.scrollHeight,
       });
+      document.body.removeChild(container);
       const link = document.createElement('a');
       const dataStr = new Date().toLocaleDateString('pt-BR').replace(/[/:\s,]/g, '-');
       link.download = 'Alocacao-Time-DEL-P2M-' + dataStr + '.png';
@@ -227,11 +188,159 @@ export default function LinhaPage() {
       link.click();
       toast('success', '📸 PNG gerado');
     } catch (err: any) {
-      toast('error', 'Erro ao gerar print: ' + err.message);
+      toast('error', 'Erro ao gerar PNG: ' + err.message);
     } finally {
-      setModoPrint(false);
       setPrintando(false);
     }
+  }
+
+  // Monta o HTML do PNG de exportação (retorna um elemento pronto pra fotografar)
+  function construirLayoutExportacao(): HTMLElement {
+    const AZUL = '#2D3277';       // azul-marinho MELI
+    const AMARELO = '#FFE600';    // amarelo MELI
+    const nomePng = (c: { nome: string }) => {
+      const p = c.nome.trim().split(/\s+/);
+      return p.length === 1 ? p[0] : p[0] + ' ' + p[1];
+    };
+    const corDe = (tipo: string) => {
+      if (tipo === 'GM') return { faixa: '#F5C518', label: '#B8890B', soft: '#FFFBEB' };
+      if (tipo === 'PESCA') return { faixa: '#2D6BE8', label: '#1D4FB0', soft: '#EFF5FF' };
+      if (tipo === 'CATEGORIA') return { faixa: '#8B3FE8', label: '#6B27B8', soft: '#F7F0FF' };
+      return { faixa: '#9AA2AF', label: '#5B6472', soft: '#F5F6F8' };
+    };
+    // card de uma pessoa dentro de bancada
+    const cardPessoa = (nome: string) =>
+      `<div style="flex:1;min-width:0;background:#fff;border:1px solid #E3E7EC;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:4px 6px;min-height:44px;">
+        <span style="font-size:13px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.15;">${nome}</span>
+      </div>`;
+    // uma bancada (alinhada, altura uniforme)
+    const bancadaHTML = (b: Bancada) => {
+      const c = corDe(b.tipo_principal);
+      const ocupantes = alocacoes.filter((a) => a.bancada_id === b.id);
+      const nomes = ocupantes.map((a) => { const col = getColab(a.id_groot); return col ? nomePng(col) : null; }).filter(Boolean) as string[];
+      const isCat = b.tipo_principal === 'CATEGORIA';
+      const corpo = nomes.length === 0
+        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#B4BAC4;font-size:11px;font-style:italic;min-height:44px;">—</div>`
+        : (isCat
+            ? `<div style="display:flex;flex-direction:column;gap:5px;">${nomes.map(cardPessoa).join('')}</div>`
+            : `<div style="display:flex;gap:5px;">${nomes.map(cardPessoa).join('')}</div>`);
+      const sub = b.subtipo ? `<span style="font-size:9px;color:${c.label};font-weight:600;margin-left:4px;">· ${b.subtipo}</span>` : '';
+      return `<div style="width:150px;min-height:78px;background:${c.soft};border:1px solid #E3E7EC;border-top:4px solid ${c.faixa};border-radius:10px;box-shadow:0 1px 3px rgba(16,24,40,.08);padding:6px 7px;display:flex;flex-direction:column;box-sizing:border-box;">
+        <div style="margin-bottom:5px;"><span style="font-size:10px;font-weight:800;letter-spacing:.5px;color:${c.label};">${b.tipo_principal}</span>${sub}</div>
+        ${corpo}
+      </div>`;
+    };
+    // uma coluna de bancadas (SEM alinharFundo — tudo no topo = esquadro)
+    const colunaHTML = (linha: number, lado: string, qtd: number) => {
+      let slots = '';
+      for (let p = 1; p <= qtd; p++) {
+        const b = getBancada(linha, lado, p);
+        slots += b ? bancadaHTML(b) : `<div style="width:150px;min-height:78px;border:2px dashed #E3E7EC;border-radius:10px;box-sizing:border-box;"></div>`;
+      }
+      return `<div style="display:flex;flex-direction:column;gap:10px;">${slots}</div>`;
+    };
+    const esteiraHTML = (qtdMax: number) => {
+      const h = qtdMax * 78 + (qtdMax - 1) * 10;
+      return `<div style="width:46px;min-height:${h}px;border-radius:8px;border:1px solid #D2D8E0;background-image:repeating-linear-gradient(45deg,#C6CDD6 0,#C6CDD6 9px,#D9DEE5 9px,#D9DEE5 18px);box-shadow:inset 0 2px 4px rgba(16,24,40,.08);"></div>`;
+    };
+    // zona central (pesca/categoria)
+    const centralHTML = () => {
+      const cel = (linha: number, pos: number) => {
+        const b = bancadas.find((x) => x.linha === linha && x.lado === 'centro' && x.posicao === pos);
+        return b ? bancadaHTML(b) : `<div style="width:150px;min-height:78px;border:2px dashed #E3E7EC;border-radius:10px;box-sizing:border-box;"></div>`;
+      };
+      return `<div style="display:flex;flex-direction:column;align-items:center;">
+        <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#B8890B;text-transform:uppercase;margin-bottom:8px;">Zona Central</div>
+        <div style="border:2px dashed #D2D8E0;border-radius:12px;background:#FBFCFD;padding:14px;display:grid;grid-template-columns:150px 150px;gap:10px;">
+          ${cel(1,1)}${cel(2,1)}${cel(1,2)}${cel(2,2)}
+        </div>
+      </div>`;
+    };
+    // linha completa (nome + colunas + esteira)
+    const linhaHTML = (linha: number, nome: string, ladoDentro: string) => {
+      const qEsq = linha === 1 ? layout.L1_ESQ : layout.L2_ESQ;
+      const qDir = linha === 1 ? layout.L1_DIR : layout.L2_DIR;
+      const qMax = Math.max(qEsq, qDir);
+      // ordem visual: esquerda | esteira | direita (igual à tela)
+      return `<div style="display:flex;flex-direction:column;align-items:center;">
+        <div style="font-size:15px;font-weight:800;letter-spacing:2px;color:#1A1D23;text-transform:uppercase;margin-bottom:10px;">${nome}</div>
+        <div style="display:flex;gap:6px;align-items:flex-start;">
+          ${colunaHTML(linha,'esquerdo',qEsq)}
+          ${esteiraHTML(qMax)}
+          ${colunaHTML(linha,'direito',qDir)}
+        </div>
+      </div>`;
+    };
+    // RESERVAS (não alocados) — coluna à esquerda, como a "Livres"
+    const livresList = colabsLivres();
+    const reservasHTML = () => {
+      const cards = livresList.length === 0
+        ? `<div style="color:#B4BAC4;font-size:12px;font-style:italic;text-align:center;padding:12px 0;">Todos alocados</div>`
+        : livresList.map((c) =>
+            `<div style="background:#fff;border:1px solid #E3E7EC;border-radius:8px;padding:6px 9px;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+              <span style="width:6px;height:6px;border-radius:50%;background:${AMARELO};flex-shrink:0;"></span>
+              <span style="font-size:12px;font-weight:600;color:#1A1D23;">${nomePng(c)}</span>
+            </div>`).join('');
+      return `<div style="width:180px;flex-shrink:0;background:#F7F8FA;border:1px solid #E3E7EC;border-radius:12px;padding:12px;align-self:stretch;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <span style="font-size:12px;font-weight:800;letter-spacing:.5px;color:#5B6472;text-transform:uppercase;">🔄 Reservas</span>
+          <span style="font-size:11px;font-weight:800;color:#1A1D23;background:#fff;border:1px solid #E3E7EC;border-radius:6px;padding:1px 7px;">${livresList.length}</span>
+        </div>
+        ${cards}
+      </div>`;
+    };
+
+    const totalAlocados = alocacoes.length;
+    const dataExt = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+    wrap.innerHTML = `
+      <div style="width:1500px;background:#fff;">
+        <!-- HEADER MELI -->
+        <div style="background:${AZUL};padding:22px 28px;display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div style="width:64px;height:52px;background:${AMARELO};border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+              <img src="/logos/pngwing.com.png" style="width:56px;height:auto;" crossorigin="anonymous" />
+            </div>
+            <div>
+              <div style="font-size:26px;font-weight:800;color:#fff;line-height:1.1;">Alocação Time · <span style="color:${AMARELO};">DEL P2M</span></div>
+              <div style="font-size:13px;color:#C9CCE8;font-weight:500;margin-top:2px;text-transform:capitalize;">${dataExt}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <div style="background:rgba(255,255,255,.12);border-radius:10px;padding:8px 14px;text-align:center;">
+              <div style="font-size:22px;font-weight:800;color:#fff;line-height:1;">${totalAlocados}</div>
+              <div style="font-size:10px;color:#C9CCE8;text-transform:uppercase;letter-spacing:.5px;margin-top:2px;">Alocados</div>
+            </div>
+            <div style="background:rgba(255,255,255,.12);border-radius:10px;padding:8px 14px;text-align:center;">
+              <div style="font-size:22px;font-weight:800;color:${AMARELO};line-height:1;">${livresList.length}</div>
+              <div style="font-size:10px;color:#C9CCE8;text-transform:uppercase;letter-spacing:.5px;margin-top:2px;">Reservas</div>
+            </div>
+          </div>
+        </div>
+        <!-- LEGENDA -->
+        <div style="display:flex;gap:18px;padding:12px 28px;border-bottom:1px solid #EEF1F5;background:#FBFCFD;">
+          <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#5B6472;"><span style="width:13px;height:13px;border-radius:3px;background:#F5C518;"></span> GM</span>
+          <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#5B6472;"><span style="width:13px;height:13px;border-radius:3px;background:#2D6BE8;"></span> Pesca</span>
+          <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#5B6472;"><span style="width:13px;height:13px;border-radius:3px;background:#8B3FE8;"></span> Categoria</span>
+        </div>
+        <!-- CORPO -->
+        <div style="display:flex;gap:24px;padding:28px;align-items:flex-start;">
+          ${reservasHTML()}
+          <div style="flex:1;display:flex;gap:32px;align-items:flex-start;justify-content:space-around;">
+            ${linhaHTML(1, nomesLinhas.linha1, 'direito')}
+            ${centralHTML()}
+            ${linhaHTML(2, nomesLinhas.linha2, 'esquerdo')}
+          </div>
+        </div>
+        <!-- RODAPÉ -->
+        <div style="padding:14px 28px;border-top:1px solid #EEF1F5;background:#FBFCFD;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;font-weight:700;color:${AZUL};">LIDER 360</span>
+          <span style="font-size:11px;color:#8A93A0;">Gerado em ${new Date().toLocaleString('pt-BR')}</span>
+        </div>
+      </div>`;
+    return wrap.firstElementChild as HTMLElement;
   }
   useEffect(() => { carregarTudo(); }, []);
   useEffect(() => {
@@ -875,7 +984,7 @@ export default function LinhaPage() {
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[10px] font-bold ' + cor.texto + ' flex-shrink-0'}>{iniciais(c.nome)}</span>
-            <span className="text-[10px] lm-text-strong truncate">{nomeExibido(c, colabs)}</span>
+            <span className="text-[10px] text-white truncate">{nomeExibido(c, colabs)}</span>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
             {ritmo?.liquida != null && ritmo.liquida > 0 && (<span className={'text-[9px] font-bold ' + cor.texto}>{ritmo.liquida}</span>)}
@@ -915,14 +1024,14 @@ export default function LinhaPage() {
           className={'relative group ' + cor.borda + ' ' + cor.bg + ' border rounded px-2 py-1 flex items-center justify-between gap-2 transition-all slide-in cursor-grab active:cursor-grabbing card-hover flex-shrink-0' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={'text-[9px] font-bold ' + cor.texto}>{iniciais(c.nome)}</span>
-            <span className="text-[10px] lm-text-strong truncate">{modoPrint ? nomeCompletoPrint(c) : nomeExibido(c, colabs)}</span>
+            <span className="text-[10px] text-white truncate">{nomeExibido(c, colabs)}</span>
             {eFixoAqui && !modoPrint && <span className="text-[9px] badge-fixo" title="Fixo">📍</span>}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
-            {!modoPrint && (liquida != null && liquida > 0 ? (<span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>) : (<span className="lm-text-soft text-[10px]">—</span>))}
+            {!modoPrint && (liquida != null && liquida > 0 ? (<span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>) : (<span className="text-gray-600 text-[10px]">—</span>))}
             {!modoPrint && (
               <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
-                className="opacity-0 group-hover:opacity-100 transition lm-text-soft hover:text-red-400 text-[11px] leading-none ml-0.5"
+                className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5"
                 title="Remover">×</button>
             )}
           </div>
@@ -932,20 +1041,19 @@ export default function LinhaPage() {
     return (
       <div {...dragHandlers} title={titulo}
         data-flip-key={'colab-' + aloc.id_groot}
-        className={'relative group flex-1 h-full rounded-md border ' + (modoPrint ? 'lm-border' : cor.borda + ' ' + cor.bg) + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}
-        style={modoPrint ? { background: '#FFFFFF' } : undefined}>
+        className={'relative group flex-1 h-full rounded border ' + (modoPrint ? 'border-gray-700 bg-[#1a1a1a]' : cor.borda + ' ' + cor.bg) + ' flex flex-col items-center justify-center transition-all slide-in cursor-grab active:cursor-grabbing card-hover' + (isDragging ? ' card-arrastando' : '') + (isAtivo ? ' card-ativo' : '') + (eTemporario ? ' card-temporario' : '')}>
         {eFixoAqui && !modoPrint && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
         {modoPrint ? (
-          <span className="text-[10px] font-bold lm-text-strong text-center px-1 leading-tight">{nomeCompletoPrint(c)}</span>
+          <span className="text-[11px] font-bold text-white text-center px-1 leading-tight">{nomeExibido(c, colabs)}</span>
         ) : (
           <>
-            {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="lm-text-soft text-sm">—</span>)}
-            <span className="text-[7px] lm-text-soft mt-0.5">{nomeExibido(c, colabs)}</span>
+            {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="text-gray-600 text-sm">—</span>)}
+            <span className="text-[7px] text-gray-500 mt-0.5">{nomeExibido(c, colabs)}</span>
           </>
         )}
         {!modoPrint && (
           <button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }}
-            className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition lm-text-soft hover:text-red-400 text-[10px] leading-none"
+            className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none"
             title="Remover">×</button>
         )}
       </div>
@@ -984,10 +1092,9 @@ export default function LinhaPage() {
     if (!b) {
       return (
         <div onClick={() => criarBancadaGM(linha, lado, posicao)}
-          className="w-[140px] h-[78px] border-2 border-dashed lm-border-mid rounded-lg flex items-center justify-center cursor-pointer hover:border-amber-400 transition"
-          style={{ background: 'var(--bg-sunken)' }}
+          className="w-[140px] h-[78px] border-2 border-dashed border-[#2a2a2a] rounded-md flex items-center justify-center cursor-pointer hover:border-yellow-500/40 hover:bg-yellow-500/5 transition"
           title="Criar bancada GM">
-          <span className="text-2xl lm-text-soft">+</span>
+          <span className="text-2xl text-[#3a3a3a]">+</span>
         </div>
       );
     }
@@ -1001,11 +1108,11 @@ export default function LinhaPage() {
     const isCompativel = (cardAtivo || draggingId) && bancadaCompativel(b);
     const classes = [
       'w-[140px] h-[78px]',
-      'bancada-card border lm-border rounded-lg border-t-[3px] flex flex-col',
+      'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200',
       isCompativel ? 'bancada-compativel' : '',
       isEncaixe ? 'bancada-encaixe' : '',
       isErro ? 'bancada-erro' : '',
-      isHover && !isCompativel ? 'ring-2 ring-green-400 shadow-lg' : '',
+      isHover && !isCompativel ? 'ring-2 ring-green-500/80 shadow-xl shadow-green-500/20' : '',
     ].join(' ');
     return (
       <div
@@ -1018,28 +1125,28 @@ export default function LinhaPage() {
         }}
         onClick={() => { if (cardAtivo && bancadaCompativel(b)) alocarColab(cardAtivo, b); }}
         className={classes}
-        style={{ borderTopColor: cor.hex, background: modoPrint ? cor.bgSoft : undefined }}>
-        <div className="flex items-center justify-between px-1.5 pt-1 pb-0 flex-shrink-0">
+        style={{ borderColor: '#1f1f1f', borderLeftColor: cor.hex }}>
+        <div className="flex items-center justify-between px-1.5 pt-0.5 pb-0 flex-shrink-0">
           <div className="flex items-center gap-1 min-w-0">
-            <span className={'text-[9px] font-extrabold ' + cor.text + ' uppercase tracking-wider'}>{b.tipo_principal}</span>
-            {b.subtipo && <span className="text-[8px] text-purple-500 truncate font-medium">· {b.subtipo}</span>}
-            {isCategoria && alocs.length > 0 && (<span className="text-[8px] lm-text-soft ml-0.5">({alocs.length})</span>)}
+            <span className={'text-[9px] font-bold ' + cor.text + ' uppercase tracking-wider'}>{b.tipo_principal}</span>
+            {b.subtipo && <span className="text-[8px] text-purple-300/70 truncate">· {b.subtipo}</span>}
+            {isCategoria && alocs.length > 0 && (<span className="text-[8px] text-gray-500 ml-0.5">({alocs.length})</span>)}
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
             {b.tipo_principal === 'CATEGORIA' && !modoPrint && (
               <button onClick={(e) => { e.stopPropagation(); abrirModalEditarSubtipo(b); }}
-                className="lm-text-soft hover:lm-text-strong text-[9px] leading-none" title="Editar sub-tipo">✏️</button>
+                className="text-gray-600 hover:text-white text-[9px] leading-none" title="Editar sub-tipo">✏️</button>
             )}
             {!b.fixo_categoria && !modoPrint && (
               <button onClick={(e) => { e.stopPropagation(); limparBancada(b); }}
-                className="lm-text-soft hover:text-red-400 text-[10px] leading-none" title="Limpar">×</button>
+                className="text-gray-600 hover:text-red-400 text-[10px] leading-none" title="Limpar">×</button>
             )}
           </div>
         </div>
         {isCategoria ? (
           <div className="flex-1 flex flex-col gap-0.5 px-1 pb-1 pt-0.5 overflow-y-auto min-h-0">
             {alocs.length === 0 && sinergias.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-[9px] lm-text-soft italic">Arrasta colabs</div>
+              <div className="flex-1 flex items-center justify-center text-[9px] text-gray-700 italic">Arrasta colabs</div>
             ) : (
               <>
                 {alocs.map((a) => <CardColabBancada key={a.id} aloc={a} expandido bancadaAtual={b} />)}
@@ -1061,7 +1168,7 @@ export default function LinhaPage() {
     );
   }
   function Esteira({ altura }: { altura: number }) {
-    return (<div className="esteira-belt w-[46px] mx-1 rounded-md transition-all duration-300" style={{ minHeight: altura + 'px' }} aria-hidden="true" />);
+    return (<div className="w-[44px] mx-1 rounded-sm border border-[#444] transition-all duration-300" style={{ minHeight: altura + 'px', background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)' }} aria-hidden="true" />);
   }
   // Altura de uma coluna com N bancadas (pra esteira crescer junto)
   function alturaDeColuna(qtd: number): number {
@@ -1082,14 +1189,14 @@ export default function LinhaPage() {
             <button
               onClick={() => removerSlot(linha, lado)}
               disabled={noMin}
-              className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMin ? 'lm-border text-gray-300 cursor-not-allowed' : 'border-red-300 text-red-600 hover:bg-red-50 active:scale-95')}
+              className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMin ? 'border-[#2a2a2a] text-[#3a3a3a] cursor-not-allowed' : 'border-red-500/40 text-red-400 hover:bg-red-500/15 active:scale-95')}
               title={noMin ? 'Mínimo 1 bancada' : 'Remover última bancada'}
             >−</button>
-            <span className="text-[9px] lm-text-soft font-mono w-10 text-center">{qtd}/{LAYOUT_MAX[chave]}</span>
+            <span className="text-[9px] text-gray-500 font-mono w-10 text-center">{qtd}/{LAYOUT_MAX[chave]}</span>
             <button
               onClick={() => adicionarSlot(linha, lado)}
               disabled={noMax}
-              className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMax ? 'lm-border text-gray-300 cursor-not-allowed' : 'border-green-300 text-green-600 hover:bg-green-50 active:scale-95')}
+              className={'w-8 h-8 rounded-md border flex items-center justify-center text-lg font-bold transition ' + (noMax ? 'border-[#2a2a2a] text-[#3a3a3a] cursor-not-allowed' : 'border-green-500/40 text-green-400 hover:bg-green-500/15 active:scale-95')}
               title={noMax ? 'Limite de ' + LAYOUT_MAX[chave] + ' bancadas' : 'Adicionar bancada'}
             >+</button>
           </div>
@@ -1123,19 +1230,19 @@ export default function LinhaPage() {
     return (
       <div className="flex flex-col items-center gap-2">
         {temAlgum && !modoPrint && (
-          <div className="lm-surface border lm-border rounded-lg px-3 py-1 flex items-center gap-3 text-[10px] lm-shadow">
+          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded px-3 py-1 flex items-center gap-3 text-[10px]">
             <div className="flex items-center gap-1.5">
-              <span className="lm-text-soft font-bold">L1:</span>
-              <span className="text-blue-600">🐟 {p1 ?? '—'}</span>
-              <span className="lm-text-soft">·</span>
-              <span className="text-purple-600">📦 {c1 ?? '—'}</span>
+              <span className="text-gray-600 font-bold">L1:</span>
+              <span className="text-blue-400">🐟 {p1 ?? '—'}</span>
+              <span className="text-gray-700">·</span>
+              <span className="text-purple-400">📦 {c1 ?? '—'}</span>
             </div>
-            <span className="lm-text-soft">|</span>
+            <span className="text-gray-700">|</span>
             <div className="flex items-center gap-1.5">
-              <span className="lm-text-soft font-bold">L2:</span>
-              <span className="text-blue-600">🐟 {p2 ?? '—'}</span>
-              <span className="lm-text-soft">·</span>
-              <span className="text-purple-600">📦 {c2 ?? '—'}</span>
+              <span className="text-gray-600 font-bold">L2:</span>
+              <span className="text-blue-400">🐟 {p2 ?? '—'}</span>
+              <span className="text-gray-700">·</span>
+              <span className="text-purple-400">📦 {c2 ?? '—'}</span>
             </div>
           </div>
         )}
@@ -1154,15 +1261,14 @@ export default function LinhaPage() {
               left: 0,
               right: 0,
               bottom: 0,
-              border: '2px dashed #D2D8E0',
-              borderRadius: '10px',
-              background: '#FBFCFD',
+              border: '2px dashed #3a3a2a',
+              borderRadius: '8px',
               pointerEvents: 'none',
             }}
             aria-hidden="true"
           />
           <div className="text-center mb-2 relative">
-            <span className="text-[10px] font-extrabold tracking-widest uppercase" style={{ color: '#B8890B' }}>Zona Central</span>
+            <span className="text-[10px] text-yellow-500/80 font-bold tracking-widest uppercase">Zona Central</span>
           </div>
           <div
             style={{
@@ -1197,112 +1303,90 @@ export default function LinhaPage() {
             onKeyDown={(e) => { if (e.key === 'Enter' && nomeTemp.trim()) salvarNomeLinha(linha, nomeTemp.trim()); if (e.key === 'Escape') setEditandoLinha(null); }}
             className="nome-linha-input" />
         ) : (
-          <span className="nome-linha-display text-sm lm-text-strong font-extrabold uppercase tracking-widest"
+          <span className="nome-linha-display text-[11px] text-gray-400 font-bold uppercase tracking-widest"
             onClick={() => { setEditandoLinha(linha); setNomeTemp(nome); }} title="Click pra editar">{nome} {!modoPrint && '🖊️'}</span>
         )}
         {!modoPrint && (ritmoLinha.totalAtivos > 0 ? (
-          <div className="lm-surface border lm-border rounded-lg px-3 py-1.5 flex items-center gap-2 ritmo-linha-pulse lm-shadow">
-            <span className="text-[10px] lm-text-soft font-bold">RITMO:</span>
+          <div className="bg-[#0f0f0f] border border-[#2a2a2a] rounded-md px-3 py-1.5 flex items-center gap-2 ritmo-linha-pulse">
+            <span className="text-[10px] text-gray-500 font-bold">RITMO:</span>
             <span className={'text-base font-black ' + corLinha.texto}>{ritmoLinha.pctMedio}%</span>
             <span className="text-sm">{corLinha.emoji}</span>
             {ritmoLinha.pecasHora > 0 && (
-              <span className="text-[9px] lm-text-soft">· {ritmoLinha.pecasHora} pç/h</span>
+              <span className="text-[9px] text-gray-500">· {ritmoLinha.pecasHora} pç/h</span>
             )}
             {ritmoLinha.totalUnidades > 0 && (
-              <span className="text-[9px] lm-text-soft">({ritmoLinha.totalUnidades} pç / {ritmoLinha.totalHoras}h)</span>
+              <span className="text-[9px] text-gray-600">({ritmoLinha.totalUnidades} pç / {ritmoLinha.totalHoras}h)</span>
             )}
-            <div className="flex items-center gap-1 ml-1 pl-2 border-l lm-border">
-              {ritmoLinha.supera > 0 && <span className="text-[10px] text-green-600 font-bold">🟢 {ritmoLinha.supera}</span>}
-              {ritmoLinha.alinhado > 0 && <span className="text-[10px] text-blue-600 font-bold">🔵 {ritmoLinha.alinhado}</span>}
-              {ritmoLinha.ofensor > 0 && <span className="text-[10px] text-red-600 font-bold">🔴 {ritmoLinha.ofensor}</span>}
-              {ritmoLinha.semDado > 0 && <span className="text-[10px] lm-text-soft">⚪ {ritmoLinha.semDado}</span>}
+            <div className="flex items-center gap-1 ml-1 pl-2 border-l border-[#2a2a2a]">
+              {ritmoLinha.supera > 0 && <span className="text-[10px] text-green-400">🟢 {ritmoLinha.supera}</span>}
+              {ritmoLinha.alinhado > 0 && <span className="text-[10px] text-blue-400">🔵 {ritmoLinha.alinhado}</span>}
+              {ritmoLinha.ofensor > 0 && <span className="text-[10px] text-red-400">🔴 {ritmoLinha.ofensor}</span>}
+              {ritmoLinha.semDado > 0 && <span className="text-[10px] text-gray-500">⚪ {ritmoLinha.semDado}</span>}
             </div>
           </div>
         ) : (
-          <div className="lm-surface border lm-border rounded-lg px-3 py-1 text-[9px] lm-text-soft italic">Sem colabs alocados</div>
+          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md px-3 py-1 text-[9px] text-gray-600 italic">Sem colabs alocados</div>
         ))}
       </div>
     );
   }
   const livres = colabsLivres();
   return (
-    <div className="lm-app min-h-screen">
+    <div className="min-h-screen bg-[#0a0a0a] text-white">
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
-      <header className="lm-surface border-b lm-border px-5 py-3 flex items-center justify-between flex-wrap gap-2 sticky top-0 z-40 lm-shadow">
-        <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-lg font-extrabold lm-text-strong flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg" style={{ background: 'var(--meli-yellow)' }}>🏭</span>
-            Mapeamento Linha
-            <span className="lm-text-soft text-sm font-semibold ml-1">· P2M</span>
+      <header className="border-b border-[#1a1a1a] px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-bold">
+            🏭 <span className="text-yellow-400">Mapeamento Linha</span>
+            <span className="text-gray-500 text-sm font-normal ml-2">· P2M</span>
           </h1>
-          <div className="flex items-center gap-2 text-[11px] lm-text-mid">
-            <span className="lm-sunken px-2 py-0.5 rounded-md font-medium">{new Date().toLocaleDateString('pt-BR')}</span>
-            <span className="lm-sunken px-2 py-0.5 rounded-md font-medium">Meta {metas.p2m_base}–{metas.p2m_alinhado_max}</span>
-            <span className="lm-sunken px-2 py-0.5 rounded-md font-medium">{colabs.length} colabs</span>
-          </div>
-          {cardAtivo && (<span className="text-[11px] font-bold text-amber-600 animate-pulse">✨ Card ativado · click na bancada (ESC)</span>)}
+          <span className="text-[10px] text-gray-500">{new Date().toLocaleDateString('pt-BR')}</span>
+          <span className="text-[10px] text-gray-500">· Metas: {metas.p2m_base}-{metas.p2m_alinhado_max}</span>
+          <span className="text-[10px] text-gray-500">· Colabs: {colabs.length}</span>
+          {cardAtivo && (<span className="text-[10px] text-yellow-400 font-bold animate-pulse">✨ Card ativado · click na bancada (ESC)</span>)}
         </div>
         <div className="flex items-center gap-2">
           <input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleUploadCSV} className="hidden" />
           <button onClick={() => setModoCustomizar((v) => !v)}
-            className={'btn-soft text-xs font-semibold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 ' + (modoCustomizar ? 'border-green-400 text-green-700' : 'lm-border-mid lm-text-mid hover:border-green-300')}
-            style={modoCustomizar ? { background: 'var(--green-soft)' } : { background: 'var(--bg-surface)' }}
+            className={'text-xs px-3 py-1.5 rounded border transition active:scale-95 ' + (modoCustomizar ? 'bg-green-500/20 border-green-500/60 text-green-300' : 'bg-[#1a1a1a] border-[#2a2a2a] text-gray-400 hover:border-green-500/40 hover:text-green-300')}
             title="Adicionar ou remover bancadas nas colunas">
             {modoCustomizar ? '✓ Editando bancadas' : '⚙️ Customizar'}
           </button>
           <button onClick={printarLayout} disabled={printando}
-            className="btn-soft text-xs font-semibold px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 flex items-center gap-1.5 disabled:opacity-50"
-            style={{ background: 'var(--blue-soft)' }}
-            title="Gera a imagem 'Alocação Time DEL P2M' pra reportar no grupo">
-            {printando ? '⏳ Gerando...' : '📸 Gerar PNG'}
+            className="bg-blue-500/10 border border-blue-500/50 text-blue-300 text-xs px-3 py-1.5 rounded hover:bg-blue-500/20 transition disabled:opacity-50"
+            title="Gera imagem do layout sem ritmos/líquidas pra reportar no grupo">
+            {printando ? '⏳ Gerando...' : '📸 Printar Layout'}
           </button>
           <button onClick={() => setModalRotacao(true)} disabled={rotacionando}
-            className="btn-soft text-xs font-semibold px-3 py-1.5 rounded-lg border border-purple-300 text-purple-700 flex items-center gap-1.5 disabled:opacity-50"
-            style={{ background: 'var(--purple-soft)' }}>🔄 Rotacionar</button>
+            className="bg-purple-500/10 border border-purple-500/50 text-purple-300 text-xs px-3 py-1.5 rounded hover:bg-purple-500/20 transition disabled:opacity-50">🔄 Rotacionar</button>
           <button onClick={limparTodasAlocacoes}
-            className="btn-soft text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-orange-300 text-orange-700 flex items-center gap-1"
-            style={{ background: '#FDEEDD' }}
-            title="Esvazia o time (tira todos das bancadas)">🧽 Esvaziar</button>
+            className="bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs px-2 py-1.5 rounded hover:bg-orange-500/20 transition"
+            title="Esvazia o time (tira todos das bancadas)">🧽 Esvaziar Time</button>
           <button onClick={limparRitmos}
-            className="btn-soft text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-red-300 text-red-700 flex items-center gap-1"
-            style={{ background: 'var(--red-soft)' }}
+            className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-2 py-1.5 rounded hover:bg-red-500/20 transition"
             title="Limpar ritmos do dia">🧹 Limpar CSV</button>
           <button onClick={() => fileInputRef.current?.click()}
-            className="btn-soft text-xs font-bold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 lm-text-strong"
-            style={{ background: 'var(--meli-yellow)', borderColor: '#E0B815' }}>↑ Upload Boletim</button>
+            className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition">↑ Upload Boletim</button>
         </div>
       </header>
-      {loading && (<div className="text-center lm-text-soft py-20 text-sm">Carregando linha...</div>)}
+      {loading && (<div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>)}
       {!loading && (
-        <div className="flex gap-3 p-4 min-w-0 overflow-x-auto">
-          <aside className="w-[158px] flex-shrink-0">
-            <div className="lm-surface border lm-border rounded-xl p-2.5 lm-shadow">
-              <div className="flex items-center justify-between mb-2 px-0.5">
-                <span className="text-[11px] lm-text-mid font-bold uppercase tracking-wide">Livres</span>
-                <span className="text-[10px] lm-text-strong font-bold lm-sunken px-1.5 py-0.5 rounded">{livres.length}</span>
+        <div className="flex gap-3 p-3 min-w-0 overflow-x-auto">
+          <aside className="w-[150px] flex-shrink-0">
+            <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-md p-2">
+              <div className="flex items-center justify-between mb-2 px-1">
+                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">Livres</span>
+                <span className="text-[10px] text-gray-500">{livres.length}</span>
               </div>
-              <div className="text-[10px] lm-text-soft mb-2 px-0.5">Arrasta ou 2× click</div>
-              <div className="max-h-[calc(100vh-180px)] overflow-y-auto pr-1">
+              <div className="text-[9px] text-gray-600 italic mb-2 px-1">Arrasta ou double-click</div>
+              <div className="max-h-[calc(100vh-160px)] overflow-y-auto pr-1">
                 {livres.length === 0 ? (
-                  <div className="text-[10px] lm-text-soft text-center py-4">Todos alocados</div>
+                  <div className="text-[10px] text-gray-600 italic text-center py-4">Todos alocados</div>
                 ) : (livres.map((c) => <CardColabSidebar key={c.id_groot} c={c} />))}
               </div>
             </div>
           </aside>
-          <main id="mapa-canvas" className="flex-1 lm-surface rounded-xl border lm-border lm-shadow p-5 flex flex-col gap-3">
-            {/* Cabeçalho que aparece no PNG */}
-            <div className={'flex items-center justify-between ' + (modoPrint ? '' : 'hidden')}>
-              <div>
-                <div className="text-xl font-extrabold lm-text-strong">Alocação Time DEL <span style={{ color: '#B8890B' }}>P2M</span></div>
-                <div className="text-xs lm-text-mid font-medium">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</div>
-              </div>
-              <div className="flex items-center gap-3 text-[11px] font-semibold">
-                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#F5C518' }} /> GM</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#2D6BE8' }} /> Pesca</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#8B3FE8' }} /> Categoria</span>
-              </div>
-            </div>
-            <div className="flex gap-4 items-start justify-around">
+          <main id="mapa-canvas" className="flex-1 flex gap-4 items-start justify-around">
             <section className="flex flex-col items-center">
               <HeaderLinha linha={1} />
               <div className="flex gap-1 items-stretch">
@@ -1310,7 +1394,7 @@ export default function LinhaPage() {
                 <Esteira altura={alturaDeColuna(Math.max(layout.L1_ESQ, layout.L1_DIR))} />
                 <ColunaBancadas linha={1} lado="direito" qtd={layout.L1_DIR} alturaColuna={alturaDeColuna(Math.max(layout.L1_ESQ, layout.L1_DIR))} alinharFundo />
               </div>
-              <div className="lm-text-soft text-xs mt-2">↓</div>
+              <div className="text-gray-700 text-xs mt-2">↓</div>
             </section>
             <section className="flex flex-col items-center mt-8">
               <ZonaCentral />
@@ -1322,23 +1406,19 @@ export default function LinhaPage() {
                 <Esteira altura={alturaDeColuna(Math.max(layout.L2_ESQ, layout.L2_DIR))} />
                 <ColunaBancadas linha={2} lado="direito" qtd={layout.L2_DIR} alturaColuna={alturaDeColuna(Math.max(layout.L2_ESQ, layout.L2_DIR))} />
               </div>
-              <div className="lm-text-soft text-xs mt-2">↓</div>
+              <div className="text-gray-700 text-xs mt-2">↓</div>
             </section>
-            </div>
           </main>
         </div>
       )}
       <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
         {toasts.map((t) => {
-          const corClass = t.tipo === 'success' ? 'border-green-300 text-green-800' :
-                          t.tipo === 'error' ? 'border-red-300 text-red-800' :
-                          'border-blue-300 text-blue-800';
-          const corBg = t.tipo === 'success' ? 'var(--green-soft)' :
-                        t.tipo === 'error' ? 'var(--red-soft)' : 'var(--blue-soft)';
+          const corClass = t.tipo === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-300' :
+                          t.tipo === 'error' ? 'bg-red-500/20 border-red-500/50 text-red-300' :
+                          'bg-blue-500/20 border-blue-500/50 text-blue-300';
           return (
             <div key={t.id}
-              style={{ background: corBg }}
-              className={'toast-in ' + corClass + ' border rounded-xl px-4 py-2 text-xs font-semibold shadow-lg min-w-[200px] max-w-[400px]'}>
+              className={'toast-in ' + corClass + ' border rounded-lg px-4 py-2 text-xs font-medium shadow-xl backdrop-blur-sm min-w-[200px] max-w-[400px]'}>
               {t.msg}
             </div>
           );
@@ -1354,23 +1434,23 @@ export default function LinhaPage() {
           <>
             <div className="fixed inset-0 z-[95]" onClick={() => setMenuSinergia(null)} onContextMenu={(e) => { e.preventDefault(); setMenuSinergia(null); }} />
             <div
-              className="fixed z-[96] lm-surface border border-yellow-500/40 rounded-md shadow-2xl py-1 min-w-[200px] slide-in"
+              className="fixed z-[96] bg-[#1a1a1a] border border-yellow-500/40 rounded-md shadow-2xl py-1 min-w-[200px] slide-in"
               style={{ left: Math.min(menuSinergia.x, window.innerWidth - 220) + 'px', top: Math.min(menuSinergia.y, window.innerHeight - 120) + 'px' }}
             >
-              <div className="px-3 py-1 border-b lm-border">
+              <div className="px-3 py-1 border-b border-[#2a2a2a]">
                 <div className="text-[10px] text-yellow-400/80 font-bold">{c?.nome}</div>
-                <div className="text-[9px] lm-text-soft">em sinergia</div>
+                <div className="text-[9px] text-gray-500">em sinergia</div>
               </div>
               <button
                 onClick={() => { voltarOrigem(menuSinergia.aloc); setMenuSinergia(null); }}
-                className="w-full text-left px-3 py-1.5 text-[11px] lm-text-strong hover:bg-yellow-500/10 transition flex items-center gap-2"
+                className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
               >
                 <span>↩️</span>
-                <span>Voltar pra origem <span className="lm-text-soft">({labelOrigem})</span></span>
+                <span>Voltar pra origem <span className="text-gray-500">({labelOrigem})</span></span>
               </button>
               <button
                 onClick={() => { fixarAqui(menuSinergia.aloc); setMenuSinergia(null); }}
-                className="w-full text-left px-3 py-1.5 text-[11px] lm-text-strong hover:bg-yellow-500/10 transition flex items-center gap-2"
+                className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-yellow-500/10 transition flex items-center gap-2"
               >
                 <span>📍</span>
                 <span>Fixar aqui</span>
@@ -1382,12 +1462,12 @@ export default function LinhaPage() {
       {confirmModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[90] p-4"
           onClick={() => setConfirmModal(null)}>
-          <div className="lm-surface border lm-border rounded-lg p-5 max-w-sm w-full slide-in"
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-sm w-full slide-in"
             onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm lm-text-strong mb-4">{confirmModal.msg}</p>
+            <p className="text-sm text-white mb-4">{confirmModal.msg}</p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setConfirmModal(null)}
-                className="px-4 py-1.5 text-xs lm-text-mid hover:lm-text-strong transition">Cancelar</button>
+                className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">Cancelar</button>
               <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }}
                 className="px-4 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition">Confirmar</button>
             </div>
@@ -1396,47 +1476,47 @@ export default function LinhaPage() {
       )}
       {modalRotacao && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setModalRotacao(false)}>
-          <div className="lm-surface border border-purple-500/30 rounded-lg p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-[#1a1a1a] border border-purple-500/30 rounded-lg p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-sm font-bold text-purple-300 mb-3">🔄 Rotacionar</h2>
             <div className="space-y-2">
               <button onClick={() => aplicarRotacao(1)} disabled={rotacionando}
-                className="w-full text-left lm-surface border lm-border hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
-                <div className="text-xs font-bold lm-text-strong mb-0.5">Rotação 1 · Sem Pesca</div>
-                <div className="text-[10px] lm-text-soft">Desce um lado → sobe o outro → Categoria</div>
+                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
+                <div className="text-xs font-bold text-white mb-0.5">Rotação 1 · Sem Pesca</div>
+                <div className="text-[10px] text-gray-500">Desce um lado → sobe o outro → Categoria</div>
               </button>
               <button onClick={() => aplicarRotacao(2)} disabled={rotacionando}
-                className="w-full text-left lm-surface border lm-border hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
-                <div className="text-xs font-bold lm-text-strong mb-0.5">Rotação 2 · Com Pesca</div>
-                <div className="text-[10px] lm-text-soft">Dupla atravessa: Pesca + Categoria</div>
+                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
+                <div className="text-xs font-bold text-white mb-0.5">Rotação 2 · Com Pesca</div>
+                <div className="text-[10px] text-gray-500">Dupla atravessa: Pesca + Categoria</div>
               </button>
               <button onClick={() => aplicarRotacao(3)} disabled={rotacionando}
-                className="w-full text-left lm-surface border lm-border hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
-                <div className="text-xs font-bold lm-text-strong mb-0.5">Rotação 3 · Nivelar Dia</div>
-                <div className="text-[10px] lm-text-soft">Topo ↔ Último (mesmo lado)</div>
+                className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
+                <div className="text-xs font-bold text-white mb-0.5">Rotação 3 · Nivelar Dia</div>
+                <div className="text-[10px] text-gray-500">Topo ↔ Último (mesmo lado)</div>
               </button>
             </div>
             <button onClick={() => setModalRotacao(false)} disabled={rotacionando}
-              className="w-full mt-3 text-[10px] lm-text-soft hover:lm-text-strong transition py-1 disabled:opacity-50">Cancelar</button>
+              className="w-full mt-3 text-[10px] text-gray-500 hover:text-white transition py-1 disabled:opacity-50">Cancelar</button>
             {rotacionando && (<div className="text-center text-[10px] text-purple-400 mt-2 animate-pulse">Rotacionando...</div>)}
           </div>
         </div>
       )}
       {modal && modal.bancadaExistente && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={fecharModal}>
-          <div className="lm-surface border lm-border rounded-lg p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-base font-bold lm-text-strong mb-1">Editar Categoria</h2>
-            <p className="text-xs lm-text-soft mb-4">Linha {modal.linha} · Zona Central</p>
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-base font-bold text-white mb-1">Editar Categoria</h2>
+            <p className="text-xs text-gray-500 mb-4">Linha {modal.linha} · Zona Central</p>
             <div className="mb-4">
-              <label className="text-xs lm-text-mid mb-1.5 block">Sub-tipo:</label>
+              <label className="text-xs text-gray-400 mb-1.5 block">Sub-tipo:</label>
               <div className="grid grid-cols-2 gap-2">
                 {SUBTIPOS_CATEGORIA.map((s) => (
                   <button key={s} onClick={() => setModalSubtipo(s)}
-                    className={'py-1.5 px-2 rounded text-xs font-medium border transition ' + (modalSubtipo === s ? 'border-purple-500 bg-purple-500/20 text-purple-300' : 'lm-border lm-text-mid hover:lm-border-mid')}>{s}</button>
+                    className={'py-1.5 px-2 rounded text-xs font-medium border transition ' + (modalSubtipo === s ? 'border-purple-500 bg-purple-500/20 text-purple-300' : 'border-[#2a2a2a] text-gray-400 hover:border-[#3a3a3a]')}>{s}</button>
                 ))}
               </div>
             </div>
-            <div className="flex gap-2 justify-end pt-2 border-t lm-border">
-              <button onClick={fecharModal} className="px-4 py-1.5 text-xs lm-text-mid hover:lm-text-strong transition">Cancelar</button>
+            <div className="flex gap-2 justify-end pt-2 border-t border-[#2a2a2a]">
+              <button onClick={fecharModal} className="px-4 py-1.5 text-xs text-gray-400 hover:text-white transition">Cancelar</button>
               <button onClick={salvarModal} className="px-4 py-1.5 text-xs font-bold bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 rounded hover:bg-yellow-500/30 transition">Salvar</button>
             </div>
           </div>
