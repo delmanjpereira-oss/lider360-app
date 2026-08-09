@@ -1,7 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-
 interface Colaborador { id_groot: string; nome: string; processo: string; status: string; }
 interface Ritmo { id_groot: string; ritmo_pct: number; liquida?: number; unidades?: number; horas?: number; }
 interface Bancada {
@@ -15,21 +14,17 @@ interface Alocacao {
 interface MetasConfig { p2m_base: number; p2m_alinhado_max: number; }
 interface Toast { id: number; tipo: 'success' | 'error' | 'info'; msg: string; }
 interface ConfirmModal { msg: string; onConfirm: () => void; onCancel?: () => void; }
-
 const ZONA = 'p2m';
 const LAYOUT = { L1_ESQ: 5, L1_DIR: 3, L2_ESQ: 3, L2_DIR: 5 };
 const ALTURA_COLUNA = 422;
 const SUBTIPOS_CATEGORIA = ['Saneante', 'High Value', 'Cosméticos', 'Mapa', 'Saúde', 'Alimento'];
-
 function maxColabsPorTipo(tipo: string): number {
   if (tipo === 'CATEGORIA') return 999;
   return 2;
 }
-
 function tipoEFixoAutomatico(tipo: string): boolean {
   return tipo === 'GM' || tipo === 'PESCA';
 }
-
 function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
   if (liquida == null || liquida === 0) {
     return { status: 'sem_dado' as const, texto: 'text-gray-400', borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', emoji: '⚪', label: 'Sem dado' };
@@ -38,7 +33,6 @@ function corPorMeta(liquida: number | null | undefined, metas: MetasConfig) {
   if (liquida <= metas.p2m_alinhado_max) return { status: 'alinhado' as const, texto: 'text-blue-400', borda: 'border-blue-500/50', bg: 'bg-blue-500/10', emoji: '🔵', label: 'Alinhado' };
   return { status: 'supera' as const, texto: 'text-green-400', borda: 'border-green-500/50', bg: 'bg-green-500/10', emoji: '🟢', label: 'Supera' };
 }
-
 function corRitmoLinha(pct: number, metas: MetasConfig) {
   if (pct === 0) return { texto: 'text-gray-400', emoji: '⚪', label: 'Sem dados' };
   if (pct < 90) return { texto: 'text-red-400', emoji: '🔴', label: 'Ofensor' };
@@ -46,13 +40,11 @@ function corRitmoLinha(pct: number, metas: MetasConfig) {
   if (pct <= 106) return { texto: 'text-blue-400', emoji: '🔵', label: 'Alinhado' };
   return { texto: 'text-green-400', emoji: '🟢', label: 'Supera' };
 }
-
 function iniciais(nome: string) {
   const p = nome.trim().split(/\s+/);
   if (p.length === 1) return p[0].substring(0, 2).toUpperCase();
   return (p[0][0] + p[p.length - 1][0]).toUpperCase();
 }
-
 function corTipo(tipo: string) {
   switch (tipo) {
     case 'GM': return { hex: '#FFD700', text: 'text-yellow-400' };
@@ -61,9 +53,7 @@ function corTipo(tipo: string) {
     default: return { hex: '#6b7280', text: 'text-gray-400' };
   }
 }
-
 function primeiroNome(nome: string) { return nome.trim().split(/\s+/)[0]; }
-
 // 🏷️ Desambigua nomes: se vários colabs compartilham o primeiro nome,
 // retorna "Victor J.P." em vez de só "Victor"
 function nomeExibido(colab: { id_groot: string; nome: string }, todos: { id_groot: string; nome: string }[]): string {
@@ -78,7 +68,6 @@ function nomeExibido(colab: { id_groot: string; nome: string }, todos: { id_groo
   const iniciaisSobrenome = partes.slice(1).map((p) => p[0].toUpperCase() + '.').join('');
   return primeiro + ' ' + iniciaisSobrenome;
 }
-
 const STYLES = `
   @keyframes pulseGold { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.9), 0 0 30px rgba(255, 215, 0, 0.6); } 50% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0), 0 0 40px rgba(255, 215, 0, 0.8); } }
   @keyframes pulseGreen { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); border-color: rgba(34, 197, 94, 0.6) !important; } 50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); border-color: rgba(34, 197, 94, 1) !important; } }
@@ -114,7 +103,6 @@ const STYLES = `
   .flip-animating [data-flip-key] { animation: floatPulse 700ms ease-in-out, shimmerGold 700ms ease-out; }
   .flip-flash { animation: shimmerGold 800ms ease-out; }
 `;
-
 export default function LinhaPage() {
   const [colabs, setColabs] = useState<Colaborador[]>([]);
   const [ritmos, setRitmos] = useState<Record<string, Ritmo>>({});
@@ -140,7 +128,6 @@ export default function LinhaPage() {
   const [modoPrint, setModoPrint] = useState(false);
   const [printando, setPrintando] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   function toast(tipo: 'success' | 'error' | 'info', msg: string) {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, tipo, msg }]);
@@ -148,11 +135,9 @@ export default function LinhaPage() {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
   }
-
   function confirmar(msg: string, onConfirm: () => void) {
     setConfirmModal({ msg, onConfirm });
   }
-
   // 📸 Tira print do mapa (sem líquida/ritmo/cores) e baixa como PNG
   async function printarLayout() {
     setPrintando(true);
@@ -191,9 +176,7 @@ export default function LinhaPage() {
       setPrintando(false);
     }
   }
-
   useEffect(() => { carregarTudo(); }, []);
-
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') {
@@ -203,7 +186,6 @@ export default function LinhaPage() {
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
-
   async function carregarTudo() {
     setLoading(true);
     await carregarMetas();
@@ -212,28 +194,24 @@ export default function LinhaPage() {
     await Promise.all([carregarColabs(), carregarRitmos(), carregarBancadas(), carregarAlocacoes()]);
     setLoading(false);
   }
-
   async function carregarMetas() {
     const { data } = await supabase.from('config').select('chave, valor').in('chave', ['meta_p2m_base', 'meta_p2m_alinhado_max']);
     const map: Record<string, number> = {};
     (data || []).forEach((c: any) => { map[c.chave] = Number(c.valor) || 0; });
     setMetas({ p2m_base: map.meta_p2m_base || 329, p2m_alinhado_max: map.meta_p2m_alinhado_max || 350 });
   }
-
   async function carregarNomesLinhas() {
     const { data } = await supabase.from('config').select('chave, valor').in('chave', ['nome_linha_1', 'nome_linha_2']);
     const map: Record<string, string> = {};
     (data || []).forEach((c: any) => { map[c.chave] = String(c.valor); });
     setNomesLinhas({ linha1: map.nome_linha_1 || 'Linha 1', linha2: map.nome_linha_2 || 'Linha 2' });
   }
-
   async function salvarNomeLinha(linha: number, nome: string) {
     const chave = 'nome_linha_' + linha;
     await supabase.from('config').upsert({ chave, valor: nome }, { onConflict: 'chave' });
     setNomesLinhas((prev) => ({ ...prev, [linha === 1 ? 'linha1' : 'linha2']: nome }));
     setEditandoLinha(null);
   }
-
   async function carregarColabs() {
     const { data } = await supabase
       .from('colaboradores')
@@ -246,7 +224,6 @@ export default function LinhaPage() {
     });
     setColabs(filtrados);
   }
-
   // ✅ RITMOS continuam por dia (vêm do CSV diário)
   async function carregarRitmos() {
     const hoje = new Date().toISOString().split('T')[0];
@@ -259,7 +236,6 @@ export default function LinhaPage() {
     });
     setRitmos(map);
   }
-
   // 🔑 OPÇÃO A: BANCADAS PERMANENTES - SEM filtro de data
   async function carregarBancadas() {
     const { data } = await supabase
@@ -269,7 +245,6 @@ export default function LinhaPage() {
       .order('posicao');
     setBancadas(data || []);
   }
-
   // 🔑 OPÇÃO A: ALOCAÇÕES PERMANENTES - SEM filtro de data
   async function carregarAlocacoes() {
     const { data } = await supabase
@@ -277,7 +252,6 @@ export default function LinhaPage() {
       .select('*');
     setAlocacoes(data || []);
   }
-
   // 🔑 OPÇÃO A: SLOTS FIXOS verificam existência permanente (sem data)
   // Só cria se realmente não existir nenhum slot fixo da Zona Central
   async function garantirSlotsFixos() {
@@ -302,7 +276,6 @@ export default function LinhaPage() {
       tipo_principal: s.tipo_principal, subtipo: null, fixo_categoria: true, data_referencia: hoje,
     })));
   }
-
   function limparRitmos() {
     confirmar('Limpar TODOS os ritmos do dia?', async () => {
       const hoje = new Date().toISOString().split('T')[0];
@@ -312,7 +285,6 @@ export default function LinhaPage() {
       await carregarRitmos();
     });
   }
-
   // 🔑 NOVO: Limpar TODAS as alocações (botão "Limpar Time")
   function limparTodasAlocacoes() {
     confirmar('Tirar TODOS os colabs das bancadas? Eles voltam pra lista de livres. (Não afeta bancadas nem ritmos.)', async () => {
@@ -322,7 +294,6 @@ export default function LinhaPage() {
       await carregarAlocacoes();
     });
   }
-
   async function handleUploadCSV(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -375,7 +346,6 @@ export default function LinhaPage() {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
-
   async function criarBancadaGM(linha: number, lado: string, posicao: number) {
     const hoje = new Date().toISOString().split('T')[0];
     const { error } = await supabase.from('layout_bancadas').insert({
@@ -384,14 +354,11 @@ export default function LinhaPage() {
     if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarBancadas();
   }
-
   function abrirModalEditarSubtipo(b: Bancada) {
     setModal({ linha: b.linha, lado: b.lado, posicao: b.posicao, bancadaExistente: b });
     setModalSubtipo(b.subtipo || '');
   }
-
   function fecharModal() { setModal(null); setModalSubtipo(''); }
-
   async function salvarModal() {
     if (!modal || !modal.bancadaExistente) return;
     if (!modalSubtipo) { toast('error', 'Escolha um sub-tipo'); return; }
@@ -400,7 +367,6 @@ export default function LinhaPage() {
     await carregarBancadas();
     fecharModal();
   }
-
   function limparBancada(b: Bancada) {
     if (b.fixo_categoria) { toast('error', 'Bancada fixa não pode ser removida'); return; }
     confirmar('Limpar esta bancada?', async () => {
@@ -409,7 +375,6 @@ export default function LinhaPage() {
       await Promise.all([carregarBancadas(), carregarAlocacoes()]);
     });
   }
-
   // 🔑 OPÇÃO A: aloca/move colab — sempre remove qualquer alocação anterior dele
   async function alocarColab(idGroot: string, bancada: Bancada) {
     const hoje = new Date().toISOString().split('T')[0];
@@ -440,13 +405,11 @@ export default function LinhaPage() {
     setDraggingId(null);
     await carregarAlocacoes();
   }
-
   async function removerColab(alocId: number) {
     const { error } = await supabase.from('layout_alocacao').delete().eq('id', alocId);
     if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarAlocacoes();
   }
-
   async function removerFixo(idGroot: string) {
     const aloc = alocacoes.find((a) => a.id_groot === idGroot);
     if (!aloc) return;
@@ -454,7 +417,6 @@ export default function LinhaPage() {
     if (error) { toast('error', 'Erro: ' + error.message); return; }
     await carregarAlocacoes();
   }
-
   async function voltarOrigem(aloc: Alocacao) {
     if (!aloc.bancada_fixa_id) { toast('error', 'Sem origem registrada'); return; }
     const bancadaOrigem = bancadas.find((b) => b.id === aloc.bancada_fixa_id);
@@ -475,7 +437,6 @@ export default function LinhaPage() {
     animarFLIP(posicoesAntes);
     toast('success', '↩️ Voltou pra origem');
   }
-
   async function fixarAqui(aloc: Alocacao) {
     const { error } = await supabase
       .from('layout_alocacao')
@@ -485,43 +446,51 @@ export default function LinhaPage() {
     await carregarAlocacoes();
     toast('success', '📍 Fixado aqui');
   }
-
   function getBancada(linha: number, lado: string, posicao: number) {
     return bancadas.find((b) => b.zona === ZONA && b.linha === linha && b.lado === lado && b.posicao === posicao);
   }
-
+  // ============================================================
+  // 🎯 ROTAÇÃO CORRIGIDA — o sentido do ciclo estava invertido.
+  // Agora: DESCE por um lado (topo→fundo), cruza embaixo,
+  // SOBE pelo outro (fundo→topo), e a Pesca/Categoria ficam
+  // no FIM do ciclo (a "ponte" do topo que volta pro começo).
+  //
+  // Linha 1 (K): desce ESQUERDA, sobe DIREITA, pesca/cat no fim
+  // Linha 2 (J): desce DIREITA, sobe ESQUERDA (espelhado)
+  // ============================================================
   function getCicloLinha(linha: number, comPesca: boolean): Bancada[] {
     const ciclo: Bancada[] = [];
-    const ladoSobe = linha === 1 ? 'esquerdo' : 'direito';
-    const ladoDesce = linha === 1 ? 'direito' : 'esquerdo';
-    const qtdSobe = linha === 1 ? LAYOUT.L1_ESQ : LAYOUT.L2_DIR;
-    const qtdDesce = linha === 1 ? LAYOUT.L1_DIR : LAYOUT.L2_ESQ;
-    for (let p = qtdSobe; p >= 1; p--) {
-      const b = getBancada(linha, ladoSobe, p);
-      if (b && b.tipo_principal === 'GM') ciclo.push(b);
-    }
-    const cat = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'CATEGORIA');
-    const pesca = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'PESCA');
-    if (comPesca && pesca) ciclo.push(pesca);
-    if (cat) ciclo.push(cat);
+    const ladoDesce = linha === 1 ? 'esquerdo' : 'direito';
+    const ladoSobe = linha === 1 ? 'direito' : 'esquerdo';
+    const qtdDesce = linha === 1 ? LAYOUT.L1_ESQ : LAYOUT.L2_DIR;
+    const qtdSobe = linha === 1 ? LAYOUT.L1_DIR : LAYOUT.L2_ESQ;
+    // 1) DESCE pelo ladoDesce: do TOPO ao FUNDO (posição 1 → última)
     for (let p = 1; p <= qtdDesce; p++) {
       const b = getBancada(linha, ladoDesce, p);
       if (b && b.tipo_principal === 'GM') ciclo.push(b);
     }
+    // 2) SOBE pelo ladoSobe: do FUNDO ao TOPO (última → posição 1)
+    //    (o cruzamento de baixo acontece aqui: fundo do ladoDesce → fundo do ladoSobe)
+    for (let p = qtdSobe; p >= 1; p--) {
+      const b = getBancada(linha, ladoSobe, p);
+      if (b && b.tipo_principal === 'GM') ciclo.push(b);
+    }
+    // 3) PESCA e CATEGORIA no FIM (a ponte do topo, que fecha o ciclo pro começo)
+    const cat = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'CATEGORIA');
+    const pesca = bancadas.find((b) => b.linha === linha && b.lado === 'centro' && b.tipo_principal === 'PESCA');
+    if (comPesca && pesca) ciclo.push(pesca);
+    if (cat) ciclo.push(cat);
     return ciclo;
   }
-
   async function getHistoricoPesca(idGroot: string, linha: number): Promise<number> {
     const { data } = await supabase.from('rotacao_pesca_historico').select('id').eq('id_groot', idGroot).eq('linha', linha);
     return (data || []).length;
   }
-
   async function registrarPesca(idGroot: string, linha: number) {
     await supabase.from('rotacao_pesca_historico').insert({
       id_groot: idGroot, linha, data_pesca: new Date().toISOString().split('T')[0],
     });
   }
-
   function capturarPosicoesCards(): Map<string, DOMRect> {
     const map = new Map<string, DOMRect>();
     document.querySelectorAll('[data-flip-key]').forEach((el) => {
@@ -530,7 +499,6 @@ export default function LinhaPage() {
     });
     return map;
   }
-
   function animarFLIP(posicoesAntes: Map<string, DOMRect>) {
     requestAnimationFrame(() => {
       document.querySelectorAll('[data-flip-key]').forEach((el) => {
@@ -559,7 +527,6 @@ export default function LinhaPage() {
       });
     });
   }
-
   async function aplicarRotacao(tipo: 1 | 2 | 3) {
     setRotacionando(true);
     try {
@@ -592,7 +559,6 @@ export default function LinhaPage() {
       setModalRotacao(false);
     }
   }
-
   async function rotacaoCiclo(comPesca: boolean) {
     const hoje = new Date().toISOString().split('T')[0];
     for (const linha of [1, 2]) {
@@ -668,7 +634,6 @@ export default function LinhaPage() {
       }
     }
   }
-
   async function rotacaoNivelar() {
     for (const linha of [1, 2]) {
       for (const lado of ['esquerdo', 'direito']) {
@@ -699,7 +664,6 @@ export default function LinhaPage() {
       }
     }
   }
-
   function getAlocacoesBancada(bancadaId: number) { return alocacoes.filter((a) => a.bancada_id === bancadaId); }
   function getColab(idGroot: string) { return colabs.find((c) => c.id_groot === idGroot); }
   function colabsLivres() {
@@ -717,7 +681,6 @@ export default function LinhaPage() {
     const atuais = alocacoes.filter((a) => a.bancada_id === bancada.id);
     return atuais.length < maxColabsPorTipo(bancada.tipo_principal);
   }
-
   function calcularRitmoLinha(linha: number) {
     const bancadasGM = bancadas.filter((b) => b.linha === linha && b.tipo_principal === 'GM');
     const bancadasIds = new Set(bancadasGM.map((b) => b.id));
@@ -771,7 +734,6 @@ export default function LinhaPage() {
       totalAtivos, supera, alinhado, ofensor, semDado
     };
   }
-
   function CardColabSidebar({ c }: { c: Colaborador }) {
     const ritmo = ritmos[c.id_groot];
     const cor = corPorMeta(ritmo?.liquida, metas);
@@ -799,7 +761,6 @@ export default function LinhaPage() {
       </div>
     );
   }
-
   function CardColabBancada({ aloc, expandido, bancadaAtual }: { aloc: Alocacao; expandido?: boolean; bancadaAtual: Bancada }) {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
@@ -865,7 +826,6 @@ export default function LinhaPage() {
       </div>
     );
   }
-
   function CardSinergia({ aloc, expandido }: { aloc: Alocacao; expandido?: boolean }) {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
@@ -894,7 +854,6 @@ export default function LinhaPage() {
       </div>
     );
   }
-
   function SlotBancada({ linha, lado, posicao }: { linha: number; lado: string; posicao: number }) {
     const b = getBancada(linha, lado, posicao);
     if (!b) {
@@ -975,11 +934,9 @@ export default function LinhaPage() {
       </div>
     );
   }
-
   function Esteira() {
     return (<div className="w-[44px] mx-1 rounded-sm border border-[#444]" style={{ minHeight: ALTURA_COLUNA + 'px', background: 'repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 8px, #1a1a1a 8px, #1a1a1a 16px)' }} aria-hidden="true" />);
   }
-
   function ColunaBancadas({ linha, lado, qtd, alinharFundo = false }: { linha: number; lado: string; qtd: number; alinharFundo?: boolean }) {
     return (
       <div className={'flex flex-col gap-2 ' + (alinharFundo ? 'justify-end' : 'justify-start')} style={{ minHeight: ALTURA_COLUNA + 'px' }}>
@@ -989,7 +946,6 @@ export default function LinhaPage() {
       </div>
     );
   }
-
   function calcularRitmoPescaCat(linha: number, tipo: 'PESCA' | 'CATEGORIA') {
     const bancadasMatch = bancadas.filter((b) => b.linha === linha && b.tipo_principal === tipo);
     const ids = new Set(bancadasMatch.map((b) => b.id));
@@ -1007,7 +963,6 @@ export default function LinhaPage() {
     if (liquidas.length > 0) return Math.round(liquidas.reduce((a, b) => a + b, 0) / liquidas.length);
     return null;
   }
-
   function ZonaCentral() {
     const p1 = calcularRitmoPescaCat(1, 'PESCA');
     const c1 = calcularRitmoPescaCat(1, 'CATEGORIA');
@@ -1076,7 +1031,6 @@ export default function LinhaPage() {
       </div>
     );
   }
-
   function HeaderLinha({ linha }: { linha: number }) {
     const nome = linha === 1 ? nomesLinhas.linha1 : nomesLinhas.linha2;
     const editando = editandoLinha === linha;
@@ -1118,9 +1072,7 @@ export default function LinhaPage() {
       </div>
     );
   }
-
   const livres = colabsLivres();
-
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
@@ -1267,7 +1219,7 @@ export default function LinhaPage() {
               <button onClick={() => aplicarRotacao(1)} disabled={rotacionando}
                 className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
                 <div className="text-xs font-bold text-white mb-0.5">Rotação 1 · Sem Pesca</div>
-                <div className="text-[10px] text-gray-500">Esq sobe → Categoria → Dir desce</div>
+                <div className="text-[10px] text-gray-500">Desce um lado → sobe o outro → Categoria</div>
               </button>
               <button onClick={() => aplicarRotacao(2)} disabled={rotacionando}
                 className="w-full text-left bg-[#0f0f0f] border border-[#2a2a2a] hover:border-purple-500/50 rounded p-3 transition disabled:opacity-50">
