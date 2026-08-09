@@ -258,9 +258,9 @@ export default function LinhaPage() {
         : `<div style="flex:1;display:flex;gap:5px;">${cols.map((x) => cardPessoa(x, c, ehPesca)).join('')}</div>`;
       const badge = num ? `<span style="font-size:12px;font-weight:900;color:${AZUL};line-height:1;flex-shrink:0;">${num}</span>` : '';
       const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;line-height:1;"> · ${b.subtipo}</span>` : '';
-      return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;">
-        <div style="padding:16px 10px 6px 10px;display:flex;flex-direction:column;flex:1;min-height:0;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;margin-bottom:5px;height:14px;"><span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:${c.label};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:14px;">${b.tipo_principal}${sub}</span>${badge}</div>
+      return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);box-sizing:border-box;display:flex;flex-direction:column;">
+        <div style="padding:9px 10px 7px 10px;display:flex;flex-direction:column;flex:1;min-height:0;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:4px;margin-bottom:5px;"><span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:${c.label};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;display:block;">${b.tipo_principal}${sub}</span><span style="line-height:1.2;">${badge}</span></div>
           ${corpo}
         </div>
       </div>`;
