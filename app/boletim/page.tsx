@@ -391,40 +391,29 @@ export default function BoletimPage() {
     const nome = isP2M ? 'P2M' : 'CHECK-IN';
     const metaLiq = isP2M ? metas.p2mLiq : metas.checkinLiq;
     const metaVol = isP2M ? metas.p2mVol : metas.checkinVol;
+    // MiniCard com alturas/lineHeight FIXOS (mesma técnica dos cards NET) → alinha certo no PNG (html2canvas)
     const MiniCard = ({ label, valor, cor }: { label: string; valor: string; cor: string }) => (
-      <div className="flex-1 text-center rounded-lg" style={{ padding: '10px 8px', backgroundColor: 'rgba(255,255,255,0.04)', border: `1px solid ${cor}44` }}>
-        <div className="uppercase font-bold" style={{ fontSize: '9px', color: '#9ca3af', letterSpacing: '0.05em', marginBottom: '3px' }}>{label}</div>
-        <div className="font-black font-mono" style={{ fontSize: '22px', color: cor, lineHeight: '1' }}>{valor}</div>
+      <div className="flex-1 text-center rounded-lg" style={{ paddingTop: '10px', paddingBottom: '10px', paddingLeft: '8px', paddingRight: '8px', backgroundColor: 'rgba(255,255,255,0.04)', border: `1px solid ${cor}44` }}>
+        <div className="uppercase font-bold" style={{ fontSize: '9px', color: '#9ca3af', letterSpacing: '0.05em', height: '14px', lineHeight: '14px', margin: '0', padding: '0', display: 'block' }}>{label}</div>
+        <div className="font-black font-mono" style={{ fontSize: '22px', color: cor, height: '28px', lineHeight: '28px', margin: '0', marginTop: '4px', padding: '0', display: 'block' }}>{valor}</div>
       </div>
     );
     return (
       <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}`, background: 'linear-gradient(135deg, rgba(45,50,119,0.18) 0%, rgba(15,15,26,0.4) 100%)' }}>
-        <div className="flex items-center gap-2.5" style={{ padding: '10px 16px', backgroundColor: MELI.azul }}>
-          <span style={{ fontSize: '22px' }}>{icone}</span>
-          <span className="font-black" style={{ fontSize: '18px', color: MELI.amarelo, letterSpacing: '0.03em' }}>{nome}</span>
-          <span className="flex items-center gap-1.5 rounded-full" style={{ marginLeft: 'auto', backgroundColor: 'rgba(255,255,255,0.12)', padding: '4px 12px' }}>
-            <span style={{ fontSize: '14px' }}>👥</span>
-            <span className="font-black" style={{ fontSize: '15px', color: '#fff' }}>{qtd}</span>
-            <span className="font-bold" style={{ fontSize: '10px', color: 'rgba(255,255,255,0.7)' }}>colabs</span>
+        <div className="flex items-center" style={{ paddingTop: '10px', paddingBottom: '10px', paddingLeft: '16px', paddingRight: '16px', backgroundColor: MELI.azul, gap: '10px' }}>
+          <span style={{ fontSize: '22px', height: '26px', lineHeight: '26px', display: 'inline-block' }}>{icone}</span>
+          <span className="font-black" style={{ fontSize: '18px', color: MELI.amarelo, letterSpacing: '0.03em', height: '26px', lineHeight: '26px', display: 'inline-block' }}>{nome}</span>
+          <span className="flex items-center rounded-full" style={{ marginLeft: 'auto', backgroundColor: 'rgba(255,255,255,0.12)', paddingTop: '4px', paddingBottom: '4px', paddingLeft: '12px', paddingRight: '12px', gap: '6px' }}>
+            <span style={{ fontSize: '14px', height: '20px', lineHeight: '20px', display: 'inline-block' }}>👥</span>
+            <span className="font-black" style={{ fontSize: '15px', color: '#fff', height: '20px', lineHeight: '20px', display: 'inline-block' }}>{qtd}</span>
+            <span className="font-bold" style={{ fontSize: '10px', color: 'rgba(255,255,255,0.7)', height: '20px', lineHeight: '20px', display: 'inline-block' }}>colabs</span>
           </span>
         </div>
-        <div className="flex gap-2" style={{ padding: '12px' }}>
+        <div className="flex" style={{ padding: '12px', gap: '8px' }}>
           <MiniCard label="Meta Líquida" valor={String(metaLiq)} cor={MELI.amarelo} />
           <MiniCard label="Meta Volume" valor={metaVol.toLocaleString('pt-BR')} cor={MELI.azulClaro} />
           {isP2M && <MiniCard label="Meta Ocupação" valor={`${metas.ocupMeta}%`} cor="#34d399" />}
         </div>
-      </div>
-    );
-  }
-  // 🎯 Barra minimalista no topo da tabela (só identifica o setor, sem repetir metas)
-  function BarraTabela({ tipo }: { tipo: 'CK' | 'P2M' }) {
-    const isP2M = tipo === 'P2M';
-    return (
-      <div className="px-4 py-2 flex items-center gap-2" style={{ backgroundColor: MELI.azul }}>
-        <span className="text-base">{isP2M ? '🚚' : '📦'}</span>
-        <h3 className="font-black text-sm uppercase" style={{ color: MELI.amarelo }}>
-          {isP2M ? 'P2M' : 'CHECK-IN'}
-        </h3>
       </div>
     );
   }
@@ -793,7 +782,6 @@ export default function BoletimPage() {
             {dividirEm2Colunas && setoresAtivos[0] === 'P2M' ? (
               /* SÓ P2M COM 15+ → 2 COLUNAS */
               <div className="bg-white rounded-xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}` }}>
-                <BarraTabela tipo="P2M" />
                 <div className="grid grid-cols-2 gap-0">
                   {(() => {
                     const [primeira, segunda] = dividirEmDuas(p2ms);
@@ -819,7 +807,6 @@ export default function BoletimPage() {
             ) : dividirEm2Colunas && setoresAtivos[0] === 'CK' ? (
               /* SÓ CHECKIN COM 15+ → 2 COLUNAS */
               <div className="bg-white rounded-xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}` }}>
-                <BarraTabela tipo="CK" />
                 <div className="grid grid-cols-2 gap-0">
                   {(() => {
                     const [primeira, segunda] = dividirEmDuas(checkins);
@@ -847,7 +834,6 @@ export default function BoletimPage() {
               <div className={`grid grid-cols-1 ${temCheckin && temP2M ? 'lg:grid-cols-2' : ''} gap-4`}>
                 {temCheckin && (
                   <div className="bg-white rounded-xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}` }}>
-                    <BarraTabela tipo="CK" />
                     <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                       <HeaderCK />
                       <tbody>
@@ -858,7 +844,6 @@ export default function BoletimPage() {
                 )}
                 {temP2M && (
                   <div className="bg-white rounded-xl overflow-hidden" style={{ border: `1px solid ${MELI.azul}` }}>
-                    <BarraTabela tipo="P2M" />
                     <table className="w-full text-sm" style={{ tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                       <HeaderP2M />
                       <tbody>
