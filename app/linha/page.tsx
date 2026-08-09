@@ -259,7 +259,7 @@ export default function LinhaPage() {
       const badge = num ? `<span style="font-size:12px;font-weight:900;color:${AZUL};line-height:1;flex-shrink:0;">${num}</span>` : '';
       const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;line-height:1;"> · ${b.subtipo}</span>` : '';
       return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;">
-        <div style="padding:11px 10px 7px 10px;display:flex;flex-direction:column;flex:1;min-height:0;">
+        <div style="padding:26px 10px 7px 10px;display:flex;flex-direction:column;flex:1;min-height:0;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;margin-bottom:6px;height:14px;"><span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:${c.label};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:14px;">${b.tipo_principal}${sub}</span>${badge}</div>
           ${corpo}
         </div>
