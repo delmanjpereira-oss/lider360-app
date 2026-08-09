@@ -211,34 +211,39 @@ export default function LinhaPage() {
       const sig = sob.find((s) => !PREP.includes(s.toLowerCase())) || sob[0];
       return partes[0] + ' ' + sig[0].toUpperCase() + '.';
     };
-    const iniciaisPng = (c: { nome: string }) => {
+    // Nome COMPLETO pra Pesca (primeiro nome + sobrenome inteiro), pra distinguir os "Matheus"
+    const nomeCompletoPng = (c: { nome: string }) => {
       const partes = c.nome.trim().split(/\s+/);
-      if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
+      if (partes.length === 1) return partes[0];
       const sob = partes.slice(1);
       const sig = sob.find((s) => !PREP.includes(s.toLowerCase())) || sob[0];
-      return (partes[0][0] + sig[0]).toUpperCase();
+      return partes[0] + ' ' + sig;
     };
     const ICON_PEOPLE = (cor: string, sz: number) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><path d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 14c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z" fill="${cor}"/></svg>`;
+    // Avatar: círculo com ícone de pessoa (branco)
+    const ICON_AVATAR = (sz: number) => `<svg width="${Math.round(sz * 0.62)}" height="${Math.round(sz * 0.62)}" viewBox="0 0 24 24" fill="none"><path d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 14c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z" fill="#fff"/></svg>`;
     const corDe = (tipo: string) => {
-      if (tipo === 'GM') return { label: '#8A6100', avatar: '#F5C518', bd: '#F5C518' };
-      if (tipo === 'PESCA') return { label: '#1D4FB0', avatar: '#2D6BE8', bd: '#2D6BE8' };
-      if (tipo === 'CATEGORIA') return { label: '#6B27B8', avatar: '#8B3FE8', bd: '#8B3FE8' };
-      return { label: '#5B6472', avatar: '#9AA2AF', bd: '#D2D8E0' };
+      if (tipo === 'GM') return { label: '#8A6100', avatar: '#F5C518', bd: '#F5C518', grad: 'linear-gradient(180deg,#FFFFFF 0%,#FFFDF3 100%)' };
+      if (tipo === 'PESCA') return { label: '#1D4FB0', avatar: '#2D6BE8', bd: '#2D6BE8', grad: 'linear-gradient(180deg,#FFFFFF 0%,#F5F9FF 100%)' };
+      if (tipo === 'CATEGORIA') return { label: '#6B27B8', avatar: '#8B3FE8', bd: '#8B3FE8', grad: 'linear-gradient(180deg,#FFFFFF 0%,#FBF7FF 100%)' };
+      return { label: '#5B6472', avatar: '#9AA2AF', bd: '#D2D8E0', grad: 'linear-gradient(180deg,#FFFFFF 0%,#F8F9FB 100%)' };
     };
-    const cardPessoa = (col: { nome: string }, c: { avatar: string }) =>
-      `<div style="flex:1;min-width:0;background:#fff;border:1px solid #F0F0F0;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:5px 4px;box-shadow:0 1px 2px rgba(16,24,40,.03);"><div style="width:22px;height:22px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:8px;font-weight:800;color:#fff;">${iniciaisPng(col)}</span></div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.05;white-space:nowrap;">${nomePng(col)}</span></div>`;
+    // cardPessoa: avatar com ÍCONE de pessoa; nome completo se for Pesca
+    const cardPessoa = (col: { nome: string }, c: { avatar: string }, nomeCompleto = false) =>
+      `<div style="flex:1;min-width:0;background:linear-gradient(180deg,#FFFFFF,#FAFBFC);border:1px solid #ECEEF1;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px 4px;box-shadow:0 1px 3px rgba(16,24,40,.06),inset 0 1px 0 rgba(255,255,255,.8);"><div style="width:24px;height:24px;border-radius:50%;background:${c.avatar};display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 4px rgba(16,24,40,.15),inset 0 1px 1px rgba(255,255,255,.3);">${ICON_AVATAR(24)}</div><span style="font-size:11px;font-weight:700;color:#1A1D23;text-align:center;line-height:1.05;white-space:nowrap;">${nomeCompleto ? nomeCompletoPng(col) : nomePng(col)}</span></div>`;
     const bancadaHTML = (b: Bancada, num: number) => {
       const c = corDe(b.tipo_principal);
+      const ehPesca = b.tipo_principal === 'PESCA';
       const ocupantes = alocacoes.filter((a) => a.bancada_id === b.id);
       const sinergias = alocacoes.filter((a) => a.bancada_fixa_id === b.id && a.bancada_id !== b.id);
       const cols = [...ocupantes, ...sinergias].map((a) => getColab(a.id_groot)).filter(Boolean) as { nome: string }[];
       const corpo = cols.length === 0
         ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;"><span style="font-size:11px;color:#C4CAD3;font-weight:700;letter-spacing:2px;">VAZIA</span></div>`
-        : `<div style="flex:1;display:flex;gap:5px;">${cols.map((x) => cardPessoa(x, c)).join('')}</div>`;
-      const badge = num ? `<span style="font-size:9px;font-weight:800;color:#fff;background:${c.bd};width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;">${num}</span>` : '';
+        : `<div style="flex:1;display:flex;gap:5px;">${cols.map((x) => cardPessoa(x, c, ehPesca)).join('')}</div>`;
+      const badge = num ? `<span style="font-size:9px;font-weight:800;color:#fff;background:${c.bd};width:17px;height:17px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(16,24,40,.2);">${num}</span>` : '';
       const sub = b.subtipo ? `<span style="font-size:8.5px;color:${c.label};font-weight:700;opacity:.75;"> · ${b.subtipo}</span>` : '';
-      return `<div style="width:172px;height:${H_BANCADA}px;background:#fff;border:2px solid ${c.bd};border-radius:14px;box-shadow:0 2px 8px rgba(16,24,40,.07);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;">
-        <div style="padding:6px 9px;display:flex;flex-direction:column;flex:1;min-height:0;">
+      return `<div style="width:172px;height:${H_BANCADA}px;background:${c.grad};border:2px solid ${c.bd};border-radius:14px;box-shadow:0 6px 16px rgba(16,24,40,.12),0 2px 4px rgba(16,24,40,.08),inset 0 1px 0 rgba(255,255,255,.9);overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;">
+        <div style="padding:7px 10px;display:flex;flex-direction:column;flex:1;min-height:0;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:${c.label};">${b.tipo_principal}${sub}</span>${badge}</div>
           ${corpo}
         </div>
@@ -256,7 +261,13 @@ export default function LinhaPage() {
     };
     const esteiraHTML = (qtdMax: number) => {
       const h = qtdMax * H_BANCADA + (qtdMax - 1) * GAP;
-      return `<div style="width:26px;height:${h}px;border-radius:20px;background:linear-gradient(180deg,#EDEFF3,#E2E6EC);border:1px solid #DCE0E7;box-shadow:inset 0 1px 3px rgba(16,24,40,.08);flex-shrink:0;"></div>`;
+      // Esteira de ROLETES (cilindros transversais) com trilhos escuros - estilo CD industrial
+      const nRoletes = Math.max(1, Math.round((h - 6) / 15));
+      let roletes = '';
+      for (let i = 0; i < nRoletes; i++) {
+        roletes += `<div style="height:12px;border-radius:6px;background:linear-gradient(180deg,#D8DCE2 0%,#9AA2AF 45%,#5B6472 80%,#3A404C 100%);box-shadow:inset 0 1px 1px rgba(255,255,255,.5),0 1px 2px rgba(0,0,0,.2);flex-shrink:0;"></div>`;
+      }
+      return `<div style="width:38px;height:${h}px;border-radius:5px;padding:3px;background:linear-gradient(90deg,#2A2E38,#3A404C 15%,#3A404C 85%,#2A2E38);box-shadow:0 6px 16px rgba(16,24,40,.3);display:flex;flex-direction:column;gap:3px;box-sizing:border-box;overflow:hidden;flex-shrink:0;">${roletes}</div>`;
     };
     const centralHTML = () => {
       const cel = (linha: number, pos: number) => {
@@ -264,11 +275,11 @@ export default function LinhaPage() {
         return b ? bancadaHTML(b, 0) : `<div style="width:172px;height:${H_BANCADA}px;border:2px dashed #E0E4EA;border-radius:14px;box-sizing:border-box;"></div>`;
       };
       return `<div style="display:flex;flex-direction:column;align-items:center;">
-        <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:14px;padding:6px 18px;background:#fff;border:2px solid ${DOURADO};border-radius:22px;box-shadow:0 2px 6px rgba(16,24,40,.08);"><span style="font-size:11px;font-weight:800;letter-spacing:1.5px;color:${AZUL};text-transform:uppercase;">Zona Central</span></div>
-        <div style="border:2px dashed #C9CFD8;border-radius:18px;background:linear-gradient(135deg,#FCFCFD,#F6F8FA);padding:16px;display:grid;grid-template-columns:172px 172px;gap:${GAP}px;">${cel(1, 1)}${cel(2, 1)}${cel(1, 2)}${cel(2, 2)}</div>
+        <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:14px;padding:7px 20px;background:linear-gradient(180deg,#FFFFFF,#FBFCFD);border:2px solid ${DOURADO};border-radius:22px;box-shadow:0 4px 10px rgba(16,24,40,.12),inset 0 1px 0 rgba(255,255,255,.9);"><span style="font-size:11px;font-weight:800;letter-spacing:1.5px;color:${AZUL};text-transform:uppercase;text-shadow:0 1px 1px rgba(255,255,255,.6);">Zona Central</span></div>
+        <div style="border:2px dashed #C9CFD8;border-radius:18px;background:linear-gradient(135deg,#FCFCFD,#F6F8FA);padding:16px;display:grid;grid-template-columns:172px 172px;gap:${GAP}px;box-shadow:inset 0 2px 6px rgba(16,24,40,.04);">${cel(1, 1)}${cel(2, 1)}${cel(1, 2)}${cel(2, 2)}</div>
       </div>`;
     };
-    const tituloLinha = (nm: string) => `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;width:100%;justify-content:center;"><div style="flex:1;max-width:80px;height:3px;background:linear-gradient(90deg,transparent,${DOURADO});border-radius:2px;"></div><div style="width:9px;height:9px;border-radius:50%;background:${DOURADO};box-shadow:0 0 6px rgba(245,197,24,.5);"></div><span style="font-size:17px;font-weight:900;letter-spacing:3px;color:${AZUL};text-transform:uppercase;white-space:nowrap;">${nm}</span><div style="width:9px;height:9px;border-radius:50%;background:${DOURADO};box-shadow:0 0 6px rgba(245,197,24,.5);"></div><div style="flex:1;max-width:80px;height:3px;background:linear-gradient(90deg,${DOURADO},transparent);border-radius:2px;"></div></div>`;
+    const tituloLinha = (nm: string) => `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;width:100%;justify-content:center;"><div style="flex:1;max-width:80px;height:4px;background:linear-gradient(90deg,transparent,${DOURADO});border-radius:2px;box-shadow:0 1px 2px rgba(245,197,24,.4);"></div><div style="width:10px;height:10px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFE87A,${DOURADO});box-shadow:0 2px 5px rgba(245,197,24,.6),inset 0 1px 1px rgba(255,255,255,.5);"></div><span style="font-size:18px;font-weight:900;letter-spacing:3px;color:${AZUL};text-transform:uppercase;white-space:nowrap;text-shadow:0 2px 3px rgba(27,42,143,.18),0 1px 0 rgba(255,255,255,.5);">${nm}</span><div style="width:10px;height:10px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFE87A,${DOURADO});box-shadow:0 2px 5px rgba(245,197,24,.6),inset 0 1px 1px rgba(255,255,255,.5);"></div><div style="flex:1;max-width:80px;height:4px;background:linear-gradient(90deg,${DOURADO},transparent);border-radius:2px;box-shadow:0 1px 2px rgba(245,197,24,.4);"></div></div>`;
     const linhaHTML = (linha: number, nome: string) => {
       const qEsq = linha === 1 ? layout.L1_ESQ : layout.L2_ESQ;
       const qDir = linha === 1 ? layout.L1_DIR : layout.L2_DIR;
@@ -286,7 +297,7 @@ export default function LinhaPage() {
       const cards = livresList.length === 0
         ? `<div style="color:#B4BAC4;font-size:12px;font-style:italic;text-align:center;padding:16px 0;">Todos alocados</div>`
         : livresList.map((c) =>
-            `<div style="background:#fff;border:1px solid #EEF0F3;border-radius:11px;padding:8px 10px;margin-bottom:8px;display:flex;align-items:center;gap:9px;box-shadow:0 1px 3px rgba(16,24,40,.04);"><div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#FFE600,#FFC400);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:9px;font-weight:800;color:#5A4A00;">${iniciaisPng(c)}</span></div><span style="font-size:12px;font-weight:700;color:#1A1D23;white-space:nowrap;">${nomePng(c)}</span></div>`).join('');
+            `<div style="background:linear-gradient(180deg,#FFFFFF,#FAFBFC);border:1px solid #EEF0F3;border-radius:11px;padding:8px 10px;margin-bottom:8px;display:flex;align-items:center;gap:9px;box-shadow:0 1px 3px rgba(16,24,40,.05),inset 0 1px 0 rgba(255,255,255,.8);"><div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#FFE600,#FFC400);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 4px rgba(245,197,24,.3),inset 0 1px 1px rgba(255,255,255,.4);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 14c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z" fill="${AZUL}"/></svg></div><span style="font-size:12px;font-weight:700;color:#1A1D23;white-space:nowrap;">${nomePng(c)}</span></div>`).join('');
       return `<div style="width:192px;flex-shrink:0;background:#fff;border:1px solid #EAEDF1;border-radius:18px;padding:16px;box-shadow:0 3px 12px rgba(16,24,40,.06);">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:12px;border-bottom:2px solid #F0F2F5;"><span style="font-size:13px;font-weight:900;letter-spacing:1px;color:${AZUL};text-transform:uppercase;">Reservas</span><div style="width:28px;height:28px;border-radius:50%;background:${AZUL};display:flex;align-items:center;justify-content:center;">${ICON_PEOPLE('#fff', 15)}</div></div>
         ${cards}
