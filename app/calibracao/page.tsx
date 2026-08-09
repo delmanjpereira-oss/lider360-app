@@ -56,14 +56,24 @@ type FeedbackTrim = {
   data_referencia: string | null;
   registrado_em: string;
 };
+type PresencaTipo = {
+  id_groot: string;
+  data_referencia: string;
+  motivo: string | null;
+  categoria: string | null;
+  conta_abs: boolean;
+  conta_presenca: boolean;
+  status: string;
+};
 type LinhaCalib = {
   id: number;
   idGroot: string;
   nome: string;
   processo: string;
-  medMes: Record<number, { liq: number; ocup: number; ima: number }>;
+  medMes: Record<number, { liq: number; ocup: number; ima: number; abs: number | null }>;
   liqTrim: number;
   ocupTrim: number;
+  absTrim: number | null;
   ima: number;
   imaDefeitos: number;
   imaUnidades: number;
@@ -160,6 +170,7 @@ export default function CalibracaoPage() {
   const [dpmoAgregado, setDpmoAgregado] = useState<DpmoAgregado[]>([]);
   const [ocupacaoP2M, setOcupacaoP2M] = useState<OcupacaoP2MTipo[]>([]);
   const [feedbacks, setFeedbacks] = useState<FeedbackTrim[]>([]);
+  const [presencaData, setPresencaData] = useState<PresencaTipo[]>([]);
   const [metaIma, setMetaIma] = useState({ checkin: 1567, p2m: 1567 });
   const [metaOcup, setMetaOcup] = useState({ checkin: 75, p2m: 80 });
   const [metaLiq, setMetaLiq] = useState({ checkin: 296, p2m: 329 });
@@ -204,6 +215,7 @@ export default function CalibracaoPage() {
         ocupData,
         fbData,
         imaManualData,
+        presData,
         confResp,
       ] = await Promise.all([
         fetchAll(supabase.from('colaboradores').select('*').eq('status', 'Ativo'), 'colaboradores'),
@@ -214,6 +226,7 @@ export default function CalibracaoPage() {
         fetchAll(supabase.from('ocupacao_p2m').select('id_groot, user_id, data_referencia, nome_rep, qtd_totes, ocupacao_pct, mes, ano, trimestre'), 'ocupacao_p2m'),
         fetchAll(supabase.from('feedbacks').select('id_groot, classificacao, data_referencia, registrado_em'), 'feedbacks'),
         fetchAll(supabase.from('ima_manual').select('id_groot, mes, ano, trimestre, processo, ima'), 'ima_manual'),
+        fetchAll(supabase.from('presenca').select('id_groot, data_referencia, motivo, categoria, conta_abs, conta_presenca, status'), 'presenca'),
         supabase.from('config').select('chave, valor'),
       ]);
       console.log('🔍 ===== DEBUG CALIBRAÇÃO =====');
@@ -223,6 +236,7 @@ export default function CalibracaoPage() {
       console.log('🔥 DPMO eventos TOTAL:', dpmoData.length);
       console.log('🔥 DPMO agregado TOTAL:', dpmoAggData.length);
       console.log('📷 IMA Manual TOTAL:', imaManualData.length);
+      console.log('🗓️ Presença TOTAL:', presData.length);
       setColaboradores(colabData);
       setHistorico(histData);
       setProdutividadeMensal(prodMensalData);
@@ -231,6 +245,7 @@ export default function CalibracaoPage() {
       setDpmoAgregado(dpmoAggData as DpmoAgregado[]);
       setOcupacaoP2M(ocupData as OcupacaoP2MTipo[]);
       setFeedbacks(fbData as FeedbackTrim[]);
+      setPresencaData(presData as PresencaTipo[]);
       if (confResp.data) {
         const map: Record<string, number> = {};
         confResp.data.forEach((c: { chave: string; valor: string }) => {
@@ -391,18 +406,51 @@ export default function CalibracaoPage() {
         if (arr.length === 0) return 0;
         return arr.reduce((s, v) => s + v, 0) / arr.length;
       };
-      const medMes: Record<number, { liq: number; ocup: number; ima: number }> = {};
+      // 🗓️ ABS OPERACIONAL por mês (faltas / dias esperados)
+      // Fórmula MELI validada (julho + agosto):
+      //   dias_esperados (base) = presença + todas as ausências que contam (conta_abs)
+      //     = exclui folga (DSR), férias, INSS, BH planejado
+      //   ABS Operacional = faltas (categoria='falta') / base
+      //   ABS do trimestre = média ponderada (soma faltas / soma base do trimestre)
+      const presColab = presencaData.filter((p) => p.id_groot === c.id_groot && p.status !== 'descartado');
+      const absPorMes: Record<number, { faltas: number; base: number }> = {};
+      mesesPossiveis.forEach((m) => { absPorMes[m] = { faltas: 0, base: 0 }; });
+      presColab.forEach((p) => {
+        const d = new Date(p.data_referencia + 'T12:00:00');
+        if (d.getFullYear() !== anoNum) return;
+        const mes = d.getMonth() + 1;
+        if (!absPorMes[mes]) return;
+        // base (dias esperados) = presença efetiva + ausências que contam
+        if (p.conta_presenca === true || p.conta_abs === true) {
+          absPorMes[mes].base += 1;
+        }
+        // faltas operacionais = categoria 'falta' (FI, BHnp, Abandono, Suspensão)
+        if (p.conta_abs === true && p.categoria === 'falta') {
+          absPorMes[mes].faltas += 1;
+        }
+      });
+      const absMes = (mes: number): number | null => {
+        const a = absPorMes[mes];
+        if (!a || a.base === 0) return null;
+        return Number(((a.faltas / a.base) * 100).toFixed(1));
+      };
+      const medMes: Record<number, { liq: number; ocup: number; ima: number; abs: number | null }> = {};
       mesesPossiveis.forEach((m) => {
         medMes[m] = {
           liq: Math.round(mediaMes(m, 'liq')),
           ocup: Math.round(mediaMes(m, 'ocup')),
           ima: 0,
+          abs: absMes(m),
         };
       });
       const liqsValidas = mesesPossiveis.map((m) => medMes[m].liq).filter((v) => v > 0);
       const ocupsValidas = mesesPossiveis.map((m) => medMes[m].ocup).filter((v) => v > 0);
       const liqTrim = liqsValidas.length > 0 ? Math.round(liqsValidas.reduce((s, v) => s + v, 0) / liqsValidas.length) : 0;
       const ocupTrim = ocupsValidas.length > 0 ? Math.round(ocupsValidas.reduce((s, v) => s + v, 0) / ocupsValidas.length) : 0;
+      // ABS do trimestre = média PONDERADA (soma faltas / soma base de todos os meses)
+      const totFaltas = mesesPossiveis.reduce((s, m) => s + (absPorMes[m]?.faltas || 0), 0);
+      const totBase = mesesPossiveis.reduce((s, m) => s + (absPorMes[m]?.base || 0), 0);
+      const absTrim: number | null = totBase > 0 ? Number(((totFaltas / totBase) * 100).toFixed(1)) : null;
       let ima = 0;
       let imaDefeitos = 0;
       let imaUnidades = 0;
@@ -594,6 +642,7 @@ export default function CalibracaoPage() {
         medMes,
         liqTrim,
         ocupTrim,
+        absTrim,
         ima,
         imaDefeitos,
         imaUnidades,
@@ -605,7 +654,7 @@ export default function CalibracaoPage() {
         aptidao,
       };
     });
-  }, [colaboradores, historico, produtividadeMensal, imaManual, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
+  }, [colaboradores, historico, produtividadeMensal, imaManual, dpmoEventos, dpmoAgregado, ocupacaoP2M, feedbacks, presencaData, anoNum, quarterSel, mesesPossiveis, metaIma, metaLiq, metaOcup]);
   const porProcesso = {
     Checkin: linhasCalibracao.filter((l) => l.processo === 'Checkin').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
     P2M: linhasCalibracao.filter((l) => l.processo === 'P2M').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
@@ -624,10 +673,12 @@ export default function CalibracaoPage() {
       headers.push(`${NOMES_MESES[m]}_Liq`);
       headers.push(`${NOMES_MESES[m]}_IMA`);
       if (incluiOcup) headers.push(`${NOMES_MESES[m]}_Ocup`);
+      headers.push(`${NOMES_MESES[m]}_ABS`);
     });
     headers.push('Trim_Liq');
     headers.push('Trim_IMA');
     if (incluiOcup) headers.push('Trim_Ocup');
+    headers.push('Trim_ABS');
     headers.push('QUE', 'COMO', 'APTIDAO');
     const rows = linhas.map((l) => {
       const row: (string | number)[] = [l.idGroot, l.nome, l.processo];
@@ -635,10 +686,12 @@ export default function CalibracaoPage() {
         row.push(l.medMes[m]?.liq || '-');
         row.push(l.imaOrigem === 'aguardando' ? 'aguardando' : (l.medMes[m]?.ima || '0'));
         if (incluiOcup) row.push(l.medMes[m]?.ocup ? `${l.medMes[m].ocup}%` : '-');
+        row.push(l.medMes[m]?.abs === null || l.medMes[m]?.abs === undefined ? '-' : `${l.medMes[m]!.abs}%`);
       });
       row.push(l.liqTrim || '-');
       row.push(l.imaOrigem === 'aguardando' ? 'aguardando' : (l.ima || '0'));
       if (incluiOcup) row.push(l.ocupTrim ? `${l.ocupTrim}%` : '-');
+      row.push(l.absTrim === null ? '-' : `${l.absTrim}%`);
       row.push(l.que);
       row.push(l.como);
       row.push(l.aptidao);
@@ -741,7 +794,7 @@ export default function CalibracaoPage() {
       const metaL = processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
       const metaI = processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
       const metaO = metaOcup.p2m;
-      const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0);
+      const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0) + 1; // +1 = coluna ABS
       const headerMeses = mesesComDados.map((m) => `
         <th colspan="${subColsPorMes}" style="padding: 14px 8px; text-align: center; background: ${CORES.amareloSuave}; color: ${CORES.amareloMeli}; font-weight: 700; font-size: 14px; border: 1px solid ${CORES.amareloBorda}; letter-spacing: 1.5px;">
           ${NOMES_MESES_FULL[m]}
@@ -751,22 +804,29 @@ export default function CalibracaoPage() {
         <th style="padding: 9px 4px; text-align: center; background: ${CORES.fundoHeader}; color: ${CORES.textoClaro}; font-size: 11px; font-weight: 700; border-left: 1px solid ${CORES.amareloBorda}; border-bottom: 1px solid ${CORES.bordaSutil}; letter-spacing: 1px;">LÍQ</th>
         ${temIma ? `<th style="padding: 9px 4px; text-align: center; background: ${CORES.fundoHeader}; color: ${CORES.textoClaro}; font-size: 11px; font-weight: 700; border-bottom: 1px solid ${CORES.bordaSutil}; letter-spacing: 1px;">IMA</th>` : ''}
         ${temOcup ? `<th style="padding: 9px 4px; text-align: center; background: ${CORES.fundoHeader}; color: ${CORES.textoClaro}; font-size: 11px; font-weight: 700; border-bottom: 1px solid ${CORES.bordaSutil}; letter-spacing: 1px;">OCUP</th>` : ''}
+        <th style="padding: 9px 4px; text-align: center; background: ${CORES.fundoHeader}; color: ${CORES.textoClaro}; font-size: 11px; font-weight: 700; border-bottom: 1px solid ${CORES.bordaSutil}; letter-spacing: 1px;">ABS</th>
       `).join('');
       const tbody = linhasParte.map((l) => {
         const mesesCells = mesesComDados.map((m) => {
           const liqMes = l.medMes[m]?.liq || 0;
           const imaMes = l.medMes[m]?.ima || 0;
           const ocupMes = l.medMes[m]?.ocup || 0;
+          const absMesVal = l.medMes[m]?.abs;
           const bgLiq = corFundoStatus(liqMes, metaL);
           const txtLiq = corTextoStatus(liqMes, metaL);
           const bgIma = imaMes > 0 ? corFundoStatus(imaMes, metaI, true) : CORES.cinzaBg;
           const txtIma = imaMes > 0 ? corTextoStatus(imaMes, metaI, true) : CORES.cinza;
           const bgOcup = ocupMes > 0 ? corFundoStatus(ocupMes, metaO) : CORES.cinzaBg;
           const txtOcup = ocupMes > 0 ? corTextoStatus(ocupMes, metaO) : CORES.cinza;
+          // ABS: menor = melhor, meta 5% (verde se <=5, vermelho se >5)
+          const temAbs = absMesVal !== null && absMesVal !== undefined;
+          const bgAbs = !temAbs ? CORES.cinzaBg : (absMesVal as number) <= 5 ? CORES.verdeBg : CORES.vermelhoBg;
+          const txtAbs = !temAbs ? CORES.cinza : (absMesVal as number) <= 5 ? CORES.verde : CORES.vermelho;
           return `
             <td style="padding: 12px 6px; text-align: center; background: ${bgLiq}; color: ${txtLiq}; font-family: monospace; font-weight: 800; font-size: 14px; border-left: 1px solid ${CORES.bordaClara};">${liqMes || '—'}</td>
             ${temIma ? `<td style="padding: 12px 6px; text-align: center; background: ${bgIma}; color: ${txtIma}; font-family: monospace; font-weight: 800; font-size: 13px; border-left: 1px solid ${CORES.bordaClara};">${imaMes > 0 ? imaMes.toLocaleString('pt-BR') : '—'}</td>` : ''}
             ${temOcup ? `<td style="padding: 12px 6px; text-align: center; background: ${bgOcup}; color: ${txtOcup}; font-family: monospace; font-weight: 800; font-size: 13px; border-left: 1px solid ${CORES.bordaClara};">${ocupMes > 0 ? ocupMes + '%' : '—'}</td>` : ''}
+            <td style="padding: 12px 6px; text-align: center; background: ${bgAbs}; color: ${txtAbs}; font-family: monospace; font-weight: 800; font-size: 13px; border-left: 1px solid ${CORES.bordaClara};">${temAbs ? absMesVal + '%' : '—'}</td>
           `;
         }).join('');
         return `
@@ -796,7 +856,7 @@ export default function CalibracaoPage() {
         </table>
       `;
     }
-    const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0);
+    const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0) + 1; // +1 = coluna ABS
     const numColsTotal = 1 + (mesesComDados.length * subColsPorMes);
     const widthBase = Math.max(700, numColsTotal * 90);
     const widthTotal = PRECISA_SPLIT ? widthBase * 2 + 40 : widthBase;
@@ -1002,7 +1062,7 @@ export default function CalibracaoPage() {
                       <tr className="border-b border-[#2a2a2a] text-left text-xs text-gray-400">
                         <th className="py-3 px-3" rowSpan={2}>Colab.</th>
                         {mesesComDados.map((m) => (
-                          <th key={m} colSpan={proc === 'Checkin' ? 2 : 3} className="py-3 px-2 text-center border-l border-[#2a2a2a]">{NOMES_MESES[m]}</th>
+                          <th key={m} colSpan={proc === 'Checkin' ? 3 : 4} className="py-3 px-2 text-center border-l border-[#2a2a2a]">{NOMES_MESES[m]}</th>
                         ))}
                         <th className="py-3 px-2 text-center border-l border-[#2a2a2a]" rowSpan={2}>QUE</th>
                         <th className="py-3 px-2 text-center" rowSpan={2}>COMO</th>
@@ -1014,6 +1074,7 @@ export default function CalibracaoPage() {
                             <th key={`${m}-l`} className="py-1 text-center border-l border-[#2a2a2a]">Líq</th>
                             <th key={`${m}-i`} className="py-1 text-center text-purple-400">IMA</th>
                             {proc !== 'Checkin' && <th key={`${m}-o`} className="py-1 text-center text-emerald-400">Oc%</th>}
+                            <th key={`${m}-a`} className="py-1 text-center text-amber-400">ABS</th>
                           </>
                         ))}
                       </tr>
@@ -1042,6 +1103,14 @@ export default function CalibracaoPage() {
                                   {l.medMes[m]?.ocup ? l.medMes[m].ocup + '%' : '-'}
                                 </td>
                               )}
+                              <td key={`${l.idGroot}-${m}-a`} className={`py-2 px-2 text-center font-mono text-xs font-bold ${
+                                l.medMes[m]?.abs === null || l.medMes[m]?.abs === undefined ? 'text-gray-600' :
+                                (l.medMes[m]!.abs as number) < 5 ? 'text-green-400' :
+                                (l.medMes[m]!.abs as number) < 10 ? 'text-amber-400' :
+                                'text-red-400'
+                              }`}>
+                                {l.medMes[m]?.abs === null || l.medMes[m]?.abs === undefined ? '-' : l.medMes[m]!.abs + '%'}
+                              </td>
                             </>
                           ))}
                           <td className="py-2 px-2 text-center border-l border-[#2a2a2a]">
