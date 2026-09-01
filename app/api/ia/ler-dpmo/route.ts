@@ -1,31 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-
 // ============================================
 // API: LER DPMO DO PRINT (Claude Vision) - V2
 // /app/api/ia/ler-dpmo/route.ts
 // 🆕 Prompt reforçado pra evitar erros de leitura
+// 🆕 Log de tamanho de payload (diagnóstico de erro 500 por imagem grande)
 // ============================================
-
 export const runtime = 'nodejs';
 export const maxDuration = 60;
-
 type ImagemInput = {
   base64: string;
   mimeType?: string;
 };
-
 type ColabExtraido = {
   nome: string;
   semanas: Record<string, number | null>;
   total_geral: number | null;
 };
-
 type RespostaIA = {
   semanas: number[];
   colaboradores: ColabExtraido[];
   erro?: string;
 };
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -33,26 +28,24 @@ export async function POST(request: NextRequest) {
     const mes: number = body.mes || 0;
     const ano: number = body.ano || 0;
     const processo: string = body.processo || 'Checkin';
-
+    // 🔍 log de tamanho — ajuda a confirmar se o problema é payload grande
+    const tamanhoTotalKB = imagens.reduce((s, img) => s + (img.base64?.length || 0), 0) / 1024;
+    console.log(`📸 ${imagens.length} imagem(ns) recebida(s) · ~${tamanhoTotalKB.toFixed(0)}KB total (base64)`);
     if (imagens.length === 0) {
       return NextResponse.json({ erro: 'Nenhuma imagem enviada' }, { status: 400 });
     }
     if (imagens.length > 3) {
       return NextResponse.json({ erro: 'Máximo 3 imagens por chamada' }, { status: 400 });
     }
-
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ erro: 'ANTHROPIC_API_KEY não configurada' }, { status: 500 });
     }
-
     const prompt = buildPrompt(mes, ano, processo);
     const content: any[] = [];
-
     imagens.forEach((img, i) => {
       let base64Limpo = img.base64;
       let mimeType = img.mimeType || 'image/png';
-
       if (base64Limpo.startsWith('data:')) {
         const match = base64Limpo.match(/^data:([^;]+);base64,(.+)$/);
         if (match) {
@@ -60,7 +53,6 @@ export async function POST(request: NextRequest) {
           base64Limpo = match[2];
         }
       }
-
       content.push({
         type: 'image',
         source: {
@@ -69,7 +61,6 @@ export async function POST(request: NextRequest) {
           data: base64Limpo,
         },
       });
-
       if (imagens.length > 1) {
         content.push({
           type: 'text',
@@ -77,12 +68,10 @@ export async function POST(request: NextRequest) {
         });
       }
     });
-
     content.push({
       type: 'text',
       text: prompt,
     });
-
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -102,7 +91,6 @@ export async function POST(request: NextRequest) {
         ],
       }),
     });
-
     if (!resp.ok) {
       const errText = await resp.text();
       console.error('❌ Erro API Anthropic:', errText);
@@ -111,11 +99,9 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-
     const data = await resp.json();
     const textoResposta = data.content?.[0]?.text || '';
     console.log('🤖 Resposta bruta da IA:', textoResposta);
-
     const jsonExtraido = extrairJson(textoResposta);
     if (!jsonExtraido) {
       return NextResponse.json(
@@ -123,14 +109,12 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-
     if (!jsonExtraido.colaboradores || !Array.isArray(jsonExtraido.colaboradores)) {
       return NextResponse.json(
         { erro: 'JSON sem colaboradores', respostaBruta: textoResposta },
         { status: 500 }
       );
     }
-
     return NextResponse.json({
       sucesso: true,
       semanas: jsonExtraido.semanas || [],
@@ -142,11 +126,16 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (e: any) {
-    console.error('❌ Erro geral:', e);
-    return NextResponse.json({ erro: e.message || 'Erro desconhecido' }, { status: 500 });
+    // 🔍 log mais detalhado (nome + mensagem) pra facilitar diagnóstico
+    console.error('❌ Erro geral:', e?.name, e?.message, e);
+    // body muito grande costuma vir como erro de parse do request.json()
+    // ou como erro genérico da própria infraestrutura antes de chegar aqui
+    const mensagem = e?.message?.includes('body')
+      ? 'Payload muito grande — tenta com menos prints ou imagens menores'
+      : (e.message || 'Erro desconhecido');
+    return NextResponse.json({ erro: mensagem }, { status: 500 });
   }
 }
-
 // ============================================
 // PROMPT REFORÇADO
 // ============================================
@@ -156,18 +145,13 @@ function buildPrompt(mes: number, ano: number, processo: string): string {
     'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
   ];
   const mesLabel = nomesMeses[mes] || '';
-
   return `Você é um extrator especializado no relatório DPMO do Looker MELI (Mercado Livre).
-
 Analise o(s) print(s) e extraia os dados dos colaboradores em formato JSON.
-
 **CONTEXTO:**
 - Processo: ${processo}
 - Mês/Ano de referência: ${mesLabel} de ${ano}
 - Formato típico: Tabela com nomes à esquerda, valores DPMO por semana e "Total Geral" na última coluna
-
 **⚠️ ATENÇÃO EXTRAORDINÁRIA À LEITURA DE NOMES:**
-
 REGRAS OBRIGATÓRIAS PARA NOMES:
 1. **Leia LETRA POR LETRA cuidadosamente** - Não presuma, não complete, não corrija ortografia
 2. **Se ver 1 "s", escreva 1 "s"** - NÃO dobre letras que você não vê claramente
@@ -176,14 +160,12 @@ REGRAS OBRIGATÓRIAS PARA NOMES:
 5. **NÃO adicione letras** - Só transcreva o que está VISIVELMENTE na imagem
 6. **Preserve acentos** - Se ver "José", escreva "José" (não "Jose")
 7. **Em caso de dúvida** - Escolha a grafia MAIS SIMPLES (menos letras)
-
 EXEMPLOS DE ERROS COMUNS A EVITAR:
 ❌ Ler "Barbosa" (1 s) e escrever "Barbossa" (2 s)
 ❌ Ler "Silva" e escrever "Sylva"
 ❌ Ler "Souza" e escrever "Sousa"
 ❌ Ler "Kaique" e escrever "Caique"
 ✅ Ler EXATAMENTE o que está na imagem, mesmo se parecer estranho
-
 **ESTRUTURA DE RESPOSTA (JSON puro, sem markdown):**
 {
   "semanas": [22, 21, 20, 19, 18],
@@ -201,42 +183,33 @@ EXEMPLOS DE ERROS COMUNS A EVITAR:
     }
   ]
 }
-
 **REGRAS DAS SEMANAS:**
 - Extraia os números do cabeçalho (ex: "Semana 22", "Sem 21")
 - MANTENHA A ORDEM que aparecem no print (mais recente → mais antiga)
 - Se não tem cabeçalho, deduza pela quantidade de colunas
-
 **REGRAS DOS VALORES:**
 - São números inteiros (ex: 1234, 856, 4390)
 - Ponto/vírgula = separador de milhar ("10.014" = 10014)
 - Traço "-" ou "—" = null (valor vazio)
 - "0" literal = 0 (não null)
 - NUNCA invente valores
-
 **REGRAS DO TOTAL GERAL:**
 - SEMPRE a ÚLTIMA coluna
 - Confie no que aparece no print
-
 **SE MÚLTIPLOS PRINTS:**
 - Combine em uma única lista
 - Mesmo colab em prints diferentes → 1 entrada (complementa semanas)
-
 **REGRA FINAL:**
 Retorne APENAS o JSON puro, sem markdown, sem \`\`\`json, sem texto antes/depois.
 Comece com { e termine com }.
-
 **SE TIVER QUALQUER DÚVIDA NUM NOME → PREFIRA A GRAFIA MAIS SIMPLES/CURTA**`;
 }
-
 function extrairJson(texto: string): RespostaIA | null {
   if (!texto) return null;
   let limpo = texto.replace(/\`\`\`json\s*/gi, '').replace(/\`\`\`\s*/g, '').trim();
-
   try {
     return JSON.parse(limpo);
   } catch {}
-
   const match = limpo.match(/\{[\s\S]*\}/);
   if (match) {
     try {
