@@ -151,7 +151,6 @@ function corAptidao(apt: string): string {
   if (apt === 'NÃO APTO') return 'bg-red-500 text-white';
   return 'bg-gray-500 text-white';
 }
-// 🆕 CONVERTE LOGO EM BASE64 (pra html2canvas capturar sem erro de CORS)
 async function carregarLogoBase64(): Promise<string> {
   try {
     const res = await fetch('/logos/pngwing.com.png');
@@ -273,14 +272,13 @@ export default function CalibracaoPage() {
   // ✏️ Salva o ABS Operacional digitado à mão pra um colaborador/mês
   async function salvarAbsManual(idGroot: string, mes: number, valorRaw: string) {
     const limpo = valorRaw.replace('%', '').replace(',', '.').trim();
-    // vazio → remove o valor manual (volta pro calculado)
     if (limpo === '') {
       await supabase.from('abs_manual').delete().match({ id_groot: idGroot, mes, ano: anoNum });
       setAbsManual((prev) => prev.filter((x) => !(x.id_groot === idGroot && x.mes === mes && x.ano === anoNum)));
       return;
     }
     const valor = Number(limpo);
-    if (isNaN(valor) || valor < 0 || valor > 100) return; // ignora inválido
+    if (isNaN(valor) || valor < 0 || valor > 100) return;
     const arredondado = Number(valor.toFixed(2));
     const { error } = await supabase
       .from('abs_manual')
@@ -292,10 +290,37 @@ export default function CalibracaoPage() {
       console.error('Erro ao salvar ABS manual:', error);
       return;
     }
-    // atualiza estado local (sem recarregar tudo)
     setAbsManual((prev) => {
       const semEsse = prev.filter((x) => !(x.id_groot === idGroot && x.mes === mes && x.ano === anoNum));
       return [...semEsse, { id_groot: idGroot, mes, ano: anoNum, abs_pct: arredondado }];
+    });
+  }
+  // ✏️ NOVO: Salva o IMA digitado à mão pra um colaborador/mês (mesmo padrão do ABS).
+  // Grava na tabela ima_manual, que JÁ é lida e priorizada no cálculo — só faltava
+  // uma forma de editar direto na tela em vez de precisar do upload de print/CSV.
+  async function salvarImaManual(idGroot: string, mes: number, valorRaw: string, processo: string) {
+    const limpo = valorRaw.replace(/\./g, '').replace(',', '.').trim();
+    if (limpo === '') {
+      await supabase.from('ima_manual').delete().match({ id_groot: idGroot, mes, ano: anoNum, processo });
+      setImaManual((prev) => prev.filter((x) => !(String(x.id_groot) === idGroot && Number(x.mes) === mes && Number(x.ano) === anoNum && processosIguais(x.processo, processo))));
+      return;
+    }
+    const valor = Number(limpo);
+    if (isNaN(valor) || valor < 0) return;
+    const arredondado = Math.round(valor);
+    const { error } = await supabase
+      .from('ima_manual')
+      .upsert(
+        { id_groot: idGroot, mes, ano: anoNum, trimestre: quarterSel, processo, ima: arredondado },
+        { onConflict: 'id_groot,mes,ano,processo' }
+      );
+    if (error) {
+      console.error('Erro ao salvar IMA manual:', error);
+      return;
+    }
+    setImaManual((prev) => {
+      const semEsse = prev.filter((x) => !(String(x.id_groot) === idGroot && Number(x.mes) === mes && Number(x.ano) === anoNum && processosIguais(x.processo, processo)));
+      return [...semEsse, { id_groot: idGroot, mes, ano: anoNum, trimestre: quarterSel, processo, ima: arredondado }];
     });
   }
   const trimestresDisponiveis = useMemo(() => {
@@ -402,20 +427,15 @@ export default function CalibracaoPage() {
         const { quarter, ano } = getTrimestreDeData(h.data_referencia);
         return ano === anoNum && quarter === quarterSel;
       });
-      // 📊 LÍQUIDA PONDERADA POR HORAS (correto):
-      //   liq = Σ(unidades) ÷ Σ(horas)   — nunca média das médias diárias
-      //   horas de cada dia = unidades ÷ prod_liquida  (deriva do histórico)
-      //   OCUP continua sendo média simples dos dias (é um % de utilização)
       const mediasPorMes: Record<number, { unidades: number; horas: number; ocup: number[] }> = {};
       histColab.forEach((h) => {
         const { mes } = getTrimestreDeData(h.data_referencia);
         if (!mediasPorMes[mes]) mediasPorMes[mes] = { unidades: 0, horas: 0, ocup: [] };
-        // só acumula dias com dados válidos (pula prod_liquida=0 ou unidades=0)
         const und = Number(h.unidades) || 0;
         const liqDia = Number(h.prod_liquida) || 0;
         if (und > 0 && liqDia > 0) {
           mediasPorMes[mes].unidades += und;
-          mediasPorMes[mes].horas += und / liqDia; // horas do dia = peças ÷ (peças/hora)
+          mediasPorMes[mes].horas += und / liqDia;
         }
       });
       const prodMensalColab = produtividadeMensal.filter((p) => {
@@ -437,7 +457,6 @@ export default function CalibracaoPage() {
         if (!mediasPorMes[pMes]) mediasPorMes[pMes] = { unidades: 0, horas: 0, ocup: [] };
         const liqValue = Number(p.prod_liquida_media) || 0;
         const undValue = Number(p.unidades_total) || 0;
-        // reconstrói as horas do mês: unidades ÷ (peças/hora). Só se ambos > 0.
         if (undValue > 0 && liqValue > 0) {
           mediasPorMes[pMes].unidades += undValue;
           mediasPorMes[pMes].horas += undValue / liqValue;
@@ -453,7 +472,6 @@ export default function CalibracaoPage() {
           if (o.ocupacao_pct > 0) mediasPorMes[o.mes].ocup.push(o.ocupacao_pct);
         });
       }
-      // LÍQUIDA do mês = Σ unidades ÷ Σ horas (ponderada). OCUP = média simples dos dias.
       const liqDoMes = (mes: number): number => {
         const m = mediasPorMes[mes];
         if (!m || m.horas <= 0) return 0;
@@ -464,12 +482,6 @@ export default function CalibracaoPage() {
         if (arr.length === 0) return 0;
         return arr.reduce((s, v) => s + v, 0) / arr.length;
       };
-      // 🗓️ ABS OPERACIONAL por mês (faltas / dias esperados)
-      // Fórmula MELI validada (julho + agosto):
-      //   dias_esperados (base) = presença + todas as ausências que contam (conta_abs)
-      //     = exclui folga (DSR), férias, INSS, BH planejado
-      //   ABS Operacional = faltas (categoria='falta') / base
-      //   ABS do trimestre = média ponderada (soma faltas / soma base do trimestre)
       const presColab = presencaData.filter((p) => p.id_groot === c.id_groot && p.status !== 'descartado');
       const absPorMes: Record<number, { faltas: number; base: number }> = {};
       mesesPossiveis.forEach((m) => { absPorMes[m] = { faltas: 0, base: 0 }; });
@@ -478,11 +490,9 @@ export default function CalibracaoPage() {
         if (d.getFullYear() !== anoNum) return;
         const mes = d.getMonth() + 1;
         if (!absPorMes[mes]) return;
-        // base (dias esperados) = presença efetiva + ausências que contam
         if (p.conta_presenca === true || p.conta_abs === true) {
           absPorMes[mes].base += 1;
         }
-        // faltas operacionais = categoria 'falta' (FI, BHnp, Abandono, Suspensão)
         if (p.conta_abs === true && p.categoria === 'falta') {
           absPorMes[mes].faltas += 1;
         }
@@ -492,7 +502,6 @@ export default function CalibracaoPage() {
         if (!a || a.base === 0) return null;
         return Number(((a.faltas / a.base) * 100).toFixed(1));
       };
-      // ABS manual sobrescreve o calculado: se há valor digitado pra esse mês/ano, usa ele
       const absManualDe = (mes: number): number | null => {
         const rec = absManual.find((x) => x.id_groot === c.id_groot && x.mes === mes && x.ano === anoNum);
         return rec ? Number(rec.abs_pct) : null;
@@ -511,16 +520,11 @@ export default function CalibracaoPage() {
           abs: absMes(m),
         };
       });
-      // LÍQUIDA do TRIMESTRE = Σ unidades ÷ Σ horas de TODOS os meses (ponderada, não média das médias)
       const totUnidadesTrim = mesesPossiveis.reduce((s, m) => s + (mediasPorMes[m]?.unidades || 0), 0);
       const totHorasTrim = mesesPossiveis.reduce((s, m) => s + (mediasPorMes[m]?.horas || 0), 0);
       const liqTrim = totHorasTrim > 0 ? Math.round(totUnidadesTrim / totHorasTrim) : 0;
-      // OCUP do trimestre = média simples dos meses com ocupação (continua como antes)
       const ocupsValidas = mesesPossiveis.map((m) => medMes[m].ocup).filter((v) => v > 0);
       const ocupTrim = ocupsValidas.length > 0 ? Math.round(ocupsValidas.reduce((s, v) => s + v, 0) / ocupsValidas.length) : 0;
-      // ABS do trimestre:
-      //   - Se NENHUM mês tem valor manual → média PONDERADA (soma faltas / soma base)
-      //   - Se ALGUM mês é manual → média SIMPLES dos ABS mensais finais (o manual não tem faltas/base)
       const temAlgumManual = mesesPossiveis.some((m) => absManualDe(m) !== null);
       let absTrim: number | null;
       if (temAlgumManual) {
@@ -710,13 +714,9 @@ export default function CalibracaoPage() {
         else if (supera >= alinhado && supera >= abaixo) como = 'Supera';
         else como = 'Alinhado';
       }
-      // 🗓️ ABS entra no COMO junto com o feedback:
-      //   ABS > 5% → puxa o COMO pra Abaixo (eliminatório, mesmo com feedback bom)
-      //   ABS ≤ 5% → não atrapalha (mantém o que veio do feedback)
       if (absTrim !== null && absTrim > 5) {
         como = 'Abaixo';
       } else if (absTrim !== null && absTrim <= 5 && como === 'Sem feedbacks') {
-        // sem feedback mas ABS bom → conta como Alinhado (postura ok na presença)
         como = 'Alinhado';
       }
       let aptidao = 'Sem dados';
@@ -804,12 +804,6 @@ export default function CalibracaoPage() {
     URL.revokeObjectURL(url);
     (window as any).showToast?.('success', `📥 ${processo} exportado!`);
   }
-  // ============================================
-  // 🎨 PRINT DARK + HEADER TIME DEL (padrão boletim)
-  // Header faixa amarela + logo círculo branco + título azul + selo TIME DEL
-  // Cores de status MAIS VISÍVEIS (verde/vermelho com mais contraste)
-  // Números maiores. Logo MELI base64. Split em 2 quando >35 colabs.
-  // ============================================
   async function gerarPrintPublico(processo: 'Checkin' | 'P2M' | 'Sorting') {
     const linhas = porProcesso[processo];
     if (linhas.length === 0) return;
@@ -837,9 +831,7 @@ export default function CalibracaoPage() {
     const metade = Math.ceil(linhasOrdenadas.length / 2);
     const parte1 = PRECISA_SPLIT ? linhasOrdenadas.slice(0, metade) : linhasOrdenadas;
     const parte2 = PRECISA_SPLIT ? linhasOrdenadas.slice(metade) : [];
-    // 🖼️ Carrega logo MELI em base64
     const logoBase64 = await carregarLogoBase64();
-    // 🎨 PALETA — dark com status MAIS VISÍVEL + amarelo/azul MELI (padrão boletim)
     const MELI = {
       amarelo: '#FFE600',
       amareloEscuro: '#FFD100',
@@ -854,16 +846,15 @@ export default function CalibracaoPage() {
       amareloMeli: '#FFD700',
       amareloSuave: 'rgba(255, 215, 0, 0.14)',
       amareloBorda: 'rgba(255, 215, 0, 0.5)',
-      // 🎨 CÉLULAS DE RESULTADO CLARAS (fundo claro azulado + número escuro) — estilo boletim
-      verde: '#0f7a43',          // número verde escuro (em cima do fundo claro)
-      verdeBg: '#d6f5e3',        // fundo verde claro
-      vermelho: '#b02525',       // número vermelho escuro
-      vermelhoBg: '#fbdcdc',     // fundo vermelho claro
-      cinza: '#8a94a6',          // texto cinza (sem dados)
-      cinzaBg: '#e8ecf4',        // fundo cinza azulado claro (sem dados)
-      idBg: '#eef1f8',           // fundo do ID (branco azulado)
-      idTexto: '#2D3277',        // ID em azul MELI
-      bordaClara: '#c5cee0',     // borda azulada entre células claras
+      verde: '#0f7a43',
+      verdeBg: '#d6f5e3',
+      vermelho: '#b02525',
+      vermelhoBg: '#fbdcdc',
+      cinza: '#8a94a6',
+      cinzaBg: '#e8ecf4',
+      idBg: '#eef1f8',
+      idTexto: '#2D3277',
+      bordaClara: '#c5cee0',
       textoBranco: '#ffffff',
       textoClaro: '#e5e5e5',
       textoMedio: '#a3a3a3',
@@ -885,7 +876,7 @@ export default function CalibracaoPage() {
       const metaL = processo === 'Checkin' ? metaLiq.checkin : metaLiq.p2m;
       const metaI = processo === 'Checkin' ? metaIma.checkin : metaIma.p2m;
       const metaO = metaOcup.p2m;
-      const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0) + 1; // +1 = coluna ABS
+      const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0) + 1;
       const headerMeses = mesesComDados.map((m) => `
         <th colspan="${subColsPorMes}" style="padding: 14px 8px; text-align: center; background: ${CORES.amareloSuave}; color: ${CORES.amareloMeli}; font-weight: 700; font-size: 14px; border: 1px solid ${CORES.amareloBorda}; letter-spacing: 1.5px;">
           ${NOMES_MESES_FULL[m]}
@@ -909,7 +900,6 @@ export default function CalibracaoPage() {
           const txtIma = imaMes > 0 ? corTextoStatus(imaMes, metaI, true) : CORES.cinza;
           const bgOcup = ocupMes > 0 ? corFundoStatus(ocupMes, metaO) : CORES.cinzaBg;
           const txtOcup = ocupMes > 0 ? corTextoStatus(ocupMes, metaO) : CORES.cinza;
-          // ABS: menor = melhor, meta 5% (verde se <=5, vermelho se >5)
           const temAbs = absMesVal !== null && absMesVal !== undefined;
           const bgAbs = !temAbs ? CORES.cinzaBg : (absMesVal as number) <= 5 ? CORES.verdeBg : CORES.vermelhoBg;
           const txtAbs = !temAbs ? CORES.cinza : (absMesVal as number) <= 5 ? CORES.verde : CORES.vermelho;
@@ -947,14 +937,13 @@ export default function CalibracaoPage() {
         </table>
       `;
     }
-    const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0) + 1; // +1 = coluna ABS
+    const subColsPorMes = (temIma ? 1 : 0) + 1 + (temOcup ? 1 : 0) + 1;
     const numColsTotal = 1 + (mesesComDados.length * subColsPorMes);
     const widthBase = Math.max(700, numColsTotal * 90);
     const widthTotal = PRECISA_SPLIT ? widthBase * 2 + 40 : widthBase;
     const div = document.createElement('div');
     div.style.cssText = `position: fixed; top: -9999px; left: -9999px; width: ${widthTotal}px; padding: 40px; background: ${CORES.fundoBase}; color: ${CORES.textoBranco}; font-family: -apple-system, system-ui, sans-serif;`;
     div.innerHTML = `
-      <!-- HEADER estilo boletim: faixa amarela + logo círculo branco + título azul + selo TIME DEL -->
       <div style="border-radius: 14px; overflow: hidden; border: 1px solid ${MELI.amarelo}55; margin-bottom: 20px;">
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; gap: 16px; background: linear-gradient(90deg, ${MELI.amarelo} 0%, ${MELI.amareloEscuro} 100%);">
           <div style="display: flex; align-items: center; gap: 18px;">
@@ -976,7 +965,6 @@ export default function CalibracaoPage() {
           </div>
         </div>
       </div>
-      <!-- SUBINFO -->
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; padding: 0 4px;">
         <p style="color: ${CORES.textoMedio}; font-size: 12px; margin: 0; letter-spacing: 1px;">
           📅 Dados até <span style="color: ${CORES.textoClaro}; font-weight: 700;">${dataMaxFormatada}</span>
@@ -1066,7 +1054,7 @@ export default function CalibracaoPage() {
       <ApolloBadge
         mood="info"
         message="IMA do Print OCR puxado em tempo real"
-        detail="Print OCR (prioridade) + CSV Looker · Bate 100% com Looker"
+        detail="Print OCR (prioridade) + CSV Looker + edição manual · Bate 100% com Looker"
       />
       {trimestresDisponiveis.length === 0 ? (
         <div className="bg-[#1a1a1a] border-2 border-dashed border-[#2a2a2a] rounded-2xl p-12 text-center">
@@ -1116,7 +1104,7 @@ export default function CalibracaoPage() {
           {totalAguardando > 0 && (
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-sm">
               <p className="text-blue-300">
-                ⏳ <strong>{totalAguardando} colaboradores</strong> aguardando dados de DPMO. Sobe o print/CSV em MEU TIME pra completar.
+                ⏳ <strong>{totalAguardando} colaboradores</strong> aguardando dados de DPMO. Sobe o print/CSV em MEU TIME ou clica na célula IMA pra digitar direto.
               </p>
             </div>
           )}
@@ -1182,12 +1170,24 @@ export default function CalibracaoPage() {
                               <td key={`${l.idGroot}-${m}-l`} className="py-2 px-2 text-center text-gray-300 font-mono text-xs border-l border-[#2a2a2a]">
                                 {l.medMes[m]?.liq || '-'}
                               </td>
-                              <td key={`${l.idGroot}-${m}-i`} className="py-2 px-2 text-center font-mono text-xs">
-                                {l.imaOrigem === 'aguardando' && !l.medMes[m]?.ima ? (
-                                  <span className="text-blue-400">⏳</span>
-                                ) : (
-                                  <span className="text-purple-300 font-bold">{l.medMes[m]?.ima || '0'}</span>
-                                )}
+                              <td key={`${l.idGroot}-${m}-i`} className="py-2 px-2 text-center">
+                                <span
+                                  contentEditable
+                                  suppressContentEditableWarning
+                                  onBlur={(e) => {
+                                    const txt = e.currentTarget.textContent || '';
+                                    salvarImaManual(l.idGroot, m, txt, l.processo);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLElement).blur(); }
+                                  }}
+                                  title="Clique pra editar o IMA. Vazio = volta pro cálculo automático (DPMO)."
+                                  className={`inline-block min-w-[42px] px-1.5 py-0.5 rounded font-mono text-xs font-bold cursor-text outline-none border border-dashed border-transparent hover:border-[#FFD700]/40 focus:border-[#FFD700] focus:bg-[#FFD700]/5 ${
+                                    l.imaOrigem === 'aguardando' && !l.medMes[m]?.ima ? 'text-blue-400' : 'text-purple-300'
+                                  }`}
+                                >
+                                  {l.imaOrigem === 'aguardando' && !l.medMes[m]?.ima ? '⏳' : (l.medMes[m]?.ima || '')}
+                                </span>
                               </td>
                               {proc !== 'Checkin' && (
                                 <td key={`${l.idGroot}-${m}-o`} className="py-2 px-2 text-center text-emerald-300 font-mono text-xs font-bold">
@@ -1238,10 +1238,10 @@ export default function CalibracaoPage() {
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 text-sm text-blue-300">
             <p className="font-bold mb-2">💡 Cálculo:</p>
             <ul className="space-y-1 list-disc pl-5 text-xs">
-              <li><strong>IMA</strong> = vem do PRINT OCR (Total Geral do colaborador) ou cálculo do CSV Looker</li>
-              <li>IMA Manual (print) tem PRIORIDADE sobre cálculo automático</li>
+              <li><strong>IMA</strong> = vem do PRINT OCR (Total Geral do colaborador), CSV Looker, ou digitado manualmente clicando na célula</li>
+              <li>IMA Manual (print ou digitado na tela) tem PRIORIDADE sobre cálculo automático</li>
               <li><strong>QUE</strong> = Líquida + Ocupação + IMA (3 pontos: Supera / 1-2: Alinhado / 0: Abaixo)</li>
-              <li><strong>COMO</strong> = derivado dos feedbacks</li>
+              <li><strong>COMO</strong> = derivado dos feedbacks + ABS</li>
               <li><strong>APTIDÃO</strong>: QUE=Supera + COMO≥Alinhado → APTO | Algum Abaixo → NÃO APTO | Resto → EM OBSERVAÇÃO</li>
             </ul>
           </div>
