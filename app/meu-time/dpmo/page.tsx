@@ -106,15 +106,49 @@ export default function DpmoPage() {
       console.log(`👥 ${unicos.length} colabs ${processoSelecionado} carregados`);
     }
   }
-  function adicionarPrint(file: File) {
+  // 🖼️ Comprime/redimensiona a imagem antes de guardar.
+  // Print de tela cheia em PNG pode passar de 2-3MB; com 3 prints
+  // isso ultrapassa o limite de payload da Vercel (~4.5MB) e a
+  // requisição falha com 500 antes mesmo de chegar na IA.
+  // Redimensiona pra no máx 1600px de largura + converte pra JPEG
+  // qualidade 0.85 — reduz o tamanho bastante sem perder legibilidade.
+  function comprimirImagem(file: File): Promise<{ base64: string; mimeType: string }> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.onload = () => {
+          const MAX_LARGURA = 1600;
+          let { width, height } = img;
+          if (width > MAX_LARGURA) {
+            height = Math.round((height * MAX_LARGURA) / width);
+            width = MAX_LARGURA;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { reject(new Error('Canvas não suportado')); return; }
+          ctx.drawImage(img, 0, 0, width, height);
+          const base64 = canvas.toDataURL('image/jpeg', 0.85);
+          resolve({ base64, mimeType: 'image/jpeg' });
+        };
+        img.onerror = () => reject(new Error('Falha ao carregar imagem'));
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => reject(new Error('Falha ao ler arquivo'));
+      reader.readAsDataURL(file);
+    });
+  }
+  async function adicionarPrint(file: File) {
     if (prints.length >= 3) { toast.error('Limite atingido', 'Máximo 3 prints por upload'); return; }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target?.result as string;
-      const mimeType = file.type || 'image/png';
+    try {
+      const { base64, mimeType } = await comprimirImagem(file);
       setPrints((prev) => [...prev, { base64, mimeType, processando: false, status: 'aguardando' }]);
-    };
-    reader.readAsDataURL(file);
+    } catch (e: any) {
+      console.error('❌ Erro comprimindo imagem:', e);
+      toast.error('Erro ao processar imagem', e.message || 'Tenta outra imagem');
+    }
   }
   async function lerComIA() {
     if (prints.length === 0) { toast.error('Sem prints', 'Adicione ao menos 1 print'); return; }
