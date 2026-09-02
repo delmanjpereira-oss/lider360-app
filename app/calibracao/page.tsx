@@ -275,6 +275,7 @@ export default function CalibracaoPage() {
     if (limpo === '') {
       await supabase.from('abs_manual').delete().match({ id_groot: idGroot, mes, ano: anoNum });
       setAbsManual((prev) => prev.filter((x) => !(x.id_groot === idGroot && x.mes === mes && x.ano === anoNum)));
+      (window as any).showToast?.('success', '✅ ABS removido (voltou ao cálculo automático)');
       return;
     }
     const valor = Number(limpo);
@@ -288,12 +289,16 @@ export default function CalibracaoPage() {
       );
     if (error) {
       console.error('Erro ao salvar ABS manual:', error);
+      (window as any).showToast?.('error', '❌ Erro ao salvar ABS: ' + error.message);
       return;
     }
     setAbsManual((prev) => {
       const semEsse = prev.filter((x) => !(x.id_groot === idGroot && x.mes === mes && x.ano === anoNum));
       return [...semEsse, { id_groot: idGroot, mes, ano: anoNum, abs_pct: arredondado }];
     });
+    // ⚠️ o salvamento é assíncrono — espera esse toast aparecer antes de
+    // clicar em "Gerar Print", senão o print pode sair com o valor antigo
+    (window as any).showToast?.('success', `✅ ABS salvo: ${arredondado}% · pode gerar o print`);
   }
   // ✏️ NOVO: Salva o IMA digitado à mão pra um colaborador/mês (mesmo padrão do ABS).
   // Grava na tabela ima_manual, que JÁ é lida e priorizada no cálculo — só faltava
@@ -303,6 +308,7 @@ export default function CalibracaoPage() {
     if (limpo === '') {
       await supabase.from('ima_manual').delete().match({ id_groot: idGroot, mes, ano: anoNum, processo });
       setImaManual((prev) => prev.filter((x) => !(String(x.id_groot) === idGroot && Number(x.mes) === mes && Number(x.ano) === anoNum && processosIguais(x.processo, processo))));
+      (window as any).showToast?.('success', '✅ IMA removido (voltou ao cálculo automático)');
       return;
     }
     const valor = Number(limpo);
@@ -316,12 +322,16 @@ export default function CalibracaoPage() {
       );
     if (error) {
       console.error('Erro ao salvar IMA manual:', error);
+      (window as any).showToast?.('error', '❌ Erro ao salvar IMA: ' + error.message);
       return;
     }
     setImaManual((prev) => {
       const semEsse = prev.filter((x) => !(String(x.id_groot) === idGroot && Number(x.mes) === mes && Number(x.ano) === anoNum && processosIguais(x.processo, processo)));
       return [...semEsse, { id_groot: idGroot, mes, ano: anoNum, trimestre: quarterSel, processo, ima: arredondado }];
     });
+    // ⚠️ o salvamento é assíncrono — espera esse toast aparecer antes de
+    // clicar em "Gerar Print", senão o print pode sair com o valor antigo
+    (window as any).showToast?.('success', `✅ IMA salvo: ${arredondado} · pode gerar o print`);
   }
   const trimestresDisponiveis = useMemo(() => {
     const set = new Set<string>();
