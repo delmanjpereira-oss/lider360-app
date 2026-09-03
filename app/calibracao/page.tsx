@@ -1050,6 +1050,19 @@ export default function CalibracaoPage() {
         </span>
       </div>
     `;
+    // 🔍 DEBUG TEMPORÁRIO — mostra no console os dados de IMA que
+    // foram usados pra montar o print, pra achar onde o valor se perde
+    console.log('🔍 DEBUG PRINT - linhas com IMA manual:');
+    linhasOrdenadas.forEach((l) => {
+      mesesComDados.forEach((m) => {
+        const manualDesseColabMes = imaManual.find((im: any) =>
+          String(im.id_groot) === String(l.idGroot) && Number(im.mes) === m && Number(im.ano) === anoNum
+        );
+        if (manualDesseColabMes) {
+          console.log(`  ${l.nome} (${l.idGroot}) mês ${m}: manual salvo=${manualDesseColabMes.ima} | l.medMes[${m}].ima=${l.medMes[m]?.ima}`);
+        }
+      });
+    });
     document.body.appendChild(div);
     try {
       const html2canvas = (await import('html2canvas')).default;
