@@ -303,10 +303,15 @@ export default function CalibracaoPage() {
   // ✏️ NOVO: Salva o IMA digitado à mão pra um colaborador/mês (mesmo padrão do ABS).
   // Grava na tabela ima_manual, que JÁ é lida e priorizada no cálculo — só faltava
   // uma forma de editar direto na tela em vez de precisar do upload de print/CSV.
-  async function salvarImaManual(idGroot: string, mes: number, valorRaw: string, processo: string) {
+  async function salvarImaManual(idGroot: string, mes: number, valorRaw: string, processo: string, nomeColab: string) {
     const limpo = valorRaw.replace(/\./g, '').replace(',', '.').trim();
     if (limpo === '') {
-      await supabase.from('ima_manual').delete().match({ id_groot: idGroot, mes, ano: anoNum, processo });
+      const { error: errDel } = await supabase.from('ima_manual').delete().match({ id_groot: idGroot, mes, ano: anoNum, processo });
+      if (errDel) {
+        console.error('Erro ao remover IMA manual:', errDel);
+        (window as any).showToast?.('error', '❌ Erro ao remover IMA: ' + errDel.message);
+        return;
+      }
       setImaManual((prev) => prev.filter((x) => !(String(x.id_groot) === idGroot && Number(x.mes) === mes && Number(x.ano) === anoNum && processosIguais(x.processo, processo))));
       (window as any).showToast?.('success', '✅ IMA removido (voltou ao cálculo automático)');
       return;
@@ -314,20 +319,43 @@ export default function CalibracaoPage() {
     const valor = Number(limpo);
     if (isNaN(valor) || valor < 0) return;
     const arredondado = Math.round(valor);
-    const { error } = await supabase
+    // 🐛 FIX: gravação idêntica à do Upload de DPMO (mesmos campos:
+    // nome, atualizado_em, atualizado_por + .select() no final) —
+    // antes faltavam esses campos aqui, e se 'nome' for NOT NULL na
+    // tabela o upsert falhava silenciosamente (a tela mostrava o
+    // valor pelo estado local do React, mas não persistia no banco,
+    // por isso sumia do PNG, que é gerado a partir dos dados reais).
+    const { error, data } = await supabase
       .from('ima_manual')
       .upsert(
-        { id_groot: idGroot, mes, ano: anoNum, trimestre: quarterSel, processo, ima: arredondado },
+        {
+          id_groot: idGroot,
+          nome: nomeColab,
+          mes,
+          ano: anoNum,
+          trimestre: quarterSel,
+          processo,
+          ima: arredondado,
+          atualizado_em: new Date().toISOString(),
+          atualizado_por: 'delman.jpereira@mercadolivre.com',
+        },
         { onConflict: 'id_groot,mes,ano,processo' }
-      );
+      )
+      .select();
     if (error) {
       console.error('Erro ao salvar IMA manual:', error);
       (window as any).showToast?.('error', '❌ Erro ao salvar IMA: ' + error.message);
       return;
     }
+    if (!data || data.length === 0) {
+      // upsert "passou" mas não retornou linha — sinal de que algo bloqueou
+      // silenciosamente (RLS, trigger, etc). Avisa em vez de fingir sucesso.
+      console.warn('IMA manual: upsert sem retorno de linha', { idGroot, mes, processo });
+      (window as any).showToast?.('error', '⚠️ IMA pode não ter salvo — confere depois de recarregar');
+    }
     setImaManual((prev) => {
       const semEsse = prev.filter((x) => !(String(x.id_groot) === idGroot && Number(x.mes) === mes && Number(x.ano) === anoNum && processosIguais(x.processo, processo)));
-      return [...semEsse, { id_groot: idGroot, mes, ano: anoNum, trimestre: quarterSel, processo, ima: arredondado }];
+      return [...semEsse, { id_groot: idGroot, nome: nomeColab, mes, ano: anoNum, trimestre: quarterSel, processo, ima: arredondado }];
     });
     // ⚠️ o salvamento é assíncrono — espera esse toast aparecer antes de
     // clicar em "Gerar Print", senão o print pode sair com o valor antigo
@@ -1198,7 +1226,7 @@ export default function CalibracaoPage() {
                                   suppressContentEditableWarning
                                   onBlur={(e) => {
                                     const txt = e.currentTarget.textContent || '';
-                                    salvarImaManual(l.idGroot, m, txt, l.processo);
+                                    salvarImaManual(l.idGroot, m, txt, l.processo, l.nome);
                                   }}
                                   onKeyDown={(e) => {
                                     if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLElement).blur(); }
