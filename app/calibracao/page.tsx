@@ -865,7 +865,11 @@ export default function CalibracaoPage() {
     const linhasOrdenadas = [...linhasComDados].sort((a, b) => (b.liqTrim || 0) - (a.liqTrim || 0));
     const temIma = processo === 'Checkin' || processo === 'P2M';
     const temOcup = processo === 'P2M';
-    const PRECISA_SPLIT = linhasOrdenadas.length > 35;
+    // 📱 Split em 2 partes a partir de 20 colabs (era 35) — com muita
+    // gente numa coluna só, a imagem fica alta/estreita demais e o
+    // preview do WhatsApp corta ou fica ilegível. Dividindo mais cedo,
+    // a proporção fica mais equilibrada (mais parecida com paisagem).
+    const PRECISA_SPLIT = linhasOrdenadas.length > 20;
     const metade = Math.ceil(linhasOrdenadas.length / 2);
     const parte1 = PRECISA_SPLIT ? linhasOrdenadas.slice(0, metade) : linhasOrdenadas;
     const parte2 = PRECISA_SPLIT ? linhasOrdenadas.slice(metade) : [];
