@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 import ApolloBadge from '../components/ApolloBadge';
@@ -1050,19 +1050,6 @@ export default function CalibracaoPage() {
         </span>
       </div>
     `;
-    // 🔍 DEBUG TEMPORÁRIO — mostra no console os dados de IMA que
-    // foram usados pra montar o print, pra achar onde o valor se perde
-    console.log('🔍 DEBUG PRINT - linhas com IMA manual:');
-    linhasOrdenadas.forEach((l) => {
-      mesesComDados.forEach((m) => {
-        const manualDesseColabMes = imaManual.find((im: any) =>
-          String(im.id_groot) === String(l.idGroot) && Number(im.mes) === m && Number(im.ano) === anoNum
-        );
-        if (manualDesseColabMes) {
-          console.log(`  ${l.nome} (${l.idGroot}) mês ${m}: manual salvo=${manualDesseColabMes.ima} | l.medMes[${m}].ima=${l.medMes[m]?.ima}`);
-        }
-      });
-    });
     document.body.appendChild(div);
     try {
       const html2canvas = (await import('html2canvas')).default;
@@ -1212,12 +1199,12 @@ export default function CalibracaoPage() {
                       </tr>
                       <tr className="border-b border-[#2a2a2a] text-xs text-gray-500">
                         {mesesComDados.map((m) => (
-                          <>
+                          <React.Fragment key={`sub-${m}`}>
                             <th key={`${m}-l`} className="py-1 text-center border-l border-[#2a2a2a]">Líq</th>
                             <th key={`${m}-i`} className="py-1 text-center text-purple-400">IMA</th>
                             {proc !== 'Checkin' && <th key={`${m}-o`} className="py-1 text-center text-emerald-400">Oc%</th>}
                             <th key={`${m}-a`} className="py-1 text-center text-amber-400">ABS</th>
-                          </>
+                          </React.Fragment>
                         ))}
                       </tr>
                     </thead>
@@ -1229,7 +1216,7 @@ export default function CalibracaoPage() {
                             <div className="text-xs text-gray-500 font-mono">{l.idGroot}</div>
                           </td>
                           {mesesComDados.map((m) => (
-                            <>
+                            <React.Fragment key={`${l.idGroot}-mescel-${m}`}>
                               <td key={`${l.idGroot}-${m}-l`} className="py-2 px-2 text-center text-gray-300 font-mono text-xs border-l border-[#2a2a2a]">
                                 {l.medMes[m]?.liq || '-'}
                               </td>
@@ -1279,7 +1266,7 @@ export default function CalibracaoPage() {
                                   {l.medMes[m]?.abs === null || l.medMes[m]?.abs === undefined ? '' : l.medMes[m]!.abs + '%'}
                                 </span>
                               </td>
-                            </>
+                            </React.Fragment>
                           ))}
                           <td className="py-2 px-2 text-center border-l border-[#2a2a2a]">
                             <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${corNota(l.que)}`}>{l.que}</span>
