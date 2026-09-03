@@ -952,6 +952,7 @@ export default function CalibracaoPage() {
     const widthBase = Math.max(700, numColsTotal * 90);
     const widthTotal = PRECISA_SPLIT ? widthBase * 2 + 40 : widthBase;
     const div = document.createElement('div');
+    // (posição off-screen tradicional — testada e funciona bem com o html2canvas)
     div.style.cssText = `position: fixed; top: -9999px; left: -9999px; width: ${widthTotal}px; padding: 40px; background: ${CORES.fundoBase}; color: ${CORES.textoBranco}; font-family: -apple-system, system-ui, sans-serif;`;
     div.innerHTML = `
       <div style="border-radius: 14px; overflow: hidden; border: 1px solid ${MELI.amarelo}55; margin-bottom: 20px;">
@@ -1024,6 +1025,12 @@ export default function CalibracaoPage() {
     document.body.appendChild(div);
     try {
       const html2canvas = (await import('html2canvas')).default;
+      // 🐛 FIX: espera o navegador terminar de calcular/pintar o layout
+      // (importante pro HTML grande montado via innerHTML) antes de
+      // tirar a "foto" — sem isso o html2canvas pode capturar o
+      // conteúdo pela metade, especialmente texto dinâmico.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
       const canvas = await html2canvas(div, {
         backgroundColor: CORES.fundoBase,
         scale: 2,
@@ -1031,7 +1038,12 @@ export default function CalibracaoPage() {
         allowTaint: true,
       });
       const link = document.createElement('a');
-      link.download = `Calibracao_TimeDEL_${processo}_${quarterSel}_${anoAtual}.png`;
+      // 🐛 FIX: nome do arquivo agora inclui hora:min:seg — evita que o
+      // navegador salve como "(1)", "(2)" e você acabe abrindo por engano
+      // um PNG antigo (gerado antes de editar o IMA/ABS), achando que é o novo
+      const agora = new Date();
+      const horaArquivo = String(agora.getHours()).padStart(2, '0') + String(agora.getMinutes()).padStart(2, '0') + String(agora.getSeconds()).padStart(2, '0');
+      link.download = `Calibracao_TimeDEL_${processo}_${quarterSel}_${anoAtual}_${horaArquivo}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
       (window as any).showToast?.('success', `📸 Print ${processo} gerado! ${PRECISA_SPLIT ? '(2 partes)' : ''}`);
