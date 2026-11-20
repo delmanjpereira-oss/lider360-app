@@ -1151,9 +1151,9 @@ export default function LinhaPage() {
     const todosSuperaram = niveis.every((n) => n === 2);
     const cor = todosBateram
       ? (todosSuperaram
-          ? { borda: 'border-sky-500/60', bg: 'bg-sky-500/10', texto: 'text-sky-400' }
-          : { borda: 'border-green-500/60', bg: 'bg-green-500/10', texto: 'text-green-400' })
-      : { borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', texto: 'text-gray-400' };
+          ? { borda: 'border-sky-500/60', bg: 'bg-sky-500/10', texto: 'text-sky-400', label: 'Superou', emoji: '🔵' }
+          : { borda: 'border-green-500/60', bg: 'bg-green-500/10', texto: 'text-green-400', label: 'Na meta', emoji: '🟢' })
+      : { borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', texto: 'text-gray-400', label: 'Abaixo', emoji: '🔴' };
     const corOc = textoPorNivel(nOc);
     const corLq = textoPorNivel(nLq);
     const corTo = textoPorNivel(nTo);
