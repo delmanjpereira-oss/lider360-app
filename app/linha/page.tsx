@@ -1183,7 +1183,7 @@ export default function LinhaPage() {
             {eFixoAqui && !eRestr && !modoPrint && <span className="text-[9px] badge-fixo" title="Fixo">📍</span>}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
-            {!modoPrint && (liquida != null && liquida > 0 ? (<span className={'text-[10px] font-black ' + cor.texto}>{liquida}</span>) : (<span className="text-gray-600 text-[10px]">—</span>))}
+            {!modoPrint && ocupVal != null && (<span className={'text-xs font-black leading-none ' + corOc}>{Math.round(ocupVal)}%</span>)}{!modoPrint && (<span className={'text-[10px] font-bold ' + corLq}>{liquida ?? '—'}</span>)}
             {!modoPrint && (<button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }} className="opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[11px] leading-none ml-0.5" title="Remover">×</button>)}
           </div>
         </div>
@@ -1228,7 +1228,7 @@ export default function LinhaPage() {
     const isErro = erroBancada === b.id;
     const isCategoria = b.tipo_principal === 'CATEGORIA';
     const isCompativel = (cardAtivo || draggingId) && bancadaCompativel(b);
-    const classes = ['w-[140px] h-[78px]', 'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200', isCompativel ? 'bancada-compativel' : '', isEncaixe ? 'bancada-encaixe' : '', isErro ? 'bancada-erro' : '', isHover && !isCompativel ? 'ring-2 ring-green-500/80 shadow-xl shadow-green-500/20' : '', ehTravada(b.id) ? 'ring-1 ring-red-500/60' : ''].join(' ');
+    const classes = [isCategoria ? 'w-[140px] min-h-[78px]' : 'w-[140px] h-[78px]', 'bg-[#0f0f0f] border rounded border-l-[3px] flex flex-col transition-all duration-200', isCompativel ? 'bancada-compativel' : '', isEncaixe ? 'bancada-encaixe' : '', isErro ? 'bancada-erro' : '', isHover && !isCompativel ? 'ring-2 ring-green-500/80 shadow-xl shadow-green-500/20' : '', ehTravada(b.id) ? 'ring-1 ring-red-500/60' : ''].join(' ');
     return (
       <div onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setHoverBancada(b.id); }} onDragLeave={() => setHoverBancada(null)}
         onDrop={(e) => { e.preventDefault(); setHoverBancada(null); const idDropped = e.dataTransfer.getData('text/plain') || draggingId; if (idDropped) alocarColab(idDropped, b); }}
