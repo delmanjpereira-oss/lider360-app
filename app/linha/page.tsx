@@ -133,6 +133,26 @@ function converterPctOcup(raw: string): number | null {
   const n = Number(limpo);
   return isNaN(n) ? null : n;
 }
+// ===== METAS POR BANCADA (ocupação % · líquida) =====
+function metaDaBancada(tipo: string, num: number): { ocup: number; liq: number } {
+  if (tipo === 'PESCA') return { ocup: 95, liq: 350 };
+  if (tipo === 'CATEGORIA') return { ocup: 72, liq: 330 };
+  if (num <= 2) return { ocup: 95, liq: 370 };
+  if (num === 3 || num === 6) return { ocup: 81, liq: 355 };
+  if (num === 4 || num === 5) return { ocup: 75, liq: 335 };
+  return { ocup: 88, liq: 370 };
+}
+// verde = bateu ocupação E líquida · amarelo = bateu só uma · vermelho = não bateu nenhuma
+function corPelaMeta(ocup: number | null | undefined, liq: number | null | undefined, meta: { ocup: number; liq: number }) {
+  if ((ocup == null || ocup === 0) && (liq == null || liq === 0)) {
+    return { texto: 'text-gray-400', borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', emoji: '⚪', label: 'Sem dado' };
+  }
+  const bOc = ocup != null && ocup >= meta.ocup;
+  const bLq = liq != null && liq >= meta.liq;
+  if (bOc && bLq) return { texto: 'text-green-400', borda: 'border-green-500/50', bg: 'bg-green-500/10', emoji: '🟢', label: 'Na meta' };
+  if (bOc || bLq) return { texto: 'text-yellow-400', borda: 'border-yellow-500/50', bg: 'bg-yellow-500/10', emoji: '🟡', label: 'Parcial' };
+  return { texto: 'text-red-400', borda: 'border-red-500/50', bg: 'bg-red-500/10', emoji: '🔴', label: 'Abaixo' };
+}
 export default function LinhaPage() {
   const [colabs, setColabs] = useState<Colaborador[]>([]);
   const [ritmos, setRitmos] = useState<Record<string, Ritmo>>({});
@@ -170,6 +190,7 @@ export default function LinhaPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileOcupRef = useRef<HTMLInputElement>(null);
   const [ocupacoes, setOcupacoes] = useState<Record<string, number>>({});
+  const [totes, setTotes] = useState<Record<string, number>>({});
   function toast(tipo: 'success' | 'error' | 'info', msg: string) {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, tipo, msg }]);
@@ -632,10 +653,12 @@ export default function LinhaPage() {
     await supabase.from('layout_bancadas').insert(aCriar.map((s) => ({ zona: ZONA, linha: s.linha, lado: 'centro', posicao: s.posicao, tipo_principal: s.tipo_principal, subtipo: null, fixo_categoria: true, data_referencia: hoje })));
   }
   async function carregarOcupacoes() {
-    const { data } = await supabase.from('ocupacao').select('user_id, ocupacao_pct');
+    const { data } = await supabase.from('ocupacao').select('user_id, ocupacao_pct, qtd_totes');
     const map: Record<string, number> = {};
-    (data || []).forEach((r: any) => { map[String(r.user_id).trim()] = Number(r.ocupacao_pct); });
+    const mapT: Record<string, number> = {};
+    (data || []).forEach((r: any) => { map[String(r.user_id).trim()] = Number(r.ocupacao_pct); mapT[String(r.user_id).trim()] = Number(r.qtd_totes) || 0; });
     setOcupacoes(map);
+    setTotes(mapT);
   }
   async function handleUploadOcupacao(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1067,6 +1090,13 @@ export default function LinhaPage() {
     const pecasHora = totalUnidades / totalHoras;
     return { pctMedio: Math.round((pecasHora / metas.p2m_base) * 100), pecasHora: Math.round(pecasHora), totalUnidades, totalHoras: Math.round(totalHoras * 10) / 10, totalAtivos, supera, alinhado, ofensor, semDado };
   }
+  function numeroBancadaTela(b: Bancada): number {
+    const ladoDesce = b.linha === 1 ? 'esquerdo' : 'direito';
+    const qtdDesce = b.linha === 1 ? layout.L1_ESQ : layout.L2_DIR;
+    const qtdSobe = b.linha === 1 ? layout.L1_DIR : layout.L2_ESQ;
+    if (b.lado === ladoDesce) return b.posicao;
+    return qtdDesce + (qtdSobe - b.posicao + 1);
+  }
   function CardColabSidebar({ c }: { c: Colaborador }) {
     const ritmo = ritmos[c.id_groot];
     const cor = corPorMeta(ritmo?.liquida, metas);
@@ -1098,7 +1128,8 @@ export default function LinhaPage() {
     const c = getColab(aloc.id_groot);
     if (!c) return null;
     const ritmo = ritmos[aloc.id_groot];
-    const cor = corPorMeta(ritmo?.liquida, metas);
+    const metaB = metaDaBancada(bancadaAtual.tipo_principal, numeroBancadaTela(bancadaAtual));
+    const cor = corPelaMeta(ocupacoes[aloc.id_groot], null, metaB);
     const liquida = ritmo?.liquida;
     const eFixoAqui = aloc.bancada_fixa_id === bancadaAtual.id && aloc.bancada_id === bancadaAtual.id;
     const eTemporario = aloc.tipo_alocacao === 'temporario';
@@ -1142,6 +1173,7 @@ export default function LinhaPage() {
           <>
             {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="text-gray-600 text-sm">—</span>)}
             {ocupacoes[aloc.id_groot] != null && (<span className="text-[8px] font-bold text-emerald-300 leading-none mt-0.5">oc {Math.round(ocupacoes[aloc.id_groot])}%</span>)}
+            {totes[aloc.id_groot] != null && (<span className="text-[8px] text-gray-400 leading-none">{totes[aloc.id_groot]} totes</span>)}
             <span className="text-[7px] text-gray-500 mt-0.5">{nomeExibido(c, colabs)}</span>
           </>
         )}
