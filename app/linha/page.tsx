@@ -1197,9 +1197,9 @@ export default function LinhaPage() {
         {eFixoAqui && !eRestr && !modoPrint && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
         {modoPrint ? (<span className="text-[11px] font-bold text-white text-center px-1 leading-tight">{nomeExibido(c, colabs)}</span>) : (
           <>
-            {ocupVal != null ? (<span className={'text-2xl font-black leading-none tracking-tight ' + corOc}>{Math.round(ocupVal)}%</span>) : (<span className="text-gray-600 text-sm">—</span>)}
-            <span className="text-[8px] leading-none"><span className={corTo + ' font-bold'}>{totes[aloc.id_groot] ?? '—'} totes</span> · <span className={corLq + ' font-bold'}>líquida {liquida ?? '—'}</span></span>
-            <span className="text-[7px] text-gray-500 mt-0.5">{nomeExibido(c, colabs)}</span>
+            {ocupVal != null ? (<span className={'text-base font-black leading-none ' + corOc}>{Math.round(ocupVal)}%</span>) : (<span className="text-gray-600 text-[10px]">—</span>)}
+            <span className="text-[7px] leading-tight w-full text-center truncate"><span className={corTo + ' font-bold'}>{totes[aloc.id_groot] ?? '—'}t</span> · <span className={corLq + ' font-bold'}>{liquida ?? '—'}</span></span>
+            <span className="text-[7px] text-gray-400 leading-none w-full text-center truncate">{nomeExibido(c, colabs)}</span>
           </>
         )}
         {!modoPrint && (<button onClick={(e) => { e.stopPropagation(); removerColab(aloc.id); }} className="absolute top-0 right-0.5 opacity-0 group-hover:opacity-100 transition text-gray-500 hover:text-red-400 text-[10px] leading-none" title="Remover">×</button>)}
