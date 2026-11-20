@@ -719,6 +719,14 @@ export default function LinhaPage() {
       if (fileOcupRef.current) fileOcupRef.current.value = '';
     }
   }
+  function limparOcupacao() {
+    confirmar('Apagar o CSV de ocupação inteiro? As porcentagens somem dos cards.', async () => {
+      const { error } = await supabase.from('ocupacao').delete().neq('id', 0);
+      if (error) { toast('error', 'Erro: ' + error.message); return; }
+      toast('success', '✅ Ocupação limpa');
+      await carregarOcupacoes();
+    });
+  }
   function limparRitmos() {
     confirmar('Limpar TODOS os ritmos do dia?', async () => {
       const hoje = new Date().toISOString().split('T')[0];
@@ -1373,6 +1381,7 @@ export default function LinhaPage() {
           <button onClick={() => fileInputRef.current?.click()} className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-xs px-3 py-1.5 rounded hover:bg-yellow-500/20 transition">↑ Upload Boletim</button>
           <input ref={fileOcupRef} type="file" accept=".csv,.txt" onChange={handleUploadOcupacao} className="hidden" />
           <button onClick={() => fileOcupRef.current?.click()} className="bg-emerald-500/10 border border-emerald-500/50 text-emerald-300 text-xs px-3 py-1.5 rounded hover:bg-emerald-500/20 transition">↑ Upload Ocupação</button>
+          <button onClick={limparOcupacao} className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs px-2 py-1.5 rounded hover:bg-emerald-500/20 transition" title="Apaga o CSV de ocupação">🧹 Limpar Ocupação</button>
         </div>
       </header>
       {loading && (<div className="text-center text-gray-500 py-20 text-sm">Carregando linha...</div>)}
