@@ -134,13 +134,25 @@ function converterPctOcup(raw: string): number | null {
   return isNaN(n) ? null : n;
 }
 // ===== METAS POR BANCADA (ocupação % · líquida) =====
-function metaDaBancada(tipo: string, num: number): { ocup: number; liq: number } {
-  if (tipo === 'PESCA') return { ocup: 95, liq: 350 };
-  if (tipo === 'CATEGORIA') return { ocup: 72, liq: 330 };
-  if (num <= 2) return { ocup: 95, liq: 370 };
-  if (num === 3 || num === 6) return { ocup: 81, liq: 355 };
-  if (num === 4 || num === 5) return { ocup: 75, liq: 335 };
-  return { ocup: 88, liq: 370 };
+function metaDaBancada(tipo: string, num: number): { ocup: number; liq: number; totes: number } {
+  if (tipo === 'PESCA') return { ocup: 95, liq: 350, totes: 40 };
+  if (tipo === 'CATEGORIA') return { ocup: 72, liq: 360, totes: 70 };
+  if (num <= 2) return { ocup: 95, liq: 385, totes: 110 };
+  if (num === 3 || num === 6) return { ocup: 81, liq: 350, totes: 210 };
+  return { ocup: 75, liq: 325, totes: 250 };
+}
+// nível: 2 = superou (azul) · 1 = bateu (verde) · -1 = abaixo (vermelho) · 0 = sem dado
+function nivelMeta(v: number | null | undefined, meta: number): number {
+  if (v == null || v === 0) return 0;
+  if (v > meta * 1.05) return 2;
+  if (v >= meta) return 1;
+  return -1;
+}
+function textoPorNivel(n: number): string {
+  if (n === 2) return 'text-sky-400';
+  if (n === 1) return 'text-green-400';
+  if (n === -1) return 'text-red-400';
+  return 'text-gray-500';
 }
 // verde = bateu ocupação E líquida · amarelo = bateu só uma · vermelho = não bateu nenhuma
 function corPelaMeta(ocup: number | null | undefined, liq: number | null | undefined, meta: { ocup: number; liq: number }) {
@@ -1129,8 +1141,22 @@ export default function LinhaPage() {
     if (!c) return null;
     const ritmo = ritmos[aloc.id_groot];
     const metaB = metaDaBancada(bancadaAtual.tipo_principal, numeroBancadaTela(bancadaAtual));
-    const cor = corPelaMeta(ocupacoes[aloc.id_groot], null, metaB);
     const liquida = ritmo?.liquida;
+    const ocupVal = ocupacoes[aloc.id_groot];
+    const nOc = nivelMeta(ocupVal, metaB.ocup);
+    const nLq = nivelMeta(liquida, metaB.liq);
+    const nTo = nivelMeta(totes[aloc.id_groot], metaB.totes);
+    const niveis = [nOc, nLq, nTo];
+    const todosBateram = niveis.every((n) => n >= 1);
+    const todosSuperaram = niveis.every((n) => n === 2);
+    const cor = todosBateram
+      ? (todosSuperaram
+          ? { borda: 'border-sky-500/60', bg: 'bg-sky-500/10', texto: 'text-sky-400' }
+          : { borda: 'border-green-500/60', bg: 'bg-green-500/10', texto: 'text-green-400' })
+      : { borda: 'border-[#2a2a2a]', bg: 'bg-[#1a1a1a]', texto: 'text-gray-400' };
+    const corOc = textoPorNivel(nOc);
+    const corLq = textoPorNivel(nLq);
+    const corTo = textoPorNivel(nTo);
     const eFixoAqui = aloc.bancada_fixa_id === bancadaAtual.id && aloc.bancada_id === bancadaAtual.id;
     const eTemporario = aloc.tipo_alocacao === 'temporario';
     const eRestr = ehRestricao(aloc.id_groot);
@@ -1171,9 +1197,8 @@ export default function LinhaPage() {
         {eFixoAqui && !eRestr && !modoPrint && (<span className="absolute top-0 left-0.5 text-[8px] badge-fixo" title="Fixo">📍</span>)}
         {modoPrint ? (<span className="text-[11px] font-bold text-white text-center px-1 leading-tight">{nomeExibido(c, colabs)}</span>) : (
           <>
-            {liquida != null && liquida > 0 ? (<span className={'text-base font-black ' + cor.texto + ' leading-none tracking-tight'}>{liquida}</span>) : (<span className="text-gray-600 text-sm">—</span>)}
-            {ocupacoes[aloc.id_groot] != null && (<span className="text-[8px] font-bold text-emerald-300 leading-none mt-0.5">oc {Math.round(ocupacoes[aloc.id_groot])}%</span>)}
-            {totes[aloc.id_groot] != null && (<span className="text-[8px] text-gray-400 leading-none">{totes[aloc.id_groot]} totes</span>)}
+            {ocupVal != null ? (<span className={'text-2xl font-black leading-none tracking-tight ' + corOc}>{Math.round(ocupVal)}%</span>) : (<span className="text-gray-600 text-sm">—</span>)}
+            <span className="text-[8px] leading-none"><span className={corTo + ' font-bold'}>{totes[aloc.id_groot] ?? '—'} totes</span> · <span className={corLq + ' font-bold'}>líquida {liquida ?? '—'}</span></span>
             <span className="text-[7px] text-gray-500 mt-0.5">{nomeExibido(c, colabs)}</span>
           </>
         )}
